@@ -27,7 +27,7 @@ describe("PostgreSQL DDL Generator", () => {
     });
 
     const expectedSql = `CREATE TABLE "users" (
-  "id" VARCHAR(36) PRIMARY KEY,
+  "id" VARCHAR(36) NOT NULL PRIMARY KEY,
   "email" TEXT NOT NULL UNIQUE,
   "age" INTEGER DEFAULT 0,
   "is_admin" BOOLEAN DEFAULT false,
@@ -66,7 +66,7 @@ describe("PostgreSQL DDL Generator", () => {
       })
     );
     const expectedSql = `CREATE TABLE "products" (
-  "product_id" INTEGER PRIMARY KEY,
+  "product_id" INTEGER NOT NULL PRIMARY KEY,
   "product_name" VARCHAR(255) NOT NULL,
   "description" TEXT,
   "price" INTEGER NOT NULL DEFAULT 1000,
@@ -92,8 +92,8 @@ describe("PostgreSQL DDL Generator", () => {
       quantity: integer("quantity").notNull().default(1),
     });
     const expectedSql = `CREATE TABLE "order_items" (
-  "order_id" INTEGER,
-  "item_id" INTEGER,
+  "order_id" INTEGER NOT NULL,
+  "item_id" INTEGER NOT NULL,
   "quantity" INTEGER NOT NULL DEFAULT 1,
   PRIMARY KEY ("order_id", "item_id")
 );`
@@ -118,7 +118,7 @@ describe("PostgreSQL DDL Generator", () => {
     );
 
     const expectedSql = `CREATE TABLE "categories" (
-  "id" INTEGER PRIMARY KEY,
+  "id" INTEGER NOT NULL PRIMARY KEY,
   "name" VARCHAR(100) NOT NULL,
   PRIMARY KEY ("id"),
   CONSTRAINT "uq_categories_name" UNIQUE ("name")
@@ -136,7 +136,7 @@ describe("PostgreSQL DDL Generator", () => {
       'column with quotes"': text('col"umn').primaryKey(),
     });
     const expectedSql = `CREATE TABLE "table with spaces" (
-  "col""umn" TEXT PRIMARY KEY,
+  "col""umn" TEXT NOT NULL PRIMARY KEY,
   PRIMARY KEY ("col""umn")
 );`
       .replace(/\\s+/g, " ")

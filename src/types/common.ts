@@ -32,6 +32,7 @@ export interface TableConfig<
   name: TName;
   columns: TColumns;
   indexes?: IndexConfig[];
+  _isTable?: boolean; // Added for CLI detection
   // Spanner specific: interleave?: { parent: string; onDelete: 'cascade' | 'no action' }
 }
 
