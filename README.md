@@ -47,11 +47,11 @@ graph TD
     M --> F1;
     M --> F2;
 
-    style A fill:#f9f,stroke:#333,stroke-width:2px
-    style B fill:#ccf,stroke:#333,stroke-width:2px
+    style A fill:#fff,color:#000,stroke:#333,stroke-width:2px
+    style B fill:#fff,color:#000,stroke:#333,stroke-width:2px
     style C fill:#lightgrey,stroke:#333,stroke-width:2px
     style E fill:#lightgrey,stroke:#333,stroke-width:2px
-    style M fill:#ccf,stroke:#333,stroke-width:2px
+    style M fill:#fff,color:#000,stroke:#333,stroke-width:2px
 ```
 
 ## Project Roadmap & TODOs
