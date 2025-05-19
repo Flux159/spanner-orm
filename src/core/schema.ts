@@ -231,6 +231,7 @@ export function table<
   const tableConfig: TableConfig<TTableName, TableBuilderColumns<TColumns>> = {
     name,
     columns: builtColumns,
+    _isTable: true, // Added marker for CLI detection
   };
 
   if (extra) {
