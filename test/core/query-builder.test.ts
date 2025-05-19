@@ -216,4 +216,111 @@ describe("QueryBuilder SQL Generation", () => {
       expect(pgSql).toBe('SELECT * FROM "users" WHERE "email" = LOWER($1)');
     });
   });
+
+  // --- INSERT Statements ---
+  describe("INSERT Statements", () => {
+    it("PostgreSQL: should generate INSERT statement for a single row", () => {
+      const query = qb
+        .insert(usersTable)
+        .values({ name: "John Doe", age: 30 })
+        .toSQL("postgres");
+      expect(query).toBe('INSERT INTO "users" ("name", "age") VALUES ($1, $2)');
+      expect(qb.getBoundParameters()).toEqual(["John Doe", 30]);
+    });
+
+    it("Spanner: should generate INSERT statement for a single row", () => {
+      const query = qb
+        .insert(usersTable)
+        .values({ name: "Jane Doe", email: "jane@example.com" })
+        .toSQL("spanner");
+      expect(query).toBe(
+        "INSERT INTO `users` (`name`, `email`) VALUES (@p1, @p2)"
+      );
+      expect(qb.getBoundParameters()).toEqual(["Jane Doe", "jane@example.com"]);
+    });
+
+    it("PostgreSQL: should generate INSERT statement for multiple rows", () => {
+      const query = qb
+        .insert(usersTable)
+        .values([
+          { name: "Alice", age: 25 },
+          { name: "Bob", age: 35 },
+        ])
+        .toSQL("postgres");
+      expect(query).toBe(
+        'INSERT INTO "users" ("name", "age") VALUES ($1, $2), ($3, $4)'
+      );
+      expect(qb.getBoundParameters()).toEqual(["Alice", 25, "Bob", 35]);
+    });
+  });
+
+  // --- UPDATE Statements ---
+  describe("UPDATE Statements", () => {
+    it("PostgreSQL: should generate UPDATE statement with SET and WHERE", () => {
+      const query = qb
+        .update(usersTable)
+        .set({ age: 31, email: "john.new@example.com" })
+        .where(sql`${usersTable.columns.id} = ${1}`)
+        .toSQL("postgres");
+      expect(query).toBe(
+        'UPDATE "users" SET "age" = $1, "email" = $2 WHERE "id" = $3'
+      );
+      expect(qb.getBoundParameters()).toEqual([31, "john.new@example.com", 1]);
+    });
+
+    it("Spanner: should generate UPDATE statement with SET and WHERE", () => {
+      const query = qb
+        .update(usersTable)
+        .set({ name: "Updated Name" })
+        .where(sql`${usersTable.columns.email} = ${"old@example.com"}`)
+        .toSQL("spanner");
+      expect(query).toBe("UPDATE `users` SET `name` = @p1 WHERE `email` = @p2");
+      expect(qb.getBoundParameters()).toEqual([
+        "Updated Name",
+        "old@example.com",
+      ]);
+    });
+
+    it("PostgreSQL: should generate UPDATE statement with SQL in SET", () => {
+      const query = qb
+        .update(usersTable)
+        .set({ age: sql`${usersTable.columns.age} + ${1}` })
+        .where(sql`${usersTable.columns.id} = ${10}`)
+        .toSQL("postgres");
+      expect(query).toBe(
+        'UPDATE "users" SET "age" = "age" + $1 WHERE "id" = $2'
+      );
+      expect(qb.getBoundParameters()).toEqual([1, 10]);
+    });
+  });
+
+  // --- DELETE Statements ---
+  describe("DELETE Statements", () => {
+    it("PostgreSQL: should generate DELETE statement with WHERE", () => {
+      const query = qb
+        .deleteFrom(usersTable)
+        .where(sql`${usersTable.columns.age} < ${18}`)
+        .toSQL("postgres");
+      expect(query).toBe('DELETE FROM "users" WHERE "age" < $1');
+      expect(qb.getBoundParameters()).toEqual([18]);
+    });
+
+    it("Spanner: should generate DELETE statement with WHERE", () => {
+      const query = qb
+        .deleteFrom(usersTable)
+        .where(sql`${usersTable.columns.email} = ${"spam@example.com"}`)
+        .toSQL("spanner");
+      expect(query).toBe("DELETE FROM `users` WHERE `email` = @p1");
+      expect(qb.getBoundParameters()).toEqual(["spam@example.com"]);
+    });
+
+    it("PostgreSQL: should generate DELETE statement without WHERE (deletes all rows)", () => {
+      const query = qb.deleteFrom(usersTable).toSQL("postgres");
+      expect(query).toBe('DELETE FROM "users"');
+      expect(qb.getBoundParameters()).toEqual([]);
+    });
+  });
+  // Note: Tests for transaction execution would typically involve mocking the adapter
+  // and are beyond the scope of QueryBuilder unit tests for SQL generation.
+  // Transaction logic is tested at the adapter level.
 });
