@@ -1,0 +1,13 @@
+{
+  "editor.formatOnSave": true,
+  "files.exclude": {
+    "**/.git": true,
+    "**/.sl": true,
+    "**/.svn": true,
+    "**/.hg": true,
+    "**/.DS_Store": true,
+    "**/Thumbs.db": true,
+    // "dist/**": true,
+    "node_modules/**": true
+  }
+}
