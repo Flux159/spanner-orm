@@ -1,16 +1,17 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { execa } from "execa";
 import fs from "node:fs/promises";
 import path from "node:path";
 
 const tempSchemaDir = path.join(__dirname, "temp_cli_schema");
-const tempSchemaFile = path.join(tempSchemaDir, "schema.ts");
+// const tempSchemaFile = path.join(tempSchemaDir, "schema.ts");
 const tempSchemaJsFile = path.join(tempSchemaDir, "schema.js"); // Output of tsc
+const migrationsDir = path.join(process.cwd(), "spanner-orm-migrations"); // Default migrations dir
 
-const cliEntryPoint = path.resolve(__dirname, "../dist/cli.js"); // Adjust if your entry point is different
+const cliEntryPoint = path.resolve(__dirname, "../dist/cli.js");
 
 const schemaContent = `
-import { table, text, integer } from '../src/core/schema.js'; // Adjust path based on actual structure
+import { table, text, integer } from '../../dist/core/schema.js'; // Adjusted for dist
 
 export const users = table('users', {
   id: integer('id').primaryKey(),
@@ -24,135 +25,405 @@ export const products = table('products', {
 });
 `;
 
-describe("CLI DDL Generation", () => {
+// Helper to create a JS version of the schema for CLI to import
+async function createJsSchema() {
+  // In a real scenario, this would be a build step (tsc, esbuild, etc.)
+  // For testing, we'll just write the content as if it were JS.
+  // The import path in schemaContent is already adjusted for dist.
+  await fs.writeFile(tempSchemaJsFile, schemaContent);
+}
+
+describe("spanner-orm-cli", () => {
   beforeAll(async () => {
     await fs.mkdir(tempSchemaDir, { recursive: true });
-    await fs.writeFile(tempSchemaFile, schemaContent);
-    // We need to "compile" this TS schema to JS for the CLI to import it,
-    // as the CLI runs on the built .js files.
-    // A simple way is to just copy and rename for this test, assuming direct import works.
-    // For a more robust test, you might invoke tsc or esbuild.
-    // For now, we'll assume the CLI can import .ts if ts-node or similar is used,
-    // or that we are testing against a .js file.
-    // The CLI currently imports .js, so we need a .js file.
-    // Let's simulate a build step for this dummy schema.
-    // This is a simplified approach. A real build step might be more complex.
-    const schemaJsContent = schemaContent
-      .replace(/'\.\.\/src\/core\/schema\.js'/g, "'../../dist/core/schema.js'") // Adjust import for JS output to point to dist
-      .replace(/\.js';/g, ".js';"); // Ensure .js extension if not already
-    await fs.writeFile(tempSchemaJsFile, schemaJsContent);
+    await createJsSchema();
   });
 
   afterAll(async () => {
     await fs.rm(tempSchemaDir, { recursive: true, force: true });
+    // Clean up migrations directory if it was created by tests
+    const stats = await fs.stat(migrationsDir).catch(() => null);
+    if (stats) {
+      await fs.rm(migrationsDir, { recursive: true, force: true });
+    }
   });
 
-  it("should generate correct PostgreSQL DDL", async () => {
-    const { stdout } = await execa("node", [
-      cliEntryPoint,
-      "--schema",
-      tempSchemaJsFile,
-      "--dialect",
-      "pg",
-    ]);
+  describe("ddl command", () => {
+    it("should generate correct PostgreSQL DDL", async () => {
+      const { stdout } = await execa("bun", [
+        cliEntryPoint,
+        "ddl",
+        "--schema",
+        tempSchemaJsFile,
+        "--dialect",
+        "postgres",
+      ]);
 
-    const expectedPgDdlUsers = `CREATE TABLE "users" (
+      const expectedPgUsersDDL = `CREATE TABLE "users" (
   "id" INTEGER NOT NULL PRIMARY KEY,
   "name" TEXT NOT NULL,
-  "email" TEXT UNIQUE,
-  PRIMARY KEY ("id")
-);`; // Note: Drizzle often puts PK on column for single, and table level for composite. Our generator might do both or one.
-    // Let's assume our generator does it like this for now.
-
-    const expectedPgDdlProducts = `CREATE TABLE "products" (
-  "sku" TEXT NOT NULL PRIMARY KEY,
-  "description" TEXT,
-  PRIMARY KEY ("sku")
+  "email" TEXT UNIQUE
 );`;
+      const expectedPgProductsDDL = `CREATE TABLE "products" (
+  "sku" TEXT NOT NULL PRIMARY KEY,
+  "description" TEXT
+);`;
+      expect(stdout).toContain(expectedPgUsersDDL);
+      expect(stdout).toContain(expectedPgProductsDDL);
+    });
 
-    expect(stdout).toContain(expectedPgDdlUsers);
-    expect(stdout).toContain(expectedPgDdlProducts);
-    // A more precise test would check the full output if order is guaranteed.
-    // For now, checking containment is fine.
-  });
+    it("should generate correct Spanner DDL", async () => {
+      const { stdout } = await execa("bun", [
+        cliEntryPoint,
+        "ddl",
+        "--schema",
+        tempSchemaJsFile,
+        "--dialect",
+        "spanner",
+      ]);
 
-  it("should generate correct Spanner DDL", async () => {
-    const { stdout } = await execa("node", [
-      cliEntryPoint,
-      "--schema",
-      tempSchemaJsFile,
-      "--dialect",
-      "spanner",
-    ]);
-
-    const expectedSpannerDdlUsers = `CREATE TABLE users (
+      const expectedSpannerUsersTable = `CREATE TABLE users (
   id INT64 NOT NULL,
   name STRING(MAX) NOT NULL,
   email STRING(MAX)
-) PRIMARY KEY (id);`; // Spanner unique index for email would be separate.
-
-    const expectedSpannerDdlProducts = `CREATE TABLE products (
+) PRIMARY KEY (id);`;
+      const expectedSpannerUsersIndex = `CREATE UNIQUE INDEX uq_users_email ON users (email);`;
+      const expectedSpannerProductsTable = `CREATE TABLE products (
   sku STRING(MAX) NOT NULL,
   description STRING(MAX)
 ) PRIMARY KEY (sku);`;
+      expect(stdout).toContain(expectedSpannerUsersTable);
+      expect(stdout).toContain(expectedSpannerUsersIndex);
+      expect(stdout).toContain(expectedSpannerProductsTable);
+    });
 
-    expect(stdout).toContain(expectedSpannerDdlUsers);
-    expect(stdout).toContain(expectedSpannerDdlProducts);
-  });
-
-  it("should show error for invalid dialect", async () => {
-    try {
-      await execa("node", [
+    it("should write DDL to output file if --output is specified", async () => {
+      const outputFile = path.join(tempSchemaDir, "output.sql");
+      await execa("bun", [
         cliEntryPoint,
+        "ddl",
+        "--schema",
+        tempSchemaJsFile,
+        "--dialect",
+        "postgres",
+        "--output",
+        outputFile,
+      ]);
+      const content = await fs.readFile(outputFile, "utf-8");
+      expect(content).toContain('CREATE TABLE "users"');
+      await fs.unlink(outputFile); // Clean up
+    });
+
+    it("should show error for invalid dialect in ddl", async () => {
+      const result = await execa("bun", [
+        cliEntryPoint,
+        "ddl",
         "--schema",
         tempSchemaJsFile,
         "--dialect",
         "mysql",
-      ]);
-    } catch (error: any) {
-      // Error message from Commander for invalid choice
-      expect(error.stderr).toMatch(
-        /error: option '-d, --dialect <dialect>' argument 'mysql' is invalid. Allowed choices are pg, spanner/i
+      ]).catch((e) => e);
+      expect(result.stderr).toMatch(
+        /error: option '-d, --dialect <dialect>' argument 'mysql' is invalid. Allowed choices are postgres, spanner/i
       );
-      expect(error.exitCode).toBeGreaterThan(0);
-    }
-  });
+      expect(result.exitCode).toBeGreaterThan(0);
+    });
 
-  it("should show error if schema file not found", async () => {
-    try {
-      await execa("node", [
+    it("should show error if schema file not found for ddl", async () => {
+      const result = await execa("bun", [
         cliEntryPoint,
+        "ddl",
         "--schema",
         "./nonexistent.js",
         "--dialect",
-        "pg",
-      ]);
-    } catch (error: any) {
-      expect(error.stderr).toContain("Error: Schema file not found at");
-      expect(error.exitCode).toBeGreaterThan(0);
-    }
+        "postgres",
+      ]).catch((e) => e);
+      expect(result.stderr).toContain("Error: Schema file not found at");
+      expect(result.exitCode).toBeGreaterThan(0);
+    });
   });
 
-  it("should show error if schema option is missing", async () => {
-    try {
-      await execa("node", [cliEntryPoint, "--dialect", "pg"]);
-    } catch (error: any) {
-      expect(error.stderr).toMatch(
-        /error: required option '-s, --schema <path>' not specified/i
-      );
-      expect(error.exitCode).toBeGreaterThan(0);
-    }
-  });
+  describe("migrate command", () => {
+    beforeEach(async () => {
+      // Ensure migrations directory is clean before each migration test
+      const stats = await fs.stat(migrationsDir).catch(() => null);
+      if (stats) {
+        await fs.rm(migrationsDir, { recursive: true, force: true });
+      }
+    });
 
-  it("should show error if dialect option is missing", async () => {
-    try {
-      await execa("node", [cliEntryPoint, "--schema", tempSchemaJsFile]);
-    } catch (error: any) {
-      // Error message from Commander for missing mandatory option value
-      expect(error.stderr).toMatch(
-        /error: required option '-d, --dialect <dialect>' not specified/i
-      );
-      expect(error.exitCode).toBeGreaterThan(0);
-    }
+    describe("create", () => {
+      it("should create pg and spanner migration files with DDL", async () => {
+        const migrationName = "test-ddl-migration";
+        const { stdout, stderr } = await execa("bun", [
+          cliEntryPoint,
+          "migrate",
+          "create",
+          migrationName,
+          "--schema", // Added schema option
+          tempSchemaJsFile,
+        ]);
+
+        if (stderr) console.error("CLI stderr:", stderr);
+        expect(stdout).toContain("Created postgres migration file:");
+        expect(stdout).toContain(".pg.ts");
+        expect(stdout).toContain(migrationName);
+        expect(stdout).toContain("Created spanner migration file:");
+        expect(stdout).toContain(".spanner.ts");
+        expect(stdout).toContain(migrationName);
+
+        const files = await fs.readdir(migrationsDir);
+        const pgFile = files.find((f) => f.endsWith(`${migrationName}.pg.ts`));
+        const spannerFile = files.find((f) =>
+          f.endsWith(`${migrationName}.spanner.ts`)
+        );
+
+        expect(pgFile).toBeDefined();
+        expect(spannerFile).toBeDefined();
+
+        if (pgFile) {
+          const content = await fs.readFile(
+            path.join(migrationsDir, pgFile),
+            "utf-8"
+          );
+          expect(content).toContain("export const up: MigrationExecutor");
+          expect(content).toContain('currentDialect === "postgres"');
+          // Check for UP DDL (PostgreSQL)
+          expect(content).toContain('CREATE TABLE "users"');
+          expect(content).toContain('"id" INTEGER NOT NULL PRIMARY KEY'); // More specific
+          expect(content).toContain('"name" TEXT NOT NULL');
+          expect(content).toContain('"email" TEXT UNIQUE'); // Corrected: inline unique
+
+          expect(content).toContain('CREATE TABLE "products"');
+          expect(content).toContain('"sku" TEXT NOT NULL PRIMARY KEY'); // More specific
+
+          // Check for DOWN DDL (PostgreSQL)
+          // Order of drop statements might vary, check for presence
+          expect(content).toContain('DROP TABLE "products";');
+          expect(content).toContain('DROP TABLE "users";');
+        }
+        if (spannerFile) {
+          const content = await fs.readFile(
+            path.join(migrationsDir, spannerFile),
+            "utf-8"
+          );
+          expect(content).toContain("export const up: MigrationExecutor");
+          expect(content).toContain('currentDialect === "spanner"');
+          // Check for UP DDL (Spanner)
+          expect(content).toContain("CREATE TABLE users");
+          expect(content).toContain("id INT64 NOT NULL");
+          expect(content).toContain("name STRING(MAX) NOT NULL");
+          expect(content).toContain("email STRING(MAX)");
+          expect(content).toContain(") PRIMARY KEY (id)");
+          expect(content).toContain(
+            "CREATE UNIQUE INDEX uq_users_email ON users (email)"
+          );
+
+          expect(content).toContain("CREATE TABLE products");
+          expect(content).toContain("sku STRING(MAX) NOT NULL");
+          expect(content).toContain(") PRIMARY KEY (sku)");
+
+          // Check for DOWN DDL (Spanner)
+          expect(content).toContain("DROP TABLE products;");
+          expect(content).toContain("DROP TABLE users;");
+        }
+      });
+
+      it("should show error if migration name is missing for create", async () => {
+        const result = await execa("bun", [
+          cliEntryPoint,
+          "migrate",
+          "create",
+          // Name intentionally omitted
+          "--schema",
+          tempSchemaJsFile,
+        ]).catch((e) => e);
+        expect(result.stderr).toMatch(
+          /error: missing required argument 'name'/i
+        );
+        expect(result.exitCode).toBeGreaterThan(0);
+      });
+
+      it("should show error if schema is missing for create", async () => {
+        const result = await execa("bun", [
+          cliEntryPoint,
+          "migrate",
+          "create",
+          "some-name",
+          // Schema intentionally omitted
+        ]).catch((e) => e);
+        expect(result.stderr).toMatch(
+          /error: required option '-s, --schema <path>' not specified/i
+        );
+        expect(result.exitCode).toBeGreaterThan(0);
+      });
+    });
+
+    // TODO: Enhance 'latest' and 'down' tests to mock DB interactions
+    // For now, they will test the current simulation/placeholder output.
+    describe("latest", () => {
+      it("should simulate applying latest migrations", async () => {
+        // First, create a dummy migration file to simulate 'latest'
+        await execa("bun", [
+          cliEntryPoint,
+          "migrate",
+          "create",
+          "dummy-for-latest",
+          "--schema", // Added schema option
+          tempSchemaJsFile,
+        ]);
+
+        const { stdout } = await execa("bun", [
+          cliEntryPoint,
+          "migrate",
+          "latest",
+          "--schema",
+          tempSchemaJsFile,
+          "--dialect",
+          "postgres",
+        ]);
+        // Updated to check for the new output, which is more detailed
+        expect(stdout).toContain(
+          "Starting 'migrate latest' for dialect: postgres"
+        );
+        expect(stdout).toContain(
+          "Ensuring migration tracking table '_spanner_orm_migrations_log' exists..."
+        );
+        expect(stdout).toContain("Migration tracking table check complete.");
+        expect(stdout).toContain("Applied migrations: None"); // Assuming placeholder returns empty
+        expect(stdout).toContain("Found 1 pending migrations:");
+        expect(stdout).toContain("dummy-for-latest.pg.ts");
+        expect(stdout).toContain("Applying migration: ");
+        expect(stdout).toContain("dummy-for-latest.pg.ts");
+        // Check for DDL execution logs from the dummy migration
+        expect(stdout).toContain(
+          'Executing Command SQL (postgres): CREATE TABLE "products"'
+        );
+        expect(stdout).toContain(
+          'Executing Command SQL (postgres): CREATE TABLE "users"'
+        );
+        expect(stdout).toContain("Applying UP migration for postgres...");
+        expect(stdout).toContain("Successfully applied migration:");
+        expect(stdout).toContain(
+          "All pending migrations applied successfully."
+        );
+        expect(stdout).toContain("Migrate latest process finished.");
+      });
+
+      it("should require schema for latest", async () => {
+        const result = await execa("bun", [
+          cliEntryPoint,
+          "migrate",
+          "latest",
+          "--dialect",
+          "postgres",
+        ]).catch((e) => e);
+        expect(result.stderr).toMatch(
+          /error: required option '-s, --schema <path>' not specified/i
+        );
+        expect(result.exitCode).toBeGreaterThan(0);
+      });
+
+      it("should require dialect for latest", async () => {
+        const result = await execa("bun", [
+          cliEntryPoint,
+          "migrate",
+          "latest",
+          "--schema",
+          tempSchemaJsFile,
+        ]).catch((e) => e);
+        expect(result.stderr).toMatch(
+          /error: required option '-d, --dialect <dialect>' not specified/i
+        );
+        expect(result.exitCode).toBeGreaterThan(0);
+      });
+    });
+
+    describe("down", () => {
+      it("should simulate reverting last migration", async () => {
+        const mockMigrationBaseName = "00000000000000-mock-last-migration";
+        const spannerMigrationFileName = `${mockMigrationBaseName}.spanner.ts`;
+        const spannerMigrationFilePath = path.join(
+          migrationsDir,
+          spannerMigrationFileName
+        );
+
+        // Manually create the migration file that handleMigrateDown's mock expects
+        await fs.mkdir(migrationsDir, { recursive: true });
+        const dummySpannerMigrationContent = `
+          import type { MigrationExecutor } from '../../dist/types/common.js';
+          export const up: MigrationExecutor = async (executeSql) => { await executeSql('SELECT 1;'); };
+          export const down: MigrationExecutor = async (executeSql, dialect) => {
+            console.log("Applying DOWN migration for spanner...");
+            await executeSql('SELECT 1;'); // Dummy SQL
+          };
+        `;
+        await fs.writeFile(
+          spannerMigrationFilePath,
+          dummySpannerMigrationContent
+        );
+
+        // Verify the manually created file exists
+        expect(
+          await fs.stat(spannerMigrationFilePath).catch(() => null)
+        ).not.toBeNull();
+
+        const { stdout, stderr } = await execa("bun", [
+          cliEntryPoint,
+          "migrate",
+          "down",
+          "--schema",
+          tempSchemaJsFile,
+          "--dialect",
+          "spanner",
+        ]);
+
+        if (stderr) console.error("CLI stderr (down test):", stderr);
+
+        expect(stdout).toContain(
+          "Starting 'migrate down' for dialect: spanner"
+        );
+        expect(stdout).toContain(
+          `Simulating getAppliedMigrationNames for 'down': returning ['${mockMigrationBaseName}'].`
+        );
+        expect(stdout).toContain(
+          `Attempting to revert migration: ${mockMigrationBaseName}.spanner.ts...`
+        );
+        // Check for DDL execution from the dummy migration's down function
+        expect(stdout).toContain("Applying DOWN migration for spanner...");
+        expect(stdout).toContain(
+          `Successfully reverted migration: ${mockMigrationBaseName}.spanner.ts`
+        );
+        expect(stdout).toContain("Migrate down process finished.");
+      });
+
+      it("should require schema for down", async () => {
+        const result = await execa("bun", [
+          cliEntryPoint,
+          "migrate",
+          "down",
+          "--dialect",
+          "postgres",
+        ]).catch((e) => e);
+        expect(result.stderr).toMatch(
+          /error: required option '-s, --schema <path>' not specified/i
+        );
+        expect(result.exitCode).toBeGreaterThan(0);
+      });
+
+      it("should require dialect for down", async () => {
+        const result = await execa("bun", [
+          cliEntryPoint,
+          "migrate",
+          "down",
+          "--schema",
+          tempSchemaJsFile,
+        ]).catch((e) => e);
+        expect(result.stderr).toMatch(
+          /error: required option '-d, --dialect <dialect>' not specified/i
+        );
+        expect(result.exitCode).toBeGreaterThan(0);
+      });
+    });
   });
 });

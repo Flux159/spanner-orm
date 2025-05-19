@@ -4,19 +4,23 @@ A TypeScript ORM for Google Spanner & PostgreSQL, designed for Node.js and Bun. 
 
 ## Core Features
 
-- **Unified Object Model:** Define your database schema once using a Drizzle-like syntax. Supports both PostgreSQL & Google Spanner with this single object model.
-- **Dual Dialect SQL Generation & Versatile Deployment:**
-  - Generates Google SQL specifically tailored for Spanner.
-  - Generates standard, highly compatible SQL for PostgreSQL.
-  - This allows users to use PostgreSQL for non-Spanner deployments, Pglite for local development or applications where the user will run the app locally, and Spanner for global-scale web applications, all from the same schema.
-- **Comprehensive Migration Support:**
-  - Produces migration files with DDL for both PostgreSQL and Spanner.
-  - Enables migration execution via a CLI tool (`spanner-orm-cli migrate`) or programmatically.
-- **Flexible Querying:**
-  - Construct type-safe queries with an intuitive query builder.
-  - Seamlessly fall back to raw SQL (`sql` tag function) for complex or dialect-specific operations.
-- **Composable Schemas:** Easily create and reuse schema components (e.g., for common fields like timestamps, base entity structures), inspired by Drizzle ORM's approach.
-- **TypeScript First:** Built from the ground up with TypeScript for a robust, type-safe, and enjoyable developer experience.
+`spanner-orm` is designed to provide a seamless and powerful experience for managing data across PostgreSQL and Google Spanner. Its core capabilities include:
+
+- **Unified Object Model for PostgreSQL & Spanner:** Define your database schema once using a Drizzle-inspired syntax. This single object model seamlessly supports both PostgreSQL and Google Spanner, simplifying development and ensuring consistency across diverse database environments.
+
+- **Comprehensive Migration Generation & Execution:** Automatically produce migration files with the appropriate DDL for both PostgreSQL and Spanner. These migrations can be run via the `spanner-orm-cli migrate` command (e.g., `migrate latest`, `migrate down`) or programmatically within your application, ensuring smooth schema evolution.
+
+- **Versatile Query Building with SQL Fallback:** Construct type-safe queries using an intuitive query builder. For complex scenarios or dialect-specific needs, seamlessly fall back to raw SQL using the `sql` template literal tag, offering maximum flexibility.
+
+- **Dialect-Optimized SQL for Flexible Deployments:**
+
+  - Generates Google SQL specifically tailored for Spanner's unique architecture and capabilities.
+  - Produces standard, highly compatible SQL for PostgreSQL.
+  - This dual-dialect support empowers you to use PostgreSQL for non-Spanner deployments, Pglite for local development or embedded applications, and Google Spanner for demanding web-scale applications, all from a single, consistent codebase.
+
+- **Composable Schemas (Drizzle-Inspired):** Easily create and reuse schema components (e.g., for common fields like `id`, `createdAt`, `updatedAt`, or base entity structures), promoting DRY principles and maintainable data models.
+
+- **TypeScript First:** Built from the ground up with TypeScript, `spanner-orm` offers a robust, type-safe, and enjoyable developer experience, with strong type inference from your schema definitions.
 
 ## Why spanner-orm?
 
@@ -105,11 +109,11 @@ This project will be developed in phases. Here's a high-level overview:
 - [x] **T3.4: Transaction Support API.**
   - Implemented `transaction(callback)` method in PostgreSQL, Spanner, and Pglite adapters.
 
-### Phase 4: Migration Engine
+### Phase 4: Migration Engine - COMPLETED
 
-- [ ] **T4.1: Schema Snapshotting/Introspection.**
-- [ ] **T4.2: Schema Diffing Logic.**
-- [ ] **T4.3: Migration File Generation (DDL for both dialects).**
+- [x] **T4.1: Schema Snapshotting/Introspection.**
+- [x] **T4.2: Schema Diffing Logic.**
+- [x] **T4.3: Migration File Generation (DDL for both dialects).**
 
   - This engine will be responsible for generating the full set of DDL statements to align the database schema with the defined models.
   - For Spanner, this will include generating `CREATE UNIQUE INDEX` statements for any columns or sets of columns marked with `unique()` or `uniqueIndex()` in the schema definition.
@@ -118,14 +122,33 @@ This project will be developed in phases. Here's a high-level overview:
 
   - This also applies to other DDL like `ALTER TABLE` for adding/removing columns, constraints, etc.
 
-- [ ] **T4.4: Migration CLI (`migrate latest`, `migrate down`, `migrate create`).**
-- [ ] **T4.5: Migration Tracking Table.**
+  - Note that spanner has a limit of 10 on DDL statements that require validation or backfill. You can batch more without validation, but to be safe, we should just make our migration files be limited to 10 ddl statements at a time when adding indices, etc.
 
-### Phase 5: Advanced Features & Polish
+- [x] **T4.4: Migration CLI (`migrate latest`, `migrate down`, `migrate create`).**
+  - `spanner-orm-cli migrate create <name> --schema <path>`: Fully implemented. Generates timestamped migration files for PostgreSQL and Spanner, automatically populated with `up` (from empty to current schema) and `down` (from current to empty schema) DDL statements.
+  - `spanner-orm-cli migrate latest --schema <path> --dialect <pg|spanner>`: Core logic implemented. This includes creating the migration tracking table (if it doesn't exist), identifying pending migrations by comparing against the tracking table, dynamically importing migration modules, executing their `up` functions, and recording successful migrations in the tracking table. Full operation requires wiring up to concrete database adapters and connection configuration.
+  - `spanner-orm-cli migrate down --schema <path> --dialect <pg|spanner>`: Core logic implemented. This includes identifying the last applied migration from the tracking table, dynamically importing its module, executing its `down` function, and removing its record from the tracking table on success. Full operation requires wiring up to concrete database adapters and connection configuration.
+- [x] **T4.5: Migration Tracking Table.**
+  - Schema for `_spanner_orm_migrations_log` defined.
+  - DDL for table creation implemented in `src/core/migration-meta.ts`.
+  - Functions for recording and querying applied migrations implemented in `src/core/migration-meta.ts`.
+  - `migrate latest` command ensures this table is created on its first run.
 
-- [ ] **T5.1: Advanced Querying:** Joins, aggregations, grouping, ordering, pagination.
+### Phase 5: Advanced Features & Polish (Next Steps)
+
+Make sure to read notes/Phase5.md and notes/GoogleSQLSpanner.md when working on Phase 5.
+
+- [ ] **T5.0: Integrate Database Adapters into Migration CLI:**
+  - Implement a mechanism in `src/cli.ts` (e.g., via environment variables or a config file) to determine which database adapter to use (PostgreSQL, Pglite, Spanner) and its connection details.
+  - Replace placeholder `executeCmdSql` and `queryRowsSql` functions in `handleMigrateLatest` and `handleMigrateDown` with actual calls to the instantiated `DatabaseAdapter` (its `execute` and `query` methods).
+  - This will make `migrate latest` and `migrate down` fully operational.
+- [ ] **T5.1: Advanced Querying:** Joins, aggregations, grouping, ordering, pagination / limit & order by, sql functions like concat, like, ilike (like & ilike not available in Google SQL - see notes/GoogleSQLSpanner.md).
 - [ ] **T5.2: Relational Mappings in Schema & Query Builder.**
+  - Add defaultFn capability into ORM. See notes/DefaultFnTask.md for more info on what this means. Then update the code example below in README.md to show that its supported.
+  - Support for boolean, uniqueIndex, index, json/jsonb
+  - An alias for "uuid" that in spanner is implemented as varchar of length 36 that has defaultFn already setup. In postgres this is a uuid type & could potentially create the uuid inside of postgres itself.
 - [ ] **T5.3: Performance Optimizations (e.g., batching for Spanner).**
+  - Limit DDL statements that require validation to 10 per migration / batch (see notes/GoogleSQLSpanner.md).
 - [ ] **T5.4: Comprehensive Documentation & Examples.**
 - [ ] **T5.5: Robust Testing Suite (unit & integration tests).**
 
@@ -167,7 +190,7 @@ This project will be developed in phases. Here's a high-level overview:
       // boolean, // Assuming boolean is available or will be
       // uniqueIndex, // Assuming uniqueIndex is available or will be
       // primaryKey, // Often part of column definition, e.g., .primaryKey()
-      // jsonb, // Assuming jsonb or equivalent (e.g., json for PG, JSON/STRING for Spanner)
+      // jsonb, // Or json Assuming jsonb or equivalent (e.g., json for PG, JSON/STRING for Spanner)
       // index, // Assuming index is available or will be
       sql, // For raw SQL expressions like default values
     } from "spanner-orm"; // Adjust import path as per your project structure
@@ -254,16 +277,63 @@ Once you have defined your schema (e.g., in `src/schema.ts`), you can generate D
 # The CLI will be available via the 'bin' script in package.json
 
 # Generate PostgreSQL DDL
-npx spanner-orm-cli --schema ./path/to/your/schema.ts --dialect pg
+npx spanner-orm-cli ddl --schema ./path/to/your/schema.ts --dialect pg
 
-# Example with a schema file in dist (after build)
-npx spanner-orm-cli --schema ./dist/schema.js --dialect pg
+# Example with a schema file in dist (after build) and output to file
+npx spanner-orm-cli ddl --schema ./dist/schema.js --dialect pg --output ./generated-pg.sql
 
 # Generate Spanner DDL
-npx spanner-orm-cli --schema ./dist/schema.js --dialect spanner
+npx spanner-orm-cli ddl --schema ./dist/schema.js --dialect spanner
 ```
 
-This will print the generated `CREATE TABLE` statements to standard output.
+This will print the generated `CREATE TABLE` statements to standard output or the specified file.
+
+### Managing Migrations with the CLI
+
+The CLI also provides tools to manage your database schema migrations. Migration files are stored in the `./spanner-orm-migrations` directory by default.
+
+**1. Create a new migration:**
+
+This command generates a pair of timestamped migration files (one for PostgreSQL, one for Spanner) with `up` and `down` function templates.
+
+```bash
+# Example: Create migration files for adding a 'posts' table
+# This requires your schema file (e.g., dist/schema.js) to be built and specified.
+npx spanner-orm-cli migrate create add-posts-table --schema ./dist/schema.js
+
+# This will create files like:
+# ./spanner-orm-migrations/YYYYMMDDHHMMSS-add-posts-table.pg.ts
+# ./spanner-orm-migrations/YYYYMMDDHHMMSS-add-posts-table.spanner.ts
+# These files will be pre-populated with DDL based on changes detected against an empty schema.
+```
+
+**2. Apply pending migrations:**
+
+This command applies all pending migrations to your database for the specified dialect.
+(Requires database connection to be configured - e.g., via environment variables, specific adapter setup needed).
+
+```bash
+# Apply latest migrations for PostgreSQL
+npx spanner-orm-cli migrate latest --schema ./dist/schema.js --dialect postgres
+
+# Apply latest migrations for Spanner
+npx spanner-orm-cli migrate latest --schema ./dist/schema.js --dialect spanner
+```
+
+**3. Revert the last applied migration:**
+
+This command reverts the last applied migration for the specified dialect.
+(Requires database connection to be configured).
+
+```bash
+# Revert the last PostgreSQL migration
+npx spanner-orm-cli migrate down --schema ./dist/schema.js --dialect postgres
+
+# Revert the last Spanner migration
+npx spanner-orm-cli migrate down --schema ./dist/schema.js --dialect spanner
+```
+
+_(Note: While the core logic for `migrate latest` and `migrate down` is implemented, they require proper database connection configuration and adapter instantiation within the CLI to be fully operational. This is planned for Phase 5.)_
 
 ---
 

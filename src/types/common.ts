@@ -175,3 +175,107 @@ export function sql(strings: TemplateStringsArray, ...values: unknown[]): SQL {
     },
   };
 }
+
+// --- Schema Snapshot Types ---
+
+export interface ColumnSnapshot {
+  name: string;
+  type: string; // Generic type e.g., 'text', 'varchar'
+  dialectTypes: { postgres: string; spanner: string };
+  notNull?: boolean;
+  default?: unknown | { sql: string } | { function: string }; // Store actual value, SQL, or a marker for function
+  primaryKey?: boolean;
+  unique?: boolean;
+  references?: {
+    name?: string; // Optional name for the FK constraint
+    referencedTable: string;
+    referencedColumn: string;
+    onDelete?: OnDeleteAction;
+  } | null; // Allow null to signify removal at the snapshot level
+}
+
+export interface IndexSnapshot {
+  name?: string; // Index name might be optional if auto-generated
+  columns: string[];
+  unique: boolean;
+  // Future: using?: string; // e.g., GIN, GIST for PG
+  // Future: predicate?: string; // For partial indexes
+}
+
+export interface CompositePrimaryKeySnapshot {
+  name?: string; // Constraint name
+  columns: string[];
+}
+
+export interface InterleaveSnapshot {
+  parentTable: string;
+  onDelete: "cascade" | "no action";
+}
+
+export interface TableSnapshot {
+  name: string;
+  columns: Record<string, ColumnSnapshot>;
+  indexes?: IndexSnapshot[];
+  compositePrimaryKey?: CompositePrimaryKeySnapshot;
+  interleave?: InterleaveSnapshot; // Spanner specific
+  // Future: checks?: CheckConstraintSnapshot[];
+}
+
+export interface SchemaSnapshot {
+  version: string; // Version of the spanner-orm snapshot format
+  dialect: "postgres" | "spanner" | "common"; // Or maybe this isn't needed if snapshot is dialect-agnostic before generation
+  tables: Record<string, TableSnapshot>;
+  // Potentially other schema-level info in the future (e.g., custom types, extensions)
+}
+
+// --- Schema Diff Types ---
+
+export type ColumnDiffAction =
+  | { action: "add"; column: ColumnSnapshot }
+  | { action: "remove"; columnName: string }
+  | {
+      action: "change";
+      columnName: string;
+      changes: Partial<Omit<ColumnSnapshot, "name">>; // All fields except name can change
+    };
+
+export type IndexDiffAction =
+  | { action: "add"; index: IndexSnapshot }
+  | { action: "remove"; indexName: string } // Assuming indexes are named for removal
+  | {
+      action: "change";
+      indexName: string;
+      changes: Partial<Omit<IndexSnapshot, "name">>;
+    }; // Less common for indexes, usually drop and recreate
+
+export type PrimaryKeyDiffAction =
+  | { action: "set"; pk: CompositePrimaryKeySnapshot } // Can be add or change
+  | { action: "remove"; pkName?: string }; // Name might be optional
+
+export type InterleaveDiffAction =
+  | { action: "set"; interleave: InterleaveSnapshot }
+  | { action: "remove" };
+
+export type TableDiffAction =
+  | { action: "add"; table: TableSnapshot }
+  | { action: "remove"; tableName: string }
+  | {
+      action: "change";
+      tableName: string;
+      columnChanges?: ColumnDiffAction[];
+      indexChanges?: IndexDiffAction[];
+      primaryKeyChange?: PrimaryKeyDiffAction;
+      interleaveChange?: InterleaveDiffAction;
+    };
+
+export interface SchemaDiff {
+  fromVersion: string; // Snapshot version of the 'old' schema
+  toVersion: string; // Snapshot version of the 'new' schema
+  tableChanges: TableDiffAction[];
+}
+
+// --- Migration Executor Type ---
+export type MigrationExecutor = (
+  executeSql: (sql: string, params?: unknown[]) => Promise<void>,
+  dialect: Dialect
+) => Promise<void>;
