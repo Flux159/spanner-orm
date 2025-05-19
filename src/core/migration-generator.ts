@@ -6,7 +6,7 @@ import type {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   ColumnDiffAction, // Ensuring this is not disabled
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  IndexDiffAction,
+  IndexDiffAction, // Re-enabled
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   PrimaryKeyDiffAction,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -15,7 +15,7 @@ import type {
   ColumnSnapshot,
   TableSnapshot,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  IndexSnapshot,
+  IndexSnapshot, // Re-enabled
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   CompositePrimaryKeySnapshot,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -287,14 +287,78 @@ function generatePgDdl(diffActions: TableDiffAction[]): string[] {
             }
           }
         }
-        // TODO: Implement index, pk, interleave changes for PG
-        if (
-          action.indexChanges ||
-          action.primaryKeyChange ||
-          action.interleaveChange
-        ) {
+        if (action.indexChanges) {
+          for (const idxChange of action.indexChanges) {
+            const tableName = escapeIdentifierPostgres(action.tableName);
+            switch (idxChange.action) {
+              case "add":
+                {
+                  const index = idxChange.index;
+                  const indexName = index.name
+                    ? escapeIdentifierPostgres(index.name)
+                    : escapeIdentifierPostgres(
+                        `idx_${action.tableName}_${index.columns.join("_")}`
+                      );
+                  const columns = index.columns
+                    .map(escapeIdentifierPostgres)
+                    .join(", ");
+                  const uniqueKeyword = index.unique ? "UNIQUE " : "";
+                  ddlStatements.push(
+                    `CREATE ${uniqueKeyword}INDEX ${indexName} ON ${tableName} (${columns});`
+                  );
+                }
+                break;
+              case "remove":
+                // Dropping an index requires its name.
+                // The IndexDiffAction for remove should provide `indexName`.
+                ddlStatements.push(
+                  `DROP INDEX ${escapeIdentifierPostgres(idxChange.indexName)};`
+                );
+                break;
+              case "change":
+                // Altering an index often means DROP and CREATE.
+                // For simplicity, we'll generate DROP and ADD.
+                // A more sophisticated approach might handle specific ALTER INDEX commands if available and simple.
+                console.warn(
+                  `Index change for "${idxChange.indexName}" on table "${action.tableName}" will be handled as DROP and ADD for PG.`
+                );
+                ddlStatements.push(
+                  `DROP INDEX ${escapeIdentifierPostgres(idxChange.indexName)};`
+                );
+                // We need the full new index definition to re-create it.
+                // This assumes the 'changes' part of IndexDiffAction for 'change' might not be enough,
+                // and we'd ideally have the new IndexSnapshot.
+                // This part needs the new full IndexSnapshot to be available from the diff.
+                // For now, this is a placeholder. The diff logic might need to provide the full new index.
+                // Let's assume for now `idxChange.changes` can be cast or contains enough to rebuild.
+                // This is a simplification.
+                if (idxChange.changes && idxChange.changes.columns) {
+                  // Check if we have enough to rebuild
+                  const newIndexName = escapeIdentifierPostgres(
+                    idxChange.indexName
+                  ); // Keep same name
+                  const newColumns = (idxChange.changes.columns as string[])
+                    .map(escapeIdentifierPostgres)
+                    .join(", ");
+                  const newUniqueKeyword = idxChange.changes.unique
+                    ? "UNIQUE "
+                    : "";
+                  ddlStatements.push(
+                    `CREATE ${newUniqueKeyword}INDEX ${newIndexName} ON ${tableName} (${newColumns});`
+                  );
+                } else {
+                  console.error(
+                    `Cannot regenerate index ${idxChange.indexName} on ${tableName} due to insufficient change data.`
+                  );
+                }
+                break;
+            }
+          }
+        }
+        // TODO: Implement pk, interleave changes for PG
+        if (action.primaryKeyChange || action.interleaveChange) {
           console.warn(
-            `Table "${action.tableName}" index, PK, or interleave change DDL generation not yet implemented for PG.`
+            `Table "${action.tableName}" PK or interleave change DDL generation not yet implemented for PG.`
           );
         }
         if (
@@ -303,9 +367,10 @@ function generatePgDdl(diffActions: TableDiffAction[]): string[] {
           !action.primaryKeyChange &&
           !action.interleaveChange
         ) {
-          console.warn(
-            `Table "${action.tableName}" had a 'change' action but no specific changes were processed for PG.`
-          );
+          // This condition might be too broad if only some changes are unimplemented.
+          // console.warn(
+          //   `Table "${action.tableName}" had a 'change' action but no specific changes were processed for PG.`
+          // );
         }
         break;
     }
@@ -572,14 +637,73 @@ function generateSpannerDdl(diffActions: TableDiffAction[]): string[] {
             }
           }
         }
-        // TODO: Implement index, pk, interleave changes for Spanner
-        if (
-          action.indexChanges ||
-          action.primaryKeyChange ||
-          action.interleaveChange
-        ) {
+        if (action.indexChanges) {
+          for (const idxChange of action.indexChanges) {
+            const tableName = escapeIdentifierSpanner(action.tableName);
+            switch (idxChange.action) {
+              case "add":
+                {
+                  const index = idxChange.index;
+                  const indexName = index.name
+                    ? escapeIdentifierSpanner(index.name)
+                    : escapeIdentifierSpanner(
+                        `idx_${action.tableName}_${index.columns.join("_")}`
+                      );
+                  const columns = index.columns
+                    .map(escapeIdentifierSpanner)
+                    .join(", ");
+                  if (index.unique) {
+                    ddlStatements.push(
+                      `CREATE UNIQUE INDEX ${indexName} ON ${tableName} (${columns});`
+                    );
+                  } else {
+                    ddlStatements.push(
+                      `CREATE INDEX ${indexName} ON ${tableName} (${columns});`
+                    );
+                  }
+                }
+                break;
+              case "remove":
+                ddlStatements.push(
+                  `DROP INDEX ${escapeIdentifierSpanner(idxChange.indexName)};`
+                );
+                break;
+              case "change":
+                console.warn(
+                  `Index change for "${idxChange.indexName}" on table "${action.tableName}" will be handled as DROP and ADD for Spanner.`
+                );
+                ddlStatements.push(
+                  `DROP INDEX ${escapeIdentifierSpanner(idxChange.indexName)};`
+                );
+                if (idxChange.changes && idxChange.changes.columns) {
+                  const newIndexName = escapeIdentifierSpanner(
+                    idxChange.indexName
+                  );
+                  const newColumns = (idxChange.changes.columns as string[])
+                    .map(escapeIdentifierSpanner)
+                    .join(", ");
+                  if (idxChange.changes.unique) {
+                    ddlStatements.push(
+                      `CREATE UNIQUE INDEX ${newIndexName} ON ${tableName} (${newColumns});`
+                    );
+                  } else {
+                    ddlStatements.push(
+                      `CREATE INDEX ${newIndexName} ON ${tableName} (${newColumns});`
+                    );
+                  }
+                } else {
+                  console.error(
+                    `Cannot regenerate index ${idxChange.indexName} on ${tableName} due to insufficient change data for Spanner.`
+                  );
+                }
+                break;
+            }
+          }
+        }
+        // TODO: Implement pk, interleave changes for Spanner
+        if (action.primaryKeyChange || action.interleaveChange) {
           console.warn(
-            `Table "${action.tableName}" index, PK, or interleave change DDL generation not yet implemented for Spanner.`
+            `Table "${action.tableName}" PK, or interleave change DDL generation not yet implemented for Spanner.`
           );
         }
         if (
@@ -588,9 +712,10 @@ function generateSpannerDdl(diffActions: TableDiffAction[]): string[] {
           !action.primaryKeyChange &&
           !action.interleaveChange
         ) {
-          console.warn(
-            `Table "${action.tableName}" had a 'change' action but no specific changes were processed for Spanner.`
-          );
+          // This condition might be too broad if only some changes are unimplemented.
+          // console.warn(
+          //   `Table "${action.tableName}" had a 'change' action but no specific changes were processed for Spanner.`
+          // );
         }
         break;
     }

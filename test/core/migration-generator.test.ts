@@ -381,6 +381,107 @@ describe("generateMigrationDDL", () => {
         'ALTER TABLE "products" DROP CONSTRAINT "uq_products_product_code";'
       );
     });
+
+    it("should generate CREATE INDEX DDL for an added index", () => {
+      const schemaDiff: SchemaDiff = {
+        fromVersion: V1_SNAPSHOT_VERSION,
+        toVersion: V1_SNAPSHOT_VERSION,
+        tableChanges: [
+          {
+            action: "change",
+            tableName: "users",
+            indexChanges: [
+              {
+                action: "add",
+                index: {
+                  name: "idx_users_bio",
+                  columns: ["bio"],
+                  unique: false,
+                },
+              },
+            ],
+          },
+        ],
+      };
+      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      expect(ddl[0]).toBe('CREATE INDEX "idx_users_bio" ON "users" ("bio");');
+    });
+
+    it("should generate CREATE UNIQUE INDEX DDL for an added unique index", () => {
+      const schemaDiff: SchemaDiff = {
+        fromVersion: V1_SNAPSHOT_VERSION,
+        toVersion: V1_SNAPSHOT_VERSION,
+        tableChanges: [
+          {
+            action: "change",
+            tableName: "users",
+            indexChanges: [
+              {
+                action: "add",
+                index: {
+                  name: "uq_users_username",
+                  columns: ["username"],
+                  unique: true,
+                },
+              },
+            ],
+          },
+        ],
+      };
+      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      expect(ddl[0]).toBe(
+        'CREATE UNIQUE INDEX "uq_users_username" ON "users" ("username");'
+      );
+    });
+
+    it("should generate DROP INDEX DDL for a removed index", () => {
+      const schemaDiff: SchemaDiff = {
+        fromVersion: V1_SNAPSHOT_VERSION,
+        toVersion: V1_SNAPSHOT_VERSION,
+        tableChanges: [
+          {
+            action: "change",
+            tableName: "users",
+            indexChanges: [
+              { action: "remove", indexName: "idx_users_email_old" },
+            ],
+          },
+        ],
+      };
+      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      expect(ddl[0]).toBe('DROP INDEX "idx_users_email_old";');
+    });
+
+    it("should generate DROP and CREATE INDEX DDL for a changed index", () => {
+      const consoleWarnSpy = vi.spyOn(console, "warn");
+      const schemaDiff: SchemaDiff = {
+        fromVersion: V1_SNAPSHOT_VERSION,
+        toVersion: V1_SNAPSHOT_VERSION,
+        tableChanges: [
+          {
+            action: "change",
+            tableName: "users",
+            indexChanges: [
+              {
+                action: "change",
+                indexName: "idx_users_status",
+                changes: { columns: ["status", "type"], unique: false },
+              },
+            ],
+          },
+        ],
+      };
+      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        'Index change for "idx_users_status" on table "users" will be handled as DROP and ADD for PG.'
+      );
+      expect(ddl.length).toBe(2);
+      expect(ddl[0]).toBe('DROP INDEX "idx_users_status";');
+      expect(ddl[1]).toBe(
+        'CREATE INDEX "idx_users_status" ON "users" ("status", "type");'
+      );
+      consoleWarnSpy.mockRestore();
+    });
   });
 
   describe("Spanner DDL Generation", () => {
