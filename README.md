@@ -5,9 +5,10 @@ A TypeScript ORM for Google Spanner & PostgreSQL, designed for Node.js and Bun. 
 ## Core Features
 
 - **Unified Object Model:** Define your database schema once using a Drizzle-like syntax and use it for both PostgreSQL and Google Spanner.
-- **Dual Dialect SQL Generation:**
+- **Dual Dialect SQL Generation & Versatile Deployment:**
   - Generates Google SQL specifically tailored for Spanner.
-  - Generates standard, highly compatible SQL for PostgreSQL (and Pglite for local/embedded use).
+  - Generates standard, highly compatible SQL for PostgreSQL.
+  - This allows using PostgreSQL for non-Spanner deployments, Pglite for local development or embedded applications, and Spanner for global-scale web applications, all from the same schema.
 - **Comprehensive Migration Support:**
   - Produces migration files with DDL for both PostgreSQL and Spanner.
   - Enables migration execution via a CLI tool or programmatically.
@@ -77,17 +78,17 @@ This project will be developed in phases. Here's a high-level overview:
 
 ### Phase 2: Query Building & Execution (Read Operations)
 
-- [ ] **T2.1: Basic Query Builder API:**
+- [x] **T2.1: Basic Query Builder API:**
   - Implement `select().from().where()` structure.
-- [ ] **T2.2: PostgreSQL DML Generator (SELECT):**
+- [x] **T2.2: PostgreSQL DML Generator (SELECT):**
   - Translate query builder AST to PostgreSQL `SELECT` statements.
-- [ ] **T2.3: Spanner DML Generator (SELECT):**
+- [x] **T2.3: Spanner DML Generator (SELECT):**
   - Translate query builder AST to Spanner `SELECT` statements.
-- [ ] **T2.4: Database Adapters (Initial):**
+- [x] **T2.4: Database Adapters (Initial):**
   - PostgreSQL adapter (for `pg`/`postgres.js`).
   - Spanner adapter (for `@google-cloud/spanner`).
   - Pglite adapter.
-- [ ] **T2.5: `sql` Tag Function for Raw Queries.**
+- [x] **T2.5: `sql` Tag Function for Raw Queries.**
 
 ### Phase 3: Advanced Schema Features & DML (Write Operations)
 
@@ -151,26 +152,94 @@ This project will be developed in phases. Here's a high-level overview:
     bun run build
     ```
 
-2.  **Define your schema:** Create a `schema.ts` (or similar) file:
+2.  **Define your schema (Drizzle-Inspired):** Create a `schema.ts` (or similar) file. `spanner-orm` allows you to define your data model in a way that's familiar to Drizzle ORM users, emphasizing composability and type safety.
 
     ```typescript
     // src/schema.ts
-    import { table, text, integer, pg } from "spanner-orm"; // Adjust import path
+    import {
+      table, // Replaces pgTable from Drizzle
+      text,
+      timestamp,
+      varchar,
+      integer,
+      // boolean, // Assuming boolean is available or will be
+      // uniqueIndex, // Assuming uniqueIndex is available or will be
+      // primaryKey, // Often part of column definition, e.g., .primaryKey()
+      // jsonb, // Assuming jsonb or equivalent (e.g., json for PG, JSON/STRING for Spanner)
+      // index, // Assuming index is available or will be
+      sql, // For raw SQL expressions like default values
+    } from "spanner-orm"; // Adjust import path as per your project structure
+    import crypto from "crypto"; // For generating UUIDs
 
+    // --- Define a placeholder 'users' table for demonstrating references ---
+    // This would typically be in your main schema file or imported.
     export const users = table("users", {
-      id: integer("id").primaryKey(),
-      name: text("name").notNull(),
-      email: text("email").unique(),
+      id: varchar("id", { length: 36 }).primaryKey(), // Assuming user ID is a string UUID
+      // ... other user fields
     });
 
-    export const posts = table("posts", {
-      id: integer("id").primaryKey(),
-      title: text("title").notNull(),
-      userId: integer("user_id").references(() => users.id), // Example, references not fully implemented yet
+    // --- Shared Schema Components (Example: place in 'src/lib/sharedSchemas.ts') ---
+
+    // Common timestamp fields
+    export const timestamps = {
+      createdAt: timestamp("created_at", { withTimezone: true })
+        .default(sql`CURRENT_TIMESTAMP`) // Use backticks for sql template literal
+        .notNull(),
+      updatedAt: timestamp("updated_at", { withTimezone: true })
+        .default(sql`CURRENT_TIMESTAMP`) // Use backticks for sql template literal
+        .notNull(),
+      // Drizzle's .$onUpdate(() => new Date()) would require adapter-specific handling or triggers
+    };
+
+    // Base model with ID and timestamps
+    export const baseModel = {
+      id: varchar("id", { length: 36 })
+        // .$defaultFn(() => crypto.randomUUID()) // .$defaultFn is Drizzle-specific;
+        // For spanner-orm, default generation might be handled differently
+        // or you might set it at application level before insert.
+        // For this example, we'll assume a client-generated UUID or a DB default if supported.
+        .primaryKey(), // crypto.randomUUID() can be used by application logic to generate default.
+      ...timestamps,
+    };
+
+    // For resources that are owned by a user
+    export const ownableResource = {
+      // Removed 'any' type for better practice if possible
+      ...baseModel,
+      userId: varchar("user_id", { length: 36 }) // Assuming user_id is also a UUID
+        .notNull()
+        .references(() => users.id, { onDelete: "cascade" }), // Ensure references() is implemented
+    };
+
+    // For resources that have visibility permissions
+    // type VisibilityStatus = "private" | "shared" | "public"; // Example type for visibility
+
+    export const permissibleResource = {
+      // Removed 'any' type
+      ...ownableResource,
+      visibility: varchar("visibility", { length: 10 }) // e.g., 'private', 'shared', 'public'
+        .default("private")
+        .notNull(),
+      // .$type<VisibilityStatus>() // .$type is a Drizzle-specific helper for type assertion.
+      // In spanner-orm, this would be managed by TypeScript's inference.
+    };
+
+    // --- Example Table: Uploads (using shared components) ---
+    export const uploads = table("uploads", {
+      // Use `table` from spanner-orm
+      ...permissibleResource, // Includes id, createdAt, updatedAt, userId, visibility
+      gcsObjectName: text("gcs_object_name").notNull(), // Full path in GCS
+      fileName: text("file_name").notNull(),
+      fileType: text("file_type").notNull(), // General type: 'image', 'audio', etc.
+      mimeType: text("mime_type").notNull(), // Specific MIME type: 'image/jpeg'
+      size: integer("size").notNull(), // File size in bytes
     });
+
+    // You can then use these definitions to generate DDL or build queries.
     ```
 
-    _(Note: `references()` and full foreign key support is part of a later phase)_
+    This example demonstrates how you can compose schemas from shared building blocks, similar to patterns used in Drizzle ORM.
+    _(Note: Features like `.references()`, `.$defaultFn()`, advanced indexing, and specific type mappings like `jsonb` are part of ongoing development as outlined in the roadmap. The import paths and exact feature set of `spanner-orm` should be adjusted based on the library's actual implementation.)_
 
 ## Usage Examples
 
