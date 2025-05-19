@@ -4,7 +4,7 @@ import type {
   SchemaDiff,
   TableDiffAction,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  ColumnDiffAction,
+  ColumnDiffAction, // Ensuring this is not disabled
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   IndexDiffAction,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -182,10 +182,131 @@ function generatePgDdl(diffActions: TableDiffAction[]): string[] {
         );
         break;
       case "change":
-        // TODO: Implement column, index, pk, interleave changes for PG
-        console.warn(
-          `Table "${action.tableName}" change DDL generation not fully implemented for PG.`
-        );
+        if (action.columnChanges) {
+          for (const colChange of action.columnChanges) {
+            const tableName = escapeIdentifierPostgres(action.tableName);
+            switch (colChange.action) {
+              case "add":
+                {
+                  const column = colChange.column;
+                  let colSql = `ALTER TABLE ${tableName} ADD COLUMN ${escapeIdentifierPostgres(
+                    column.name
+                  )} ${column.dialectTypes.postgres}`;
+                  if (column.notNull) colSql += " NOT NULL";
+                  if (column.unique) colSql += " UNIQUE";
+                  const defaultSql = formatDefaultValuePostgres(
+                    column.default,
+                    column.name
+                  );
+                  if (defaultSql) colSql += ` ${defaultSql}`;
+                  // TODO: Handle primaryKey on add? Usually part of table creation or specific ALTER.
+                  // TODO: Handle references on add.
+                  ddlStatements.push(`${colSql};`);
+                }
+                break;
+              case "remove":
+                ddlStatements.push(
+                  `ALTER TABLE ${tableName} DROP COLUMN ${escapeIdentifierPostgres(
+                    colChange.columnName
+                  )};`
+                );
+                break;
+              case "change":
+                {
+                  const columnName = escapeIdentifierPostgres(
+                    colChange.columnName
+                  );
+                  const changes = colChange.changes;
+                  if (changes.type || changes.dialectTypes) {
+                    // Assuming dialectTypes.postgres is the target type string
+                    const newType =
+                      changes.dialectTypes?.postgres || changes.type;
+                    if (newType) {
+                      // USING clause might be needed for some type changes
+                      ddlStatements.push(
+                        `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} SET DATA TYPE ${newType};`
+                      );
+                    }
+                  }
+                  if (changes.hasOwnProperty("notNull")) {
+                    if (changes.notNull) {
+                      ddlStatements.push(
+                        `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} SET NOT NULL;`
+                      );
+                    } else {
+                      ddlStatements.push(
+                        `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} DROP NOT NULL;`
+                      );
+                    }
+                  }
+                  if (changes.hasOwnProperty("default")) {
+                    if (changes.default !== undefined) {
+                      const defaultSql = formatDefaultValuePostgres(
+                        changes.default,
+                        colChange.columnName
+                      );
+                      ddlStatements.push(
+                        `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} ${
+                          defaultSql ? defaultSql : "DROP DEFAULT"
+                        };`
+                      );
+                    } else {
+                      ddlStatements.push(
+                        `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} DROP DEFAULT;`
+                      );
+                    }
+                  }
+                  if (changes.hasOwnProperty("unique")) {
+                    // Adding/dropping unique constraints often requires constraint names.
+                    // This is a simplified version. A real implementation would need to manage constraint names.
+                    if (changes.unique) {
+                      const constraintName = escapeIdentifierPostgres(
+                        `uq_${action.tableName}_${colChange.columnName}`
+                      );
+                      ddlStatements.push(
+                        `ALTER TABLE ${tableName} ADD CONSTRAINT ${constraintName} UNIQUE (${columnName});`
+                      );
+                    } else {
+                      // Dropping unique constraint needs its name. This is a placeholder.
+                      // Assuming a convention like uq_tableName_columnName
+                      const constraintName = escapeIdentifierPostgres(
+                        `uq_${action.tableName}_${colChange.columnName}`
+                      );
+                      ddlStatements.push(
+                        `ALTER TABLE ${tableName} DROP CONSTRAINT ${constraintName};`
+                      );
+                      console.warn(
+                        `Dropping unique constraint on ${action.tableName}.${colChange.columnName} requires knowing the constraint name. Placeholder DDL generated.`
+                      );
+                    }
+                  }
+                  // TODO: Handle changes to primaryKey (complex, often involves dropping/recreating PK constraint)
+                  // TODO: Handle changes to references (FKs)
+                }
+                break;
+            }
+          }
+        }
+        // TODO: Implement index, pk, interleave changes for PG
+        if (
+          action.indexChanges ||
+          action.primaryKeyChange ||
+          action.interleaveChange
+        ) {
+          console.warn(
+            `Table "${action.tableName}" index, PK, or interleave change DDL generation not yet implemented for PG.`
+          );
+        }
+        if (
+          !action.columnChanges &&
+          !action.indexChanges &&
+          !action.primaryKeyChange &&
+          !action.interleaveChange
+        ) {
+          console.warn(
+            `Table "${action.tableName}" had a 'change' action but no specific changes were processed for PG.`
+          );
+        }
         break;
     }
   }
@@ -362,10 +483,115 @@ function generateSpannerDdl(diffActions: TableDiffAction[]): string[] {
         );
         break;
       case "change":
-        // TODO: Implement column, index, pk, interleave changes for Spanner
-        console.warn(
-          `Table "${action.tableName}" change DDL generation not fully implemented for Spanner.`
-        );
+        if (action.columnChanges) {
+          for (const colChange of action.columnChanges) {
+            const tableName = escapeIdentifierSpanner(action.tableName);
+            switch (colChange.action) {
+              case "add":
+                {
+                  const column = colChange.column;
+                  let colSql = `ALTER TABLE ${tableName} ADD COLUMN ${escapeIdentifierSpanner(
+                    column.name
+                  )} ${column.dialectTypes.spanner}`;
+                  if (column.notNull) colSql += " NOT NULL";
+                  // Spanner DEFAULT is part of column definition: DEFAULT (expression)
+                  const defaultSql = formatDefaultValueSpanner(
+                    column.default,
+                    column.name
+                  );
+                  if (defaultSql) colSql += ` ${defaultSql}`;
+                  // Unique constraints are handled by separate CREATE UNIQUE INDEX statements.
+                  ddlStatements.push(`${colSql};`);
+                }
+                break;
+              case "remove":
+                ddlStatements.push(
+                  `ALTER TABLE ${tableName} DROP COLUMN ${escapeIdentifierSpanner(
+                    colChange.columnName
+                  )};`
+                );
+                break;
+              case "change":
+                {
+                  const columnName = escapeIdentifierSpanner(
+                    colChange.columnName
+                  );
+                  const changes = colChange.changes;
+
+                  // Spanner ALTER COLUMN has limitations.
+                  // Type changes: ALTER TABLE <table> ALTER COLUMN <col> <new_type>
+                  // Nullability: ALTER TABLE <table> ALTER COLUMN <col> [NOT NULL | DROP NOT NULL] (DROP NOT NULL is effectively allowing NULLs)
+                  // Default: Spanner does not support ALTER COLUMN ... SET DEFAULT directly.
+                  //          Changing a default value typically requires dropping and re-adding the column or other workarounds.
+                  //          For now, we will not generate DDL for default changes on existing columns for Spanner.
+
+                  if (changes.type || changes.dialectTypes) {
+                    const newType =
+                      changes.dialectTypes?.spanner || changes.type;
+                    if (newType) {
+                      ddlStatements.push(
+                        `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} ${newType};`
+                      );
+                      console.warn(
+                        `Spanner DDL for changing column type for ${tableName}.${columnName} to ${newType} generated. Review for compatibility and potential data conversion needs.`
+                      );
+                    }
+                  }
+                  if (changes.hasOwnProperty("notNull")) {
+                    if (changes.notNull) {
+                      ddlStatements.push(
+                        `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} NOT NULL;`
+                      );
+                    } else {
+                      // Spanner doesn't have an explicit "DROP NOT NULL" in the same way as PG.
+                      // To make a column nullable, you alter its type definition to not include NOT NULL.
+                      // This often means re-specifying the type.
+                      // This is a simplified approach. A more robust solution would require the original column definition.
+                      // For now, we'll issue a warning. The user might need to provide the full type definition.
+                      // A common DDL would be: ALTER TABLE <table> ALTER COLUMN <col> <type> (where <type> does not include NOT NULL)
+                      console.warn(
+                        `Spanner DDL for making ${tableName}.${columnName} nullable may require re-specifying the full column type without NOT NULL. Automatic generation is limited here.`
+                      );
+                      // Placeholder: ddlStatements.push(`ALTER TABLE ${tableName} ALTER COLUMN ${columnName} <EXISTING_TYPE_WITHOUT_NOT_NULL>;`);
+                    }
+                  }
+                  if (changes.hasOwnProperty("default")) {
+                    console.warn(
+                      `Spanner does not support ALTER COLUMN SET DEFAULT directly for ${tableName}.${columnName}. Default value changes require manual DDL or column recreation.`
+                    );
+                  }
+                  if (changes.hasOwnProperty("unique")) {
+                    // Unique constraints in Spanner are managed via UNIQUE INDEXES.
+                    // This change should be handled by indexChanges.
+                    console.warn(
+                      `Spanner 'unique' constraint changes for ${tableName}.${columnName} should be handled via index diffs (CREATE/DROP UNIQUE INDEX).`
+                    );
+                  }
+                }
+                break;
+            }
+          }
+        }
+        // TODO: Implement index, pk, interleave changes for Spanner
+        if (
+          action.indexChanges ||
+          action.primaryKeyChange ||
+          action.interleaveChange
+        ) {
+          console.warn(
+            `Table "${action.tableName}" index, PK, or interleave change DDL generation not yet implemented for Spanner.`
+          );
+        }
+        if (
+          !action.columnChanges &&
+          !action.indexChanges &&
+          !action.primaryKeyChange &&
+          !action.interleaveChange
+        ) {
+          console.warn(
+            `Table "${action.tableName}" had a 'change' action but no specific changes were processed for Spanner.`
+          );
+        }
         break;
     }
   }
