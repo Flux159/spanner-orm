@@ -32,10 +32,10 @@ jobs:
       - name: Run lint
         run: bun run lint
 
-      # Run unit tests
-      - name: Run unit tests
-        run: bun run test
-
       # Test build process
       - name: Build application
         run: bun run build
+
+      # Run unit tests
+      - name: Run unit tests
+        run: bun run test
