@@ -482,6 +482,204 @@ describe("generateMigrationDDL", () => {
       );
       consoleWarnSpy.mockRestore();
     });
+
+    it("should generate ADD PRIMARY KEY DDL for PostgreSQL", () => {
+      const schemaDiff: SchemaDiff = {
+        fromVersion: V1_SNAPSHOT_VERSION,
+        toVersion: V1_SNAPSHOT_VERSION,
+        tableChanges: [
+          {
+            action: "change",
+            tableName: "orders",
+            primaryKeyChange: {
+              action: "set",
+              pk: { name: "pk_orders", columns: ["order_id", "customer_id"] },
+            },
+          },
+        ],
+      };
+      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      expect(ddl.length).toBe(1);
+      expect(ddl[0]).toBe(
+        'ALTER TABLE "orders" ADD CONSTRAINT "pk_orders" PRIMARY KEY ("order_id", "customer_id");'
+      );
+    });
+
+    it("should generate ADD PRIMARY KEY DDL with default name for PostgreSQL", () => {
+      const schemaDiff: SchemaDiff = {
+        fromVersion: V1_SNAPSHOT_VERSION,
+        toVersion: V1_SNAPSHOT_VERSION,
+        tableChanges: [
+          {
+            action: "change",
+            tableName: "items",
+            primaryKeyChange: {
+              action: "set",
+              pk: { columns: ["item_uuid"] }, // No name provided
+            },
+          },
+        ],
+      };
+      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      expect(ddl.length).toBe(1);
+      expect(ddl[0]).toBe(
+        'ALTER TABLE "items" ADD CONSTRAINT "pk_items" PRIMARY KEY ("item_uuid");'
+      );
+    });
+
+    it("should generate DROP PRIMARY KEY DDL for PostgreSQL with explicit name", () => {
+      const schemaDiff: SchemaDiff = {
+        fromVersion: V1_SNAPSHOT_VERSION,
+        toVersion: V1_SNAPSHOT_VERSION,
+        tableChanges: [
+          {
+            action: "change",
+            tableName: "orders",
+            primaryKeyChange: {
+              action: "remove",
+              pkName: "pk_orders_old",
+            },
+          },
+        ],
+      };
+      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      expect(ddl.length).toBe(1);
+      expect(ddl[0]).toBe(
+        'ALTER TABLE "orders" DROP CONSTRAINT "pk_orders_old";'
+      );
+    });
+
+    it("should generate DROP PRIMARY KEY DDL for PostgreSQL with warning if name is not provided", () => {
+      const consoleWarnSpy = vi
+        .spyOn(console, "warn")
+        .mockImplementation(() => {});
+      const schemaDiff: SchemaDiff = {
+        fromVersion: V1_SNAPSHOT_VERSION,
+        toVersion: V1_SNAPSHOT_VERSION,
+        tableChanges: [
+          {
+            action: "change",
+            tableName: "items",
+            primaryKeyChange: {
+              action: "remove", // No pkName provided
+            },
+          },
+        ],
+      };
+      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      expect(ddl.length).toBe(1);
+      expect(ddl[0]).toBe('ALTER TABLE "items" DROP CONSTRAINT "pk_items";');
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        'Primary key name for DROP operation on table "items" for PostgreSQL was not provided. Assuming default name ""pk_items"". This might fail.'
+      );
+      consoleWarnSpy.mockRestore();
+    });
+
+    it("should generate ADD FOREIGN KEY constraint DDL for PostgreSQL", () => {
+      const schemaDiff: SchemaDiff = {
+        fromVersion: V1_SNAPSHOT_VERSION,
+        toVersion: V1_SNAPSHOT_VERSION,
+        tableChanges: [
+          {
+            action: "change",
+            tableName: "posts",
+            columnChanges: [
+              {
+                action: "change", // Assuming FK is added to an existing column or column is changed to have an FK
+                columnName: "user_id",
+                changes: {
+                  references: {
+                    name: "fk_posts_user_id",
+                    referencedTable: "users",
+                    referencedColumn: "id",
+                    onDelete: "cascade",
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      };
+      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      expect(ddl.length).toBe(1);
+      expect(ddl[0]).toBe(
+        'ALTER TABLE "posts" ADD CONSTRAINT "fk_posts_user_id" FOREIGN KEY ("user_id") REFERENCES "users" ("id") ON DELETE CASCADE;'
+      );
+    });
+
+    it("should generate DROP FOREIGN KEY constraint DDL for PostgreSQL", () => {
+      const consoleWarnSpy = vi
+        .spyOn(console, "warn")
+        .mockImplementation(() => {});
+      const schemaDiff: SchemaDiff = {
+        fromVersion: V1_SNAPSHOT_VERSION,
+        toVersion: V1_SNAPSHOT_VERSION,
+        tableChanges: [
+          {
+            action: "change",
+            tableName: "comments",
+            columnChanges: [
+              {
+                action: "change",
+                columnName: "post_id",
+                changes: {
+                  references: null, // Signal to remove the FK
+                },
+              },
+            ],
+          },
+        ],
+      };
+      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      expect(ddl.length).toBe(1);
+      // This will use the placeholder name due to current limitations
+      expect(ddl[0]).toBe(
+        'ALTER TABLE "comments" DROP CONSTRAINT "fk_comments_post_id_TO_BE_DROPPED";'
+      );
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        'Attempting to DROP foreign key for comments.post_id because its \'references\' property was set to null. The specific constraint name is required for PostgreSQL. Using placeholder name ""fk_comments_post_id_TO_BE_DROPPED"". This DDL will likely FAIL. The schema diff process should provide the exact name of the FK constraint to drop.'
+      );
+      consoleWarnSpy.mockRestore();
+    });
+
+    it("should generate ADD COLUMN with FOREIGN KEY for PostgreSQL", () => {
+      const schemaDiff: SchemaDiff = {
+        fromVersion: V1_SNAPSHOT_VERSION,
+        toVersion: V1_SNAPSHOT_VERSION,
+        tableChanges: [
+          {
+            action: "change",
+            tableName: "profiles",
+            columnChanges: [
+              {
+                action: "add",
+                column: createSampleColumn(
+                  "user_account_id",
+                  "integer",
+                  { pg: "INTEGER", spanner: "INT64" },
+                  {
+                    references: {
+                      name: "fk_profiles_user_account",
+                      referencedTable: "user_accounts",
+                      referencedColumn: "account_id",
+                      onDelete: "set null",
+                    },
+                  }
+                ),
+              },
+            ],
+          },
+        ],
+      };
+      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      expect(ddl.length).toBe(2);
+      expect(ddl[0]).toBe(
+        'ALTER TABLE "profiles" ADD COLUMN "user_account_id" INTEGER;'
+      );
+      expect(ddl[1]).toBe(
+        'ALTER TABLE "profiles" ADD CONSTRAINT "fk_profiles_user_account" FOREIGN KEY ("user_account_id") REFERENCES "user_accounts" ("account_id") ON DELETE SET NULL;'
+      );
+    });
   });
 
   describe("Spanner DDL Generation", () => {
@@ -779,6 +977,188 @@ describe("generateMigrationDDL", () => {
         `Spanner 'unique' constraint changes for Users.Email should be handled via index diffs (CREATE/DROP UNIQUE INDEX).`
       );
       consoleWarnSpy.mockRestore();
+    });
+
+    it("should issue a warning when attempting to add a PK to an existing Spanner table", () => {
+      const consoleWarnSpy = vi
+        .spyOn(console, "warn")
+        .mockImplementation(() => {});
+      const schemaDiff: SchemaDiff = {
+        fromVersion: V1_SNAPSHOT_VERSION,
+        toVersion: V1_SNAPSHOT_VERSION,
+        tableChanges: [
+          {
+            action: "change",
+            tableName: "Users",
+            primaryKeyChange: {
+              action: "set",
+              pk: { columns: ["NewPkCol"] },
+            },
+          },
+        ],
+      };
+      const ddl = generateMigrationDDL(schemaDiff, "spanner");
+      expect(ddl.length).toBe(0); // No DDL should be generated
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        `Spanner does not support altering primary keys (add, remove, or change) on existing table "Users". This operation usually requires table recreation and data migration. No DDL will be generated by the ORM for this PK change.`
+      );
+      consoleWarnSpy.mockRestore();
+    });
+
+    it("should issue a warning when attempting to remove a PK from an existing Spanner table", () => {
+      const consoleWarnSpy = vi
+        .spyOn(console, "warn")
+        .mockImplementation(() => {});
+      const schemaDiff: SchemaDiff = {
+        fromVersion: V1_SNAPSHOT_VERSION,
+        toVersion: V1_SNAPSHOT_VERSION,
+        tableChanges: [
+          {
+            action: "change",
+            tableName: "Products",
+            primaryKeyChange: {
+              action: "remove",
+              pkName: "PK_Products_Old",
+            },
+          },
+        ],
+      };
+      const ddl = generateMigrationDDL(schemaDiff, "spanner");
+      expect(ddl.length).toBe(0); // No DDL should be generated
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        `Spanner does not support altering primary keys (add, remove, or change) on existing table "Products". This operation usually requires table recreation and data migration. No DDL will be generated by the ORM for this PK change.`
+      );
+      consoleWarnSpy.mockRestore();
+    });
+
+    it("should issue a warning when attempting to change interleave configuration on an existing Spanner table", () => {
+      const consoleWarnSpy = vi
+        .spyOn(console, "warn")
+        .mockImplementation(() => {});
+      const schemaDiff: SchemaDiff = {
+        fromVersion: V1_SNAPSHOT_VERSION,
+        toVersion: V1_SNAPSHOT_VERSION,
+        tableChanges: [
+          {
+            action: "change",
+            tableName: "OrderItems",
+            interleaveChange: {
+              action: "set", // Could be 'set' or 'remove'
+              interleave: { parentTable: "NewParent", onDelete: "no action" },
+            },
+          },
+        ],
+      };
+      const ddl = generateMigrationDDL(schemaDiff, "spanner");
+      expect(ddl.length).toBe(0); // No DDL should be generated
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        `Spanner does not support altering the interleave configuration (parent table or ON DELETE rule) for existing table "OrderItems". This operation usually requires table recreation and data migration. No DDL will be generated by the ORM for this interleave change.`
+      );
+      consoleWarnSpy.mockRestore();
+    });
+
+    it("should generate ADD FOREIGN KEY constraint DDL for Spanner", () => {
+      const schemaDiff: SchemaDiff = {
+        fromVersion: V1_SNAPSHOT_VERSION,
+        toVersion: V1_SNAPSHOT_VERSION,
+        tableChanges: [
+          {
+            action: "change",
+            tableName: "Albums",
+            columnChanges: [
+              {
+                action: "change",
+                columnName: "ArtistId",
+                changes: {
+                  references: {
+                    name: "FK_Albums_ArtistId", // Spanner FK names are global
+                    referencedTable: "Artists",
+                    referencedColumn: "ArtistId",
+                    onDelete: "no action",
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      };
+      const ddl = generateMigrationDDL(schemaDiff, "spanner");
+      expect(ddl.length).toBe(1);
+      expect(ddl[0]).toBe(
+        "ALTER TABLE Albums ADD CONSTRAINT FK_Albums_ArtistId FOREIGN KEY (ArtistId) REFERENCES Artists (ArtistId) ON DELETE NO ACTION;"
+      );
+    });
+
+    it("should generate DROP FOREIGN KEY constraint DDL for Spanner", () => {
+      const consoleWarnSpy = vi
+        .spyOn(console, "warn")
+        .mockImplementation(() => {});
+      const schemaDiff: SchemaDiff = {
+        fromVersion: V1_SNAPSHOT_VERSION,
+        toVersion: V1_SNAPSHOT_VERSION,
+        tableChanges: [
+          {
+            action: "change",
+            tableName: "Tracks",
+            columnChanges: [
+              {
+                action: "change",
+                columnName: "AlbumId",
+                changes: {
+                  references: null, // Signal to remove FK
+                },
+              },
+            ],
+          },
+        ],
+      };
+      const ddl = generateMigrationDDL(schemaDiff, "spanner");
+      expect(ddl.length).toBe(1);
+      expect(ddl[0]).toBe(
+        "ALTER TABLE Tracks DROP CONSTRAINT FK_Tracks_AlbumId_TO_BE_DROPPED;"
+      );
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        "Attempting to DROP foreign key for Spanner table Tracks.AlbumId because its 'references' property was set to null. The specific constraint name is required. Using placeholder name \"FK_Tracks_AlbumId_TO_BE_DROPPED\". This DDL will likely FAIL. The schema diff process should provide the correct constraint name."
+      );
+      consoleWarnSpy.mockRestore();
+    });
+
+    it("should generate ADD COLUMN with FOREIGN KEY for Spanner", () => {
+      const schemaDiff: SchemaDiff = {
+        fromVersion: V1_SNAPSHOT_VERSION,
+        toVersion: V1_SNAPSHOT_VERSION,
+        tableChanges: [
+          {
+            action: "change",
+            tableName: "Playlists",
+            columnChanges: [
+              {
+                action: "add",
+                column: createSampleColumn(
+                  "UserId",
+                  "STRING(36)",
+                  { pg: "VARCHAR(36)", spanner: "STRING(36)" },
+                  {
+                    references: {
+                      name: "FK_Playlists_UserId",
+                      referencedTable: "Users",
+                      referencedColumn: "UserId",
+                    }, // Default ON DELETE NO ACTION
+                  }
+                ),
+              },
+            ],
+          },
+        ],
+      };
+      const ddl = generateMigrationDDL(schemaDiff, "spanner");
+      expect(ddl.length).toBe(2);
+      expect(ddl[0]).toBe(
+        "ALTER TABLE Playlists ADD COLUMN UserId STRING(36);"
+      );
+      expect(ddl[1]).toBe(
+        "ALTER TABLE Playlists ADD CONSTRAINT FK_Playlists_UserId FOREIGN KEY (UserId) REFERENCES Users (UserId);"
+      );
     });
   });
 });

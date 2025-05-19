@@ -187,10 +187,11 @@ export interface ColumnSnapshot {
   primaryKey?: boolean;
   unique?: boolean;
   references?: {
+    name?: string; // Optional name for the FK constraint
     referencedTable: string;
     referencedColumn: string;
     onDelete?: OnDeleteAction;
-  };
+  } | null; // Allow null to signify removal at the snapshot level
 }
 
 export interface IndexSnapshot {

@@ -4,21 +4,23 @@ A TypeScript ORM for Google Spanner & PostgreSQL, designed for Node.js and Bun. 
 
 ## Core Features
 
-`spanner-orm` is built around the following key requirements and features, ensuring a robust and versatile experience for developers:
+`spanner-orm` is designed to provide a seamless and powerful experience for managing data across PostgreSQL and Google Spanner. Its core capabilities include:
 
-- **Unified Object Model:** Define your database schema once using a Drizzle-like syntax. Supports both PostgreSQL & Google Spanner with this single object model.
-- **Dual Dialect SQL Generation & Versatile Deployment:**
-  - Generates Google SQL specifically tailored for Spanner.
-  - Generates standard, highly compatible SQL for PostgreSQL.
-  - This allows users to use PostgreSQL for non-Spanner deployments, Pglite for local development or applications where the user will run the app locally, and Spanner for global-scale web applications, all from the same schema.
-- **Comprehensive Migration Support:**
-  - Produces migration files with DDL for both PostgreSQL and Spanner.
-  - Enables migration execution via a CLI tool (`spanner-orm-cli migrate`) or programmatically.
-- **Flexible Querying:**
-  - Construct type-safe queries with an intuitive query builder.
-  - Seamlessly fall back to raw SQL (`sql` tag function) for complex or dialect-specific operations.
-- **Composable Schemas:** Easily create and reuse schema components (e.g., for common fields like timestamps, base entity structures), inspired by Drizzle ORM's approach.
-- **TypeScript First:** Built from the ground up with TypeScript for a robust, type-safe, and enjoyable developer experience.
+- **Single Object Model for PostgreSQL & Spanner:** Define your database schema once using a Drizzle-inspired syntax that supports both PostgreSQL and Google Spanner. This unified approach simplifies development and ensures consistency across database environments.
+
+- **Dual-Dialect Migration Generation:** Automatically produce migration files with the appropriate DDL for both PostgreSQL and Spanner. Migrations can be executed via the `spanner-orm-cli migrate` command or programmatically within your application.
+
+- **Flexible Query Construction:** Build type-safe queries using an intuitive query builder, or fall back to raw SQL (via the `sql` template literal tag) when you need fine-grained control or dialect-specific features.
+
+- **Optimized SQL for Each Dialect & Versatile Deployment:**
+
+  - Generates Google SQL tailored for Spanner's unique capabilities.
+  - Produces standard, highly compatible SQL for PostgreSQL.
+  - This versatility allows you to use a single codebase with PostgreSQL for various deployments (including Pglite for local development or embedded scenarios) and Google Spanner for applications requiring web-scale infrastructure.
+
+- **Composable Schemas:** Easily create and reuse schema components (e.g., for common fields like `id`, `createdAt`, `updatedAt`, or base entity structures), promoting DRY principles and maintainable data models, inspired by Drizzle ORM's approach.
+
+- **TypeScript First:** Built from the ground up with TypeScript, `spanner-orm` offers a robust, type-safe, and enjoyable developer experience, with strong type inference from your schema definitions.
 
 ## Why spanner-orm?
 

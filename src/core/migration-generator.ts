@@ -148,13 +148,60 @@ function generatePgCreateTableDDL(table: TableSnapshot): string {
   return `CREATE TABLE ${tableName} (\n  ${columnsSql.join(",\n  ")}\n);`;
 }
 
+function generatePgForeignKeyConstraintDDL(
+  tableName: string,
+  columnName: string,
+  fk: NonNullable<ColumnSnapshot["references"]>
+): string {
+  const constraintName = fk.name
+    ? escapeIdentifierPostgres(fk.name)
+    : escapeIdentifierPostgres(
+        `fk_${tableName}_${columnName}_${fk.referencedTable}`
+      );
+  const onDeleteAction = fk.onDelete
+    ? ` ON DELETE ${fk.onDelete.toUpperCase()}`
+    : "";
+  return `ALTER TABLE ${escapeIdentifierPostgres(
+    tableName
+  )} ADD CONSTRAINT ${constraintName} FOREIGN KEY (${escapeIdentifierPostgres(
+    columnName
+  )}) REFERENCES ${escapeIdentifierPostgres(
+    fk.referencedTable
+  )} (${escapeIdentifierPostgres(fk.referencedColumn)})${onDeleteAction};`;
+}
+
+function generatePgCreateTableDDLWithForeignKeys(
+  table: TableSnapshot
+): string[] {
+  const ddlStatements: string[] = [];
+  const createTableSql = generatePgCreateTableDDL(table); // Existing function for base CREATE TABLE
+  ddlStatements.push(createTableSql);
+
+  // Add foreign key constraints
+  for (const columnName in table.columns) {
+    const column = table.columns[columnName];
+    if (column.references) {
+      ddlStatements.push(
+        generatePgForeignKeyConstraintDDL(
+          table.name,
+          columnName,
+          column.references
+        )
+      );
+    }
+  }
+  return ddlStatements;
+}
+
 // Placeholder for PG DDL generation functions (to be expanded)
 function generatePgDdl(diffActions: TableDiffAction[]): string[] {
   const ddlStatements: string[] = [];
   for (const action of diffActions) {
     switch (action.action) {
       case "add":
-        ddlStatements.push(generatePgCreateTableDDL(action.table));
+        ddlStatements.push(
+          ...generatePgCreateTableDDLWithForeignKeys(action.table)
+        );
         // Non-unique indexes for new tables
         if (action.table.indexes) {
           for (const index of action.table.indexes) {
@@ -200,8 +247,16 @@ function generatePgDdl(diffActions: TableDiffAction[]): string[] {
                   );
                   if (defaultSql) colSql += ` ${defaultSql}`;
                   // TODO: Handle primaryKey on add? Usually part of table creation or specific ALTER.
-                  // TODO: Handle references on add.
                   ddlStatements.push(`${colSql};`);
+                  if (colChange.column.references) {
+                    ddlStatements.push(
+                      generatePgForeignKeyConstraintDDL(
+                        action.tableName,
+                        colChange.column.name,
+                        colChange.column.references
+                      )
+                    );
+                  }
                 }
                 break;
               case "remove":
@@ -281,7 +336,44 @@ function generatePgDdl(diffActions: TableDiffAction[]): string[] {
                     }
                   }
                   // TODO: Handle changes to primaryKey (complex, often involves dropping/recreating PK constraint)
-                  // TODO: Handle changes to references (FKs)
+                  if (changes.hasOwnProperty("references")) {
+                    if (changes.references) {
+                      // Add or change/replace FK
+                      console.warn(
+                        `Changing foreign key for ${action.tableName}.${colChange.columnName}. ` +
+                          `If an old FK existed and its name/definition changed, it should be explicitly dropped by a preceding diff action. ` +
+                          `This operation will attempt to add the new/updated FK constraint.`
+                      );
+                      ddlStatements.push(
+                        generatePgForeignKeyConstraintDDL(
+                          action.tableName,
+                          colChange.columnName, // colChange.columnName is valid here for action: "change"
+                          changes.references as NonNullable<
+                            ColumnSnapshot["references"]
+                          >
+                        )
+                      );
+                    } else if (changes.references === null) {
+                      // Remove FK
+                      // This signifies that the 'references' property of the column is now null.
+                      // We need the name of the FK constraint that *was* on this column.
+                      // This name isn't available in `changes.references` (it's null).
+                      // The `differ` should ideally provide the name of the constraint to be dropped.
+                      // For now, use a placeholder and a strong warning.
+                      const fkNameToRemovePlaceholder =
+                        escapeIdentifierPostgres(
+                          `fk_${action.tableName}_${colChange.columnName}_TO_BE_DROPPED`
+                        );
+                      console.warn(
+                        `Attempting to DROP foreign key for ${action.tableName}.${colChange.columnName} because its 'references' property was set to null. ` +
+                          `The specific constraint name is required for PostgreSQL. Using placeholder name "${fkNameToRemovePlaceholder}". ` +
+                          `This DDL will likely FAIL. The schema diff process should provide the exact name of the FK constraint to drop.`
+                      );
+                      ddlStatements.push(
+                        `ALTER TABLE ${tableName} DROP CONSTRAINT ${fkNameToRemovePlaceholder};`
+                      );
+                    }
+                  }
                 }
                 break;
             }
@@ -355,10 +447,38 @@ function generatePgDdl(diffActions: TableDiffAction[]): string[] {
             }
           }
         }
-        // TODO: Implement pk, interleave changes for PG
-        if (action.primaryKeyChange || action.interleaveChange) {
+        if (action.primaryKeyChange) {
+          const tableNameEsc = escapeIdentifierPostgres(action.tableName);
+          const pkChange = action.primaryKeyChange;
+          if (pkChange.action === "set") {
+            const newPk = pkChange.pk;
+            const newPkName = newPk.name
+              ? escapeIdentifierPostgres(newPk.name)
+              : escapeIdentifierPostgres(`pk_${action.tableName}`);
+            const newPkColumns = newPk.columns
+              .map(escapeIdentifierPostgres)
+              .join(", ");
+            ddlStatements.push(
+              `ALTER TABLE ${tableNameEsc} ADD CONSTRAINT ${newPkName} PRIMARY KEY (${newPkColumns});`
+            );
+          } else if (pkChange.action === "remove") {
+            const pkNameToRemove = pkChange.pkName
+              ? escapeIdentifierPostgres(pkChange.pkName)
+              : escapeIdentifierPostgres(`pk_${action.tableName}`);
+            if (!pkChange.pkName) {
+              console.warn(
+                `Primary key name for DROP operation on table "${action.tableName}" for PostgreSQL was not provided. Assuming default name "${pkNameToRemove}". This might fail.`
+              );
+            }
+            ddlStatements.push(
+              `ALTER TABLE ${tableNameEsc} DROP CONSTRAINT ${pkNameToRemove};`
+            );
+          }
+        }
+        // TODO: Implement interleave changes for PG
+        if (action.interleaveChange) {
           console.warn(
-            `Table "${action.tableName}" PK or interleave change DDL generation not yet implemented for PG.`
+            `Table "${action.tableName}" interleave change DDL generation not yet implemented for PG.`
           );
         }
         if (
@@ -534,13 +654,60 @@ function generateSpannerCreateTableDDL(table: TableSnapshot): string[] {
   return ddlStatements;
 }
 
+function generateSpannerForeignKeyConstraintDDL(
+  tableName: string,
+  columnName: string,
+  fk: NonNullable<ColumnSnapshot["references"]>
+): string {
+  // Spanner constraint names are global to the schema.
+  const constraintName = fk.name
+    ? escapeIdentifierSpanner(fk.name)
+    : escapeIdentifierSpanner(
+        `FK_${tableName}_${columnName}_${fk.referencedTable}` // Ensure unique enough
+      );
+  const onDeleteAction = fk.onDelete
+    ? ` ON DELETE ${fk.onDelete.toUpperCase()}`
+    : ""; // Spanner defaults to NO ACTION if not specified
+
+  return `ALTER TABLE ${escapeIdentifierSpanner(
+    tableName
+  )} ADD CONSTRAINT ${constraintName} FOREIGN KEY (${escapeIdentifierSpanner(
+    columnName
+  )}) REFERENCES ${escapeIdentifierSpanner(
+    fk.referencedTable
+  )} (${escapeIdentifierSpanner(fk.referencedColumn)})${onDeleteAction};`;
+}
+
+function generateSpannerCreateTableDDLWithForeignKeys(
+  table: TableSnapshot
+): string[] {
+  const ddlStatements = generateSpannerCreateTableDDL(table); // This already returns string[]
+
+  // Add foreign key constraints separately
+  for (const columnName in table.columns) {
+    const column = table.columns[columnName];
+    if (column.references) {
+      ddlStatements.push(
+        generateSpannerForeignKeyConstraintDDL(
+          table.name,
+          columnName,
+          column.references
+        )
+      );
+    }
+  }
+  return ddlStatements;
+}
+
 // Placeholder for Spanner DDL generation functions (to be expanded)
 function generateSpannerDdl(diffActions: TableDiffAction[]): string[] {
   const ddlStatements: string[] = [];
   for (const action of diffActions) {
     switch (action.action) {
       case "add":
-        ddlStatements.push(...generateSpannerCreateTableDDL(action.table));
+        ddlStatements.push(
+          ...generateSpannerCreateTableDDLWithForeignKeys(action.table)
+        );
         break;
       case "remove":
         ddlStatements.push(
@@ -567,6 +734,15 @@ function generateSpannerDdl(diffActions: TableDiffAction[]): string[] {
                   if (defaultSql) colSql += ` ${defaultSql}`;
                   // Unique constraints are handled by separate CREATE UNIQUE INDEX statements.
                   ddlStatements.push(`${colSql};`);
+                  if (colChange.column.references) {
+                    ddlStatements.push(
+                      generateSpannerForeignKeyConstraintDDL(
+                        action.tableName,
+                        colChange.column.name,
+                        colChange.column.references
+                      )
+                    );
+                  }
                 }
                 break;
               case "remove":
@@ -631,6 +807,38 @@ function generateSpannerDdl(diffActions: TableDiffAction[]): string[] {
                     console.warn(
                       `Spanner 'unique' constraint changes for ${tableName}.${columnName} should be handled via index diffs (CREATE/DROP UNIQUE INDEX).`
                     );
+                  }
+                  if (changes.hasOwnProperty("references")) {
+                    if (changes.references) {
+                      // Add or change/replace FK
+                      console.warn(
+                        `Changing foreign key for Spanner table ${action.tableName}.${colChange.columnName}. ` +
+                          `If an old FK existed and its name/definition changed, it should be explicitly dropped by a preceding diff action. ` +
+                          `This operation will attempt to add the new/updated FK constraint.`
+                      );
+                      ddlStatements.push(
+                        generateSpannerForeignKeyConstraintDDL(
+                          action.tableName,
+                          colChange.columnName, // colChange.columnName is valid here
+                          changes.references as NonNullable<
+                            ColumnSnapshot["references"]
+                          >
+                        )
+                      );
+                    } else if (changes.references === null) {
+                      // Remove FK
+                      const fkNameToRemovePlaceholder = escapeIdentifierSpanner(
+                        `FK_${action.tableName}_${colChange.columnName}_TO_BE_DROPPED`
+                      );
+                      console.warn(
+                        `Attempting to DROP foreign key for Spanner table ${action.tableName}.${colChange.columnName} because its 'references' property was set to null. ` +
+                          `The specific constraint name is required. Using placeholder name "${fkNameToRemovePlaceholder}". ` +
+                          `This DDL will likely FAIL. The schema diff process should provide the correct constraint name.`
+                      );
+                      ddlStatements.push(
+                        `ALTER TABLE ${tableName} DROP CONSTRAINT ${fkNameToRemovePlaceholder};`
+                      );
+                    }
                   }
                 }
                 break;
@@ -700,10 +908,18 @@ function generateSpannerDdl(diffActions: TableDiffAction[]): string[] {
             }
           }
         }
-        // TODO: Implement pk, interleave changes for Spanner
-        if (action.primaryKeyChange || action.interleaveChange) {
+        if (action.primaryKeyChange) {
+          // Spanner does not support altering primary keys on existing tables.
           console.warn(
-            `Table "${action.tableName}" PK, or interleave change DDL generation not yet implemented for Spanner.`
+            `Spanner does not support altering primary keys (add, remove, or change) on existing table "${action.tableName}". ` +
+              `This operation usually requires table recreation and data migration. No DDL will be generated by the ORM for this PK change.`
+          );
+        }
+        if (action.interleaveChange) {
+          // Spanner does not support altering interleave on existing tables.
+          console.warn(
+            `Spanner does not support altering the interleave configuration (parent table or ON DELETE rule) for existing table "${action.tableName}". ` +
+              `This operation usually requires table recreation and data migration. No DDL will be generated by the ORM for this interleave change.`
           );
         }
         if (
