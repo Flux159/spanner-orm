@@ -615,26 +615,76 @@ function generateSpannerCreateTableDDL(table: TableSnapshot): string[] {
 
   ddlStatements.push(`${createTableSql};`);
 
-  // Add CREATE UNIQUE INDEX statements for unique constraints defined in indexes
+  // Add CREATE UNIQUE INDEX for columns marked with .unique()
+  for (const columnName in table.columns) {
+    const column = table.columns[columnName];
+    // DEBUG: console.log(`Checking column ${table.name}.${columnName} for unique. Unique flag: ${column.unique}`);
+    if (column.unique) {
+      // console.log(`DEBUG: Generating unique index for ${table.name}.${column.name}`);
+      // Ensure this doesn't conflict with unique indexes defined in table.indexes
+      // A common pattern is that .unique() on a column is syntactic sugar for a single-column unique index.
+      // We need to ensure we don't double-create if also defined in table.indexes.
+      // For now, assume .unique() implies a unique index that might not be in table.indexes.
+      const uniqueIndexName = escapeIdentifierSpanner(
+        `uq_${table.name}_${column.name}`
+      );
+      const uniqueColumnName = escapeIdentifierSpanner(column.name);
+      ddlStatements.push(
+        `CREATE UNIQUE INDEX ${uniqueIndexName} ON ${tableName} (${uniqueColumnName});`
+      );
+    }
+  }
+
+  // Add CREATE UNIQUE INDEX statements for unique constraints defined in table.indexes array
+  // (potentially composite unique indexes or explicitly named single-column unique indexes)
   if (table.indexes) {
     for (const index of table.indexes) {
       if (index.unique) {
+        // Check if this unique index is for a single column that already had .unique()
+        // to avoid creating it twice if the snapshot/diff process isn't smart enough.
+        // This check is a bit simplistic. A more robust way is to ensure the snapshot/diff
+        // normalizes these (e.g., .unique() on column adds to table.indexes internally).
+        // For now, we assume they might be distinct sources of truth for unique constraints.
+        const _alreadyCreatedByColumnUnique = false;
+        if (index.columns.length === 1) {
+          const colName = index.columns[0];
+          if (table.columns[colName]?.unique) {
+            // If an index is for a single column that also has .unique(),
+            // and we use a consistent naming convention, we might detect overlap.
+            // Example convention: uq_tableName_columnName
+            const autoIndexNameForColumn = `uq_${table.name}_${colName}`;
+            if (index.name === autoIndexNameForColumn || !index.name) {
+              // Assume the .unique() on column already handled this if names match or index name is auto.
+              // This is imperfect. Best to normalize in schema definition or snapshot.
+              // console.log(`Skipping unique index ${index.name || autoIndexNameForColumn} as it might be covered by column.unique()`);
+              // For safety, let's allow explicit index definitions to proceed,
+              // but this highlights a potential for duplicate index creation if not careful in schema def.
+            }
+          }
+        }
+
+        // If not (heuristically) an overlap with a column's .unique()
+        // or if it's a composite unique index, create it.
+        // The above check is commented out to prefer explicit index definitions.
+        // The responsibility is on the schema designer or snapshot normalization
+        // to avoid defining the same unique constraint in two ways.
+
         const indexName = index.name
           ? escapeIdentifierSpanner(index.name)
           : escapeIdentifierSpanner(
-              `uq_${table.name}_${index.columns.join("_")}`
+              `uq_${table.name}_${index.columns.join("_")}` // Default name for multi-column or unnamed
             );
         const uniqueColumns = index.columns
           .map(escapeIdentifierSpanner)
           .join(", ");
-        // Spanner specific: NULL_FILTERED for nullable unique columns if desired (not directly in snapshot yet)
         ddlStatements.push(
           `CREATE UNIQUE INDEX ${indexName} ON ${tableName} (${uniqueColumns});`
         );
       }
     }
   }
-  // Non-unique indexes
+
+  // Non-unique indexes from table.indexes array
   if (table.indexes) {
     for (const index of table.indexes) {
       if (!index.unique) {

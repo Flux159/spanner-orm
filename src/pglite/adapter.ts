@@ -1,114 +1,173 @@
 // src/pglite/adapter.ts
 
-// This is a placeholder for the Pglite adapter.
-// Pglite provides a PostgreSQL-compatible interface over SQLite.
+import { PGlite } from "@electric-sql/pglite";
+import type {
+  DatabaseAdapter,
+  QueryResultRow as AdapterQueryResultRow,
+  ConnectionOptions,
+} from "../types/adapter.js";
 
-export interface PgliteAdapter {
-  dialect: "pglite";
-
-  /**
-   * Executes a SQL query against the Pglite database.
-   * @param sql The SQL string to execute.
-   * @param params An array of parameters for prepared statements.
-   * @returns A promise that resolves with the query results.
-   */
-  execute: <TResult = any>(sql: string, params?: any[]) => Promise<TResult[]>;
-
-  // TODO: Add transaction methods: begin, commit, rollback
-  // TODO: Add methods for batch operations if supported by the driver.
-
-  transaction: <T>(
-    callback: (tx: PgliteTransaction) => Promise<T>
-  ) => Promise<T>;
+// Define a more specific connection options type for PGlite
+export interface PgliteConnectionOptions extends ConnectionOptions {
+  dataDir?: string;
 }
 
 /**
- * Represents the execution context within a Pglite transaction.
+ * Represents the execution context within a PGlite transaction,
+ * conforming to a subset of DatabaseAdapter for transactional operations.
  */
-export interface PgliteTransaction {
-  dialect: "pglite";
-  execute: <TResult = any>(sql: string, params?: any[]) => Promise<TResult[]>;
+export interface PgliteTransactionAdapter {
+  dialect: "postgres"; // PGlite is PG compatible
+  execute(sql: string, params?: unknown[]): Promise<void>;
+  query<T extends AdapterQueryResultRow = AdapterQueryResultRow>(
+    sql: string,
+    params?: unknown[]
+  ): Promise<T[]>;
 }
 
-import { PGlite } from "@electric-sql/pglite";
-
-export class ConcretePgliteAdapter implements PgliteAdapter {
-  readonly dialect = "pglite" as const;
+export class ConcretePgliteAdapter implements DatabaseAdapter {
+  readonly dialect = "postgres"; // Treat PGlite as PostgreSQL for ORM dialect purposes
   private pglite: PGlite;
   private ready: Promise<void>;
+  private isConnected: boolean = false;
 
-  constructor(dataDir?: string) {
-    // Pglite can be in-memory or file-backed
-    // PGlite constructor is synchronous, but some operations might be async to 'fully' initialize
-    // or if it involves loading extensions. For basic usage, it's often ready immediately.
-    // Let's assume it's ready after construction for this basic adapter.
+  constructor(options?: PgliteConnectionOptions | string) {
+    const dataDir = typeof options === "string" ? options : options?.dataDir;
     this.pglite = new PGlite(dataDir);
-    // PGlite v0.1.20 and later might return a promise from constructor or require an init step
-    // For older versions or simple cases, it might be synchronous.
-    // Assuming a simple synchronous setup or that PGlite handles its own internal ready state.
-    // If PGlite().ready or similar exists and is needed:
-    // this.ready = this.pglite.ready ? this.pglite.ready() : Promise.resolve();
-    this.ready = Promise.resolve(); // Placeholder if no explicit ready promise needed from PGlite instance
+    // PGlite's constructor is synchronous. `ready` can be a resolved promise.
+    // Some PGlite operations might be async internally if they load extensions,
+    // but the basic instance should be usable.
+    this.ready = Promise.resolve();
   }
 
-  async execute<TResult = any>(
-    sql: string,
-    params?: any[]
-  ): Promise<TResult[]> {
-    await this.ready; // Ensure PGlite is ready if it has an async initialization
+  async connect(): Promise<void> {
+    if (this.isConnected) {
+      console.log("PGlite adapter already connected/initialized.");
+      return;
+    }
+    await this.ready; // Ensure any initial setup promise resolves
+    // PGlite doesn't have an explicit connect method like a remote DB.
+    // Being instantiated is considered 'connected' for basic operations.
+    // We can do a simple query to confirm it's working.
     try {
-      // PGlite's query method returns an object with a 'rows' property.
-      // It also supports tagged template literals for queries directly.
-      const results = await this.pglite.query<TResult>(sql, params);
-      return results.rows;
+      await this.pglite.query("SELECT 1;");
+      this.isConnected = true;
+      console.log("PGlite adapter initialized and ready.");
     } catch (error) {
-      console.error("Error executing query with Pglite adapter:", error);
-      // TODO: Implement more specific error handling or logging
+      console.error("Error initializing PGlite adapter:", error);
       throw error;
     }
   }
 
-  async transaction<T>(
-    callback: (tx: PgliteTransaction) => Promise<T>
-  ): Promise<T> {
+  async disconnect(): Promise<void> {
+    if (!this.isConnected) {
+      console.log("PGlite adapter already disconnected/closed.");
+      return;
+    }
+    await this.ready;
+    if (typeof this.pglite.close === "function") {
+      try {
+        await this.pglite.close();
+        this.isConnected = false;
+        console.log("PGlite adapter closed.");
+      } catch (error) {
+        console.error("Error closing PGlite adapter:", error);
+        throw error;
+      }
+    } else {
+      this.isConnected = false; // Mark as disconnected even if no close method
+      console.log(
+        "PGlite adapter: close method not available or not needed. Marked as disconnected."
+      );
+    }
+  }
+
+  async execute(sql: string, params?: unknown[]): Promise<void> {
     await this.ready;
     try {
-      await this.pglite.query("BEGIN");
+      // Use query for commands as well to support parameters, then discard results.
+      // PGlite's `exec` is more for multi-statement SQL strings without direct param binding in the same call.
+      await this.pglite.query(sql, params as any[] | undefined);
+    } catch (error) {
+      console.error("Error executing command with Pglite adapter:", error);
+      throw error;
+    }
+  }
 
-      const txExecutor: PgliteTransaction = {
-        dialect: "pglite" as const,
-        execute: async <TResult = any>(
-          sql: string,
-          params?: any[]
-        ): Promise<TResult[]> => {
-          const result = await this.pglite.query<TResult>(sql, params);
+  async query<TResult extends AdapterQueryResultRow = AdapterQueryResultRow>(
+    sql: string,
+    params?: unknown[]
+  ): Promise<TResult[]> {
+    await this.ready;
+    try {
+      // `query` signature is <T>(sql: string, params?: any[]).
+      const results = await this.pglite.query<TResult>(
+        sql,
+        params as any[] | undefined
+      );
+      return results.rows;
+    } catch (error) {
+      console.error("Error executing query with Pglite adapter:", error);
+      throw error;
+    }
+  }
+
+  async beginTransaction(): Promise<void> {
+    await this.ready;
+    await this.pglite.query("BEGIN");
+  }
+
+  async commitTransaction(): Promise<void> {
+    await this.ready;
+    await this.pglite.query("COMMIT");
+  }
+
+  async rollbackTransaction(): Promise<void> {
+    await this.ready;
+    await this.pglite.query("ROLLBACK");
+  }
+
+  async transaction<T>(
+    callback: (txAdapter: PgliteTransactionAdapter) => Promise<T>
+  ): Promise<T> {
+    await this.ready;
+    // PGlite supports transactions directly on the main instance.
+    // The `transaction` method of PGlite itself could be used,
+    // but to align with the adapter pattern, we manage BEGIN/COMMIT/ROLLBACK.
+    try {
+      await this.beginTransaction();
+
+      const txExecutor: PgliteTransactionAdapter = {
+        dialect: "postgres",
+        execute: async (
+          sqlCmd: string,
+          paramsCmd?: unknown[]
+        ): Promise<void> => {
+          // Inside a transaction, use query for commands too
+          await this.pglite.query(sqlCmd, paramsCmd as any[] | undefined);
+        },
+        query: async <
+          TQuery extends AdapterQueryResultRow = AdapterQueryResultRow
+        >(
+          sqlQuery: string,
+          paramsQuery?: unknown[]
+        ): Promise<TQuery[]> => {
+          // Inside a transaction, use the same pglite instance's query
+          const result = await this.pglite.query<TQuery>(
+            sqlQuery,
+            paramsQuery as any[] | undefined
+          );
           return result.rows;
         },
       };
 
       const result = await callback(txExecutor);
-      await this.pglite.query("COMMIT");
+      await this.commitTransaction();
       return result;
     } catch (error) {
-      await this.pglite.query("ROLLBACK");
+      await this.rollbackTransaction();
       console.error("Pglite transaction rolled back due to error:", error);
       throw error;
     }
-    // No explicit client release needed for PGlite like with pg PoolClient
-  }
-
-  async close(): Promise<void> {
-    await this.ready;
-    // PGlite instances have a close method as of v0.1.18+
-    if (typeof this.pglite.close === "function") {
-      await this.pglite.close();
-      console.log("Pglite adapter closed.");
-    } else {
-      console.log(
-        "Pglite adapter: close method not available or not needed for this version/setup."
-      );
-    }
   }
 }
-
-// console.log("Pglite Adapter placeholder loaded."); // Remove or keep for debugging

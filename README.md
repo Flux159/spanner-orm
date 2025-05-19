@@ -6,19 +6,19 @@ A TypeScript ORM for Google Spanner & PostgreSQL, designed for Node.js and Bun. 
 
 `spanner-orm` is designed to provide a seamless and powerful experience for managing data across PostgreSQL and Google Spanner. Its core capabilities include:
 
-- **Single Object Model for PostgreSQL & Spanner:** Define your database schema once using a Drizzle-inspired syntax that supports both PostgreSQL and Google Spanner. This unified approach simplifies development and ensures consistency across database environments.
+- **Unified Object Model for PostgreSQL & Spanner:** Define your database schema once using a Drizzle-inspired syntax. This single object model seamlessly supports both PostgreSQL and Google Spanner, simplifying development and ensuring consistency across diverse database environments.
 
-- **Dual-Dialect Migration Generation:** Automatically produce migration files with the appropriate DDL for both PostgreSQL and Spanner. Migrations can be executed via the `spanner-orm-cli migrate` command or programmatically within your application.
+- **Comprehensive Migration Generation & Execution:** Automatically produce migration files with the appropriate DDL for both PostgreSQL and Spanner. These migrations can be run via the `spanner-orm-cli migrate` command (e.g., `migrate latest`, `migrate down`) or programmatically within your application, ensuring smooth schema evolution.
 
-- **Flexible Query Construction:** Build type-safe queries using an intuitive query builder, or fall back to raw SQL (via the `sql` template literal tag) when you need fine-grained control or dialect-specific features.
+- **Versatile Query Building with SQL Fallback:** Construct type-safe queries using an intuitive query builder. For complex scenarios or dialect-specific needs, seamlessly fall back to raw SQL using the `sql` template literal tag, offering maximum flexibility.
 
-- **Optimized SQL for Each Dialect & Versatile Deployment:**
+- **Dialect-Optimized SQL for Flexible Deployments:**
 
-  - Generates Google SQL tailored for Spanner's unique capabilities.
+  - Generates Google SQL specifically tailored for Spanner's unique architecture and capabilities.
   - Produces standard, highly compatible SQL for PostgreSQL.
-  - This versatility allows you to use a single codebase with PostgreSQL for various deployments (including Pglite for local development or embedded scenarios) and Google Spanner for applications requiring web-scale infrastructure.
+  - This dual-dialect support empowers you to use PostgreSQL for non-Spanner deployments, Pglite for local development or embedded applications, and Google Spanner for demanding web-scale applications, all from a single, consistent codebase.
 
-- **Composable Schemas:** Easily create and reuse schema components (e.g., for common fields like `id`, `createdAt`, `updatedAt`, or base entity structures), promoting DRY principles and maintainable data models, inspired by Drizzle ORM's approach.
+- **Composable Schemas (Drizzle-Inspired):** Easily create and reuse schema components (e.g., for common fields like `id`, `createdAt`, `updatedAt`, or base entity structures), promoting DRY principles and maintainable data models.
 
 - **TypeScript First:** Built from the ground up with TypeScript, `spanner-orm` offers a robust, type-safe, and enjoyable developer experience, with strong type inference from your schema definitions.
 
@@ -111,9 +111,9 @@ This project will be developed in phases. Here's a high-level overview:
 
 ### Phase 4: Migration Engine
 
-- [ ] **T4.1: Schema Snapshotting/Introspection.**
-- [ ] **T4.2: Schema Diffing Logic.**
-- [ ] **T4.3: Migration File Generation (DDL for both dialects).**
+- [x] **T4.1: Schema Snapshotting/Introspection.**
+- [x] **T4.2: Schema Diffing Logic.**
+- [x] **T4.3: Migration File Generation (DDL for both dialects).**
 
   - This engine will be responsible for generating the full set of DDL statements to align the database schema with the defined models.
   - For Spanner, this will include generating `CREATE UNIQUE INDEX` statements for any columns or sets of columns marked with `unique()` or `uniqueIndex()` in the schema definition.
@@ -132,7 +132,7 @@ This project will be developed in phases. Here's a high-level overview:
 
 ### Phase 5: Advanced Features & Polish
 
-- [ ] **T5.1: Advanced Querying:** Joins, aggregations, grouping, ordering, pagination.
+- [ ] **T5.1: Advanced Querying:** Joins, aggregations, grouping, ordering, pagination, sql functions like concat, like, ilike (like & ilike not available in Google SQL - see notes/GoogleSQLSpanner.md).
 - [ ] **T5.2: Relational Mappings in Schema & Query Builder.**
 - [ ] **T5.3: Performance Optimizations (e.g., batching for Spanner).**
 - [ ] **T5.4: Comprehensive Documentation & Examples.**
