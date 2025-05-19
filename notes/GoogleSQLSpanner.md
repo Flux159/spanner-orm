@@ -6,7 +6,13 @@ See this about [DDL](https://cloud.google.com/spanner/docs/reference/standard-sq
 
 This is the [link](https://cloud.google.com/spanner/docs/reference/standard-sql/functions-all) for all functions available.
 
+## DDL Statements that require validation
+
+You can only do 10 per batch / query. So spanner-orm should generate multiple migration files if that is the case.
+
 ## LIKE & ILIKE vs REGEXP_CONTAINS & Alternatives
+
+From Gemini / AI Studio:
 
 You're right, Google Cloud Spanner's SQL dialect (Google Standard SQL) does not have the traditional LIKE or ILIKE operators.
 The primary alternative is to use regular expressions with the REGEXP_CONTAINS function. You can also use specific string functions for simpler cases.
