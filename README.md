@@ -4,6 +4,8 @@ A TypeScript ORM for Google Spanner & PostgreSQL, designed for Node.js and Bun. 
 
 ## Core Features
 
+`spanner-orm` is built around the following key requirements and features, ensuring a robust and versatile experience for developers:
+
 - **Unified Object Model:** Define your database schema once using a Drizzle-like syntax. Supports both PostgreSQL & Google Spanner with this single object model.
 - **Dual Dialect SQL Generation & Versatile Deployment:**
   - Generates Google SQL specifically tailored for Spanner.
@@ -117,6 +119,8 @@ This project will be developed in phases. Here's a high-level overview:
   - Similarly, for PostgreSQL, if we decide to use `CREATE UNIQUE INDEX` for all unique constraints (for consistency or for features not available in inline constraints), the migration engine would handle that. It would also handle non-unique indexes (`CREATE INDEX`) for both dialects.
 
   - This also applies to other DDL like `ALTER TABLE` for adding/removing columns, constraints, etc.
+
+  - Note that spanner has a limit of 10 on DDL statements that require validation or backfill. You can batch more without validation, but to be safe, we should just make our migration files be limited to 10 ddl statements at a time when adding indices, etc.
 
 - [ ] **T4.4: Migration CLI (`migrate latest`, `migrate down`, `migrate create`).**
 - [ ] **T4.5: Migration Tracking Table.**
