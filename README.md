@@ -143,6 +143,7 @@ Make sure to read notes/Phase5.md and notes/GoogleSQLSpanner.md when working on 
   - Replace placeholder `executeCmdSql` and `queryRowsSql` functions in `handleMigrateLatest` and `handleMigrateDown` with actual calls to the instantiated `DatabaseAdapter` (its `execute` and `query` methods).
   - This will make `migrate latest` and `migrate down` fully operational.
 - [ ] **T5.1: Advanced Querying:** Joins, aggregations, grouping, ordering, pagination / limit & order by, sql functions like concat, like, ilike (like & ilike not available in Google SQL - see notes/GoogleSQLSpanner.md).
+  - Need to add querying examples to the README.md as well - since we have DDL example, migration example, we should also have common querying examples in the readme so that users know how to use for querying as well as migration generation.
 - [ ] **T5.2: Relational Mappings in Schema & Query Builder.**
   - Add defaultFn capability into ORM. See notes/DefaultFnTask.md for more info on what this means. Then update the code example below in README.md to show that its supported.
   - Support for boolean, uniqueIndex, index, json/jsonb
