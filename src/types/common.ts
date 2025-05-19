@@ -175,3 +175,54 @@ export function sql(strings: TemplateStringsArray, ...values: unknown[]): SQL {
     },
   };
 }
+
+// --- Schema Snapshot Types ---
+
+export interface ColumnSnapshot {
+  name: string;
+  type: string; // Generic type e.g., 'text', 'varchar'
+  dialectTypes: { postgres: string; spanner: string };
+  notNull?: boolean;
+  default?: unknown | { sql: string } | { function: string }; // Store actual value, SQL, or a marker for function
+  primaryKey?: boolean;
+  unique?: boolean;
+  references?: {
+    referencedTable: string;
+    referencedColumn: string;
+    onDelete?: OnDeleteAction;
+  };
+}
+
+export interface IndexSnapshot {
+  name?: string; // Index name might be optional if auto-generated
+  columns: string[];
+  unique: boolean;
+  // Future: using?: string; // e.g., GIN, GIST for PG
+  // Future: predicate?: string; // For partial indexes
+}
+
+export interface CompositePrimaryKeySnapshot {
+  name?: string; // Constraint name
+  columns: string[];
+}
+
+export interface InterleaveSnapshot {
+  parentTable: string;
+  onDelete: "cascade" | "no action";
+}
+
+export interface TableSnapshot {
+  name: string;
+  columns: Record<string, ColumnSnapshot>;
+  indexes?: IndexSnapshot[];
+  compositePrimaryKey?: CompositePrimaryKeySnapshot;
+  interleave?: InterleaveSnapshot; // Spanner specific
+  // Future: checks?: CheckConstraintSnapshot[];
+}
+
+export interface SchemaSnapshot {
+  version: string; // Version of the spanner-orm snapshot format
+  dialect: "postgres" | "spanner" | "common"; // Or maybe this isn't needed if snapshot is dialect-agnostic before generation
+  tables: Record<string, TableSnapshot>;
+  // Potentially other schema-level info in the future (e.g., custom types, extensions)
+}
