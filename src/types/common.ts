@@ -226,3 +226,49 @@ export interface SchemaSnapshot {
   tables: Record<string, TableSnapshot>;
   // Potentially other schema-level info in the future (e.g., custom types, extensions)
 }
+
+// --- Schema Diff Types ---
+
+export type ColumnDiffAction =
+  | { action: "add"; column: ColumnSnapshot }
+  | { action: "remove"; columnName: string }
+  | {
+      action: "change";
+      columnName: string;
+      changes: Partial<Omit<ColumnSnapshot, "name">>; // All fields except name can change
+    };
+
+export type IndexDiffAction =
+  | { action: "add"; index: IndexSnapshot }
+  | { action: "remove"; indexName: string } // Assuming indexes are named for removal
+  | {
+      action: "change";
+      indexName: string;
+      changes: Partial<Omit<IndexSnapshot, "name">>;
+    }; // Less common for indexes, usually drop and recreate
+
+export type PrimaryKeyDiffAction =
+  | { action: "set"; pk: CompositePrimaryKeySnapshot } // Can be add or change
+  | { action: "remove"; pkName?: string }; // Name might be optional
+
+export type InterleaveDiffAction =
+  | { action: "set"; interleave: InterleaveSnapshot }
+  | { action: "remove" };
+
+export type TableDiffAction =
+  | { action: "add"; table: TableSnapshot }
+  | { action: "remove"; tableName: string }
+  | {
+      action: "change";
+      tableName: string;
+      columnChanges?: ColumnDiffAction[];
+      indexChanges?: IndexDiffAction[];
+      primaryKeyChange?: PrimaryKeyDiffAction;
+      interleaveChange?: InterleaveDiffAction;
+    };
+
+export interface SchemaDiff {
+  fromVersion: string; // Snapshot version of the 'old' schema
+  toVersion: string; // Snapshot version of the 'new' schema
+  tableChanges: TableDiffAction[];
+}
