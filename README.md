@@ -124,17 +124,31 @@ This project will be developed in phases. Here's a high-level overview:
 
   - Note that spanner has a limit of 10 on DDL statements that require validation or backfill. You can batch more without validation, but to be safe, we should just make our migration files be limited to 10 ddl statements at a time when adding indices, etc.
 
-- [~] **T4.4: Migration CLI (`migrate latest`, `migrate down`, `migrate create`).**
-  - `spanner-orm-cli migrate create <name>`: Implemented. Generates timestamped migration files for both PostgreSQL and Spanner (`YYYYMMDDHHMMSS-name.pg.ts` and `YYYYMMDDHHMMSS-name.spanner.ts`) in the `./spanner-orm-migrations` directory. These files contain `up` and `down` function templates.
-  - `spanner-orm-cli migrate latest --schema <path> --dialect <pg|spanner>`: Basic command structure implemented. Currently simulates applying migrations and logs placeholder steps. Full implementation depends on T4.1, T4.2, T4.3 (partially covered by `create`), and T4.5.
-  - `spanner-orm-cli migrate down --schema <path> --dialect <pg|spanner>`: Basic command structure implemented. Currently simulates reverting the last migration and logs placeholder steps. Full implementation depends on T4.5.
-- [ ] **T4.5: Migration Tracking Table.**
+- [x] **T4.4: Migration CLI (`migrate latest`, `migrate down`, `migrate create`).**
+  - `spanner-orm-cli migrate create <name> --schema <path>`: Fully implemented. Generates timestamped migration files for PostgreSQL and Spanner, automatically populated with `up` (from empty to current schema) and `down` (from current to empty schema) DDL statements.
+  - `spanner-orm-cli migrate latest --schema <path> --dialect <pg|spanner>`: Core logic implemented. This includes creating the migration tracking table (if it doesn't exist), identifying pending migrations by comparing against the tracking table, dynamically importing migration modules, executing their `up` functions, and recording successful migrations in the tracking table. Full operation requires wiring up to concrete database adapters and connection configuration.
+  - `spanner-orm-cli migrate down --schema <path> --dialect <pg|spanner>`: Core logic implemented. This includes identifying the last applied migration from the tracking table, dynamically importing its module, executing its `down` function, and removing its record from the tracking table on success. Full operation requires wiring up to concrete database adapters and connection configuration.
+- [x] **T4.5: Migration Tracking Table.**
+  - Schema for `_spanner_orm_migrations_log` defined.
+  - DDL for table creation implemented in `src/core/migration-meta.ts`.
+  - Functions for recording and querying applied migrations implemented in `src/core/migration-meta.ts`.
+  - `migrate latest` command ensures this table is created on its first run.
 
-### Phase 5: Advanced Features & Polish
+### Phase 5: Advanced Features & Polish (Next Steps)
 
-- [ ] **T5.1: Advanced Querying:** Joins, aggregations, grouping, ordering, pagination, sql functions like concat, like, ilike (like & ilike not available in Google SQL - see notes/GoogleSQLSpanner.md).
+Make sure to read notes/Phase5.md and notes/GoogleSQLSpanner.md when working on Phase 5.
+
+- [ ] **T5.0: Integrate Database Adapters into Migration CLI:**
+  - Implement a mechanism in `src/cli.ts` (e.g., via environment variables or a config file) to determine which database adapter to use (PostgreSQL, Pglite, Spanner) and its connection details.
+  - Replace placeholder `executeCmdSql` and `queryRowsSql` functions in `handleMigrateLatest` and `handleMigrateDown` with actual calls to the instantiated `DatabaseAdapter` (its `execute` and `query` methods).
+  - This will make `migrate latest` and `migrate down` fully operational.
+- [ ] **T5.1: Advanced Querying:** Joins, aggregations, grouping, ordering, pagination / limit & order by, sql functions like concat, like, ilike (like & ilike not available in Google SQL - see notes/GoogleSQLSpanner.md).
 - [ ] **T5.2: Relational Mappings in Schema & Query Builder.**
+  - Add defaultFn capability into ORM. See notes/DefaultFnTask.md for more info on what this means. Then update the code example below in README.md to show that its supported.
+  - Support for boolean, uniqueIndex, index, json/jsonb
+  - An alias for "uuid" that in spanner is implemented as varchar of length 36 that has defaultFn already setup. In postgres this is a uuid type & could potentially create the uuid inside of postgres itself.
 - [ ] **T5.3: Performance Optimizations (e.g., batching for Spanner).**
+  - Limit DDL statements that require validation to 10 per migration / batch (see notes/GoogleSQLSpanner.md).
 - [ ] **T5.4: Comprehensive Documentation & Examples.**
 - [ ] **T5.5: Robust Testing Suite (unit & integration tests).**
 
@@ -176,7 +190,7 @@ This project will be developed in phases. Here's a high-level overview:
       // boolean, // Assuming boolean is available or will be
       // uniqueIndex, // Assuming uniqueIndex is available or will be
       // primaryKey, // Often part of column definition, e.g., .primaryKey()
-      // jsonb, // Assuming jsonb or equivalent (e.g., json for PG, JSON/STRING for Spanner)
+      // jsonb, // Or json Assuming jsonb or equivalent (e.g., json for PG, JSON/STRING for Spanner)
       // index, // Assuming index is available or will be
       sql, // For raw SQL expressions like default values
     } from "spanner-orm"; // Adjust import path as per your project structure
@@ -284,40 +298,42 @@ This command generates a pair of timestamped migration files (one for PostgreSQL
 
 ```bash
 # Example: Create migration files for adding a 'posts' table
-npx spanner-orm-cli migrate create add-posts-table
+# This requires your schema file (e.g., dist/schema.js) to be built and specified.
+npx spanner-orm-cli migrate create add-posts-table --schema ./dist/schema.js
 
 # This will create files like:
 # ./spanner-orm-migrations/YYYYMMDDHHMMSS-add-posts-table.pg.ts
 # ./spanner-orm-migrations/YYYYMMDDHHMMSS-add-posts-table.spanner.ts
+# These files will be pre-populated with DDL based on changes detected against an empty schema.
 ```
 
-You then fill in the `up` and `down` functions in these files with the necessary SQL statements for each dialect.
+**2. Apply pending migrations:**
 
-**2. Apply pending migrations (Simulated):**
-
-This command (currently in a simulated state) will eventually apply all pending migrations to your database for the specified dialect.
+This command applies all pending migrations to your database for the specified dialect.
+(Requires database connection to be configured - e.g., via environment variables, specific adapter setup needed).
 
 ```bash
-# Simulate applying latest migrations for PostgreSQL
-npx spanner-orm-cli migrate latest --schema ./dist/schema.js --dialect pg
+# Apply latest migrations for PostgreSQL
+npx spanner-orm-cli migrate latest --schema ./dist/schema.js --dialect postgres
 
-# Simulate applying latest migrations for Spanner
+# Apply latest migrations for Spanner
 npx spanner-orm-cli migrate latest --schema ./dist/schema.js --dialect spanner
 ```
 
-**3. Revert the last applied migration (Simulated):**
+**3. Revert the last applied migration:**
 
-This command (currently in a simulated state) will eventually revert the last applied migration for the specified dialect.
+This command reverts the last applied migration for the specified dialect.
+(Requires database connection to be configured).
 
 ```bash
-# Simulate reverting the last PostgreSQL migration
-npx spanner-orm-cli migrate down --schema ./dist/schema.js --dialect pg
+# Revert the last PostgreSQL migration
+npx spanner-orm-cli migrate down --schema ./dist/schema.js --dialect postgres
 
-# Simulate reverting the last Spanner migration
+# Revert the last Spanner migration
 npx spanner-orm-cli migrate down --schema ./dist/schema.js --dialect spanner
 ```
 
-_(Note: The `migrate latest` and `migrate down` commands are placeholders for now. Full functionality depends on schema snapshotting, diffing, and migration tracking features which are part of ongoing development.)_
+_(Note: While the core logic for `migrate latest` and `migrate down` is implemented, they require proper database connection configuration and adapter instantiation within the CLI to be fully operational. This is planned for Phase 5.)_
 
 ---
 
