@@ -8,7 +8,7 @@
     "spanner-orm-cli": "./dist/cli.js"
   },
   "scripts": {
-    "build": "rm -rf dist && tsc",
+    "build": "rm -rf dist && tsc && chmod +x ./dist/cli.js",
     "start": "bun dist/index.js",
     "test": "vitest run",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
