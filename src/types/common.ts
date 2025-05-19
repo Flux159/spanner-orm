@@ -51,29 +51,97 @@ export type InferModelType<T extends TableConfig<string, TableColumns>> = {
 
 // For SQL tagged template literal
 export interface SQL {
-  toSqlString(dialect: Dialect): string;
-  getValues(): unknown[]; // For parameterized queries
+  /**
+   * Generates the SQL string for the specified dialect.
+   * @param dialect The SQL dialect ('postgres' or 'spanner').
+   * @param currentParamIndex An object holding the current parameter index, passed by reference to be incremented.
+   * @returns The SQL string with placeholders.
+   */
+  toSqlString(dialect: Dialect, currentParamIndex?: { value: number }): string;
+  /**
+   * Gets the array of parameter values corresponding to the placeholders in the SQL string.
+   * @returns An array of parameter values.
+   */
+  getValues(): unknown[];
   readonly _isSQL: true;
 }
 
 export function sql(strings: TemplateStringsArray, ...values: unknown[]): SQL {
+  const getValuesRecursive = (vals: unknown[]): unknown[] => {
+    const params: unknown[] = [];
+    for (const val of vals) {
+      if (typeof val === "object" && val !== null) {
+        if ("_isSQL" in val) {
+          // Check if it's an SQL object
+          params.push(...(val as SQL).getValues());
+        } else if (
+          // Check if it's NOT a ColumnConfig object
+          // A ColumnConfig has 'name', 'type', and 'dialectTypes'
+          !(
+            "name" in val &&
+            typeof (val as any).name === "string" &&
+            "type" in val &&
+            typeof (val as any).type === "string" &&
+            "dialectTypes" in val &&
+            typeof (val as any).dialectTypes === "object"
+          )
+        ) {
+          params.push(val); // It's some other object, treat as parameter
+        }
+        // If it is a ColumnConfig, it's not a parameter, so it's skipped here.
+      } else {
+        params.push(val); // Primitives are parameters
+      }
+    }
+    return params;
+  };
+
   return {
     _isSQL: true,
-    getValues: () => values,
-    toSqlString: (dialect: Dialect): string => {
-      // Basic implementation, dialect-specific handling might be needed for placeholders
+    getValues: () => getValuesRecursive(values),
+    toSqlString: (
+      dialect: Dialect,
+      currentParamIndex?: { value: number }
+    ): string => {
       let result = strings[0];
+      // Initialize paramIndex if it's the top-level call
+      const paramIndexState = currentParamIndex || { value: 1 };
+
       for (let i = 0; i < values.length; i++) {
         const value = values[i];
-        if (typeof value === "object" && value !== null && "_isSQL" in value) {
-          result += (value as SQL).toSqlString(dialect) + strings[i + 1];
+        if (typeof value === "object" && value !== null) {
+          if ("_isSQL" in value) {
+            // Nested SQL object
+            result +=
+              (value as SQL).toSqlString(dialect, paramIndexState) +
+              strings[i + 1];
+          } else if (
+            // Check if it IS a ColumnConfig object
+            "name" in value &&
+            typeof (value as any).name === "string" &&
+            "type" in value &&
+            typeof (value as any).type === "string" &&
+            "dialectTypes" in value &&
+            typeof (value as any).dialectTypes === "object"
+          ) {
+            // It's a ColumnConfig, interpolate its name as an identifier
+            const colName = (value as ColumnConfig<any, any>).name;
+            result +=
+              (dialect === "postgres" ? `"${colName}"` : `\`${colName}\``) +
+              strings[i + 1];
+          } else {
+            // It's some other object, treat as a parameter
+            result +=
+              (dialect === "postgres"
+                ? `$${paramIndexState.value++}`
+                : `@p${paramIndexState.value++}`) + strings[i + 1];
+          }
         } else {
-          // This needs to be dialect-specific for placeholders ($1, ?, @p1)
-          // For now, just a simple placeholder.
-          // In a real scenario, the adapter would handle this.
+          // Primitives are parameters
           result +=
-            (dialect === "postgres" ? `$${i + 1}` : `@p${i + 1}`) +
-            strings[i + 1];
+            (dialect === "postgres"
+              ? `$${paramIndexState.value++}`
+              : `@p${paramIndexState.value++}`) + strings[i + 1];
         }
       }
       return result.trim();
