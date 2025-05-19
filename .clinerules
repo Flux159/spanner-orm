@@ -1,0 +1,8 @@
+# Cline Rules
+
+- Ensure all new code includes corresponding tests in the "/test" folder.
+- Verify tests pass by running "bun run test".
+- Check linting by running "bun run lint" and resolve all issues.
+- Ensure the project builds successfully using "bun run build".
+
+To use a tagged template literal with "sql", you want to do something like sql<backtick>CURRENT_TIMESTAMP<backtick> - DO NOT USE backslashes because that will be invalid syntax.
