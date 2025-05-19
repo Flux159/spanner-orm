@@ -27,9 +27,9 @@ type InsertData<TTable extends TableConfig<any, any>> =
   | Partial<InferModelType<TTable>>[];
 
 // Type for values in UPDATE's SET clause
-type UpdateData<TTable extends TableConfig<any, any>> = Partial<
-  InferModelType<TTable>
->;
+type UpdateData<TTable extends TableConfig<any, any>> = {
+  [K in keyof InferModelType<TTable>]?: InferModelType<TTable>[K] | SQL;
+};
 
 export class QueryBuilder<TTable extends TableConfig<any, any>> {
   private _operationType?: OperationType;

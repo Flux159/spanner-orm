@@ -5,7 +5,7 @@ import type {
   TableConfig,
   IndexConfig,
   SQL,
-  ForeignKeyConfig,
+  // ForeignKeyConfig, // Not directly used as a type annotation here
   OnDeleteAction,
   CompositePrimaryKeyConfig,
 } from "../types/common.js";
