@@ -1,0 +1,10 @@
+# Cline Rules
+
+This project is a Spanner & Postgres ORM for typescript that allows for consistent data modeling in typescript for both SQL dialects (Google Spanner uses Google SQL). It is inspired by drizzle & will allow for query building, sql generation, migration, and simplifying database operations for Spanner & postgres / pglite. This will allow for one app to be built for both web scale and local / enterprise deployments when bundled with node / bun.
+
+- Ensure all new code includes corresponding tests in the "/test" folder.
+- Verify tests pass by running "bun run test".
+- Check linting by running "bun run lint" and resolve all issues.
+- Ensure the project builds successfully using "bun run build".
+
+To use a tagged template literal with "sql", you want to do something like sql<backtick>CURRENT_TIMESTAMP<backtick> - DO NOT USE backslashes because that will be invalid syntax.
