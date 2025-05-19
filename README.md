@@ -124,7 +124,10 @@ This project will be developed in phases. Here's a high-level overview:
 
   - Note that spanner has a limit of 10 on DDL statements that require validation or backfill. You can batch more without validation, but to be safe, we should just make our migration files be limited to 10 ddl statements at a time when adding indices, etc.
 
-- [ ] **T4.4: Migration CLI (`migrate latest`, `migrate down`, `migrate create`).**
+- [~] **T4.4: Migration CLI (`migrate latest`, `migrate down`, `migrate create`).**
+  - `spanner-orm-cli migrate create <name>`: Implemented. Generates timestamped migration files for both PostgreSQL and Spanner (`YYYYMMDDHHMMSS-name.pg.ts` and `YYYYMMDDHHMMSS-name.spanner.ts`) in the `./spanner-orm-migrations` directory. These files contain `up` and `down` function templates.
+  - `spanner-orm-cli migrate latest --schema <path> --dialect <pg|spanner>`: Basic command structure implemented. Currently simulates applying migrations and logs placeholder steps. Full implementation depends on T4.1, T4.2, T4.3 (partially covered by `create`), and T4.5.
+  - `spanner-orm-cli migrate down --schema <path> --dialect <pg|spanner>`: Basic command structure implemented. Currently simulates reverting the last migration and logs placeholder steps. Full implementation depends on T4.5.
 - [ ] **T4.5: Migration Tracking Table.**
 
 ### Phase 5: Advanced Features & Polish
@@ -260,16 +263,61 @@ Once you have defined your schema (e.g., in `src/schema.ts`), you can generate D
 # The CLI will be available via the 'bin' script in package.json
 
 # Generate PostgreSQL DDL
-npx spanner-orm-cli --schema ./path/to/your/schema.ts --dialect pg
+npx spanner-orm-cli ddl --schema ./path/to/your/schema.ts --dialect pg
 
-# Example with a schema file in dist (after build)
-npx spanner-orm-cli --schema ./dist/schema.js --dialect pg
+# Example with a schema file in dist (after build) and output to file
+npx spanner-orm-cli ddl --schema ./dist/schema.js --dialect pg --output ./generated-pg.sql
 
 # Generate Spanner DDL
-npx spanner-orm-cli --schema ./dist/schema.js --dialect spanner
+npx spanner-orm-cli ddl --schema ./dist/schema.js --dialect spanner
 ```
 
-This will print the generated `CREATE TABLE` statements to standard output.
+This will print the generated `CREATE TABLE` statements to standard output or the specified file.
+
+### Managing Migrations with the CLI
+
+The CLI also provides tools to manage your database schema migrations. Migration files are stored in the `./spanner-orm-migrations` directory by default.
+
+**1. Create a new migration:**
+
+This command generates a pair of timestamped migration files (one for PostgreSQL, one for Spanner) with `up` and `down` function templates.
+
+```bash
+# Example: Create migration files for adding a 'posts' table
+npx spanner-orm-cli migrate create add-posts-table
+
+# This will create files like:
+# ./spanner-orm-migrations/YYYYMMDDHHMMSS-add-posts-table.pg.ts
+# ./spanner-orm-migrations/YYYYMMDDHHMMSS-add-posts-table.spanner.ts
+```
+
+You then fill in the `up` and `down` functions in these files with the necessary SQL statements for each dialect.
+
+**2. Apply pending migrations (Simulated):**
+
+This command (currently in a simulated state) will eventually apply all pending migrations to your database for the specified dialect.
+
+```bash
+# Simulate applying latest migrations for PostgreSQL
+npx spanner-orm-cli migrate latest --schema ./dist/schema.js --dialect pg
+
+# Simulate applying latest migrations for Spanner
+npx spanner-orm-cli migrate latest --schema ./dist/schema.js --dialect spanner
+```
+
+**3. Revert the last applied migration (Simulated):**
+
+This command (currently in a simulated state) will eventually revert the last applied migration for the specified dialect.
+
+```bash
+# Simulate reverting the last PostgreSQL migration
+npx spanner-orm-cli migrate down --schema ./dist/schema.js --dialect pg
+
+# Simulate reverting the last Spanner migration
+npx spanner-orm-cli migrate down --schema ./dist/schema.js --dialect spanner
+```
+
+_(Note: The `migrate latest` and `migrate down` commands are placeholders for now. Full functionality depends on schema snapshotting, diffing, and migration tracking features which are part of ongoing development.)_
 
 ---
 

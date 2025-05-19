@@ -273,3 +273,9 @@ export interface SchemaDiff {
   toVersion: string; // Snapshot version of the 'new' schema
   tableChanges: TableDiffAction[];
 }
+
+// --- Migration Executor Type ---
+export type MigrationExecutor = (
+  executeSql: (sql: string, params?: unknown[]) => Promise<void>,
+  dialect: Dialect
+) => Promise<void>;
