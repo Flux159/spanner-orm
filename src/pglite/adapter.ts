@@ -16,6 +16,18 @@ export interface PgliteAdapter {
 
   // TODO: Add transaction methods: begin, commit, rollback
   // TODO: Add methods for batch operations if supported by the driver.
+
+  transaction: <T>(
+    callback: (tx: PgliteTransaction) => Promise<T>
+  ) => Promise<T>;
+}
+
+/**
+ * Represents the execution context within a Pglite transaction.
+ */
+export interface PgliteTransaction {
+  dialect: "pglite";
+  execute: <TResult = any>(sql: string, params?: any[]) => Promise<TResult[]>;
 }
 
 import { PGlite } from "@electric-sql/pglite";
@@ -54,6 +66,35 @@ export class ConcretePgliteAdapter implements PgliteAdapter {
       // TODO: Implement more specific error handling or logging
       throw error;
     }
+  }
+
+  async transaction<T>(
+    callback: (tx: PgliteTransaction) => Promise<T>
+  ): Promise<T> {
+    await this.ready;
+    try {
+      await this.pglite.query("BEGIN");
+
+      const txExecutor: PgliteTransaction = {
+        dialect: "pglite" as const,
+        execute: async <TResult = any>(
+          sql: string,
+          params?: any[]
+        ): Promise<TResult[]> => {
+          const result = await this.pglite.query<TResult>(sql, params);
+          return result.rows;
+        },
+      };
+
+      const result = await callback(txExecutor);
+      await this.pglite.query("COMMIT");
+      return result;
+    } catch (error) {
+      await this.pglite.query("ROLLBACK");
+      console.error("Pglite transaction rolled back due to error:", error);
+      throw error;
+    }
+    // No explicit client release needed for PGlite like with pg PoolClient
   }
 
   async close(): Promise<void> {
