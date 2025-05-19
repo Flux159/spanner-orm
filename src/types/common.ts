@@ -1,6 +1,6 @@
 // src/types/common.ts
 
-export type Dialect = "postgres" | "spanner";
+export type Dialect = "pg" | "spanner"; // Changed "postgres" to "pg" for consistency
 
 export type OnDeleteAction =
   | "cascade"
@@ -22,7 +22,7 @@ export interface ColumnConfig<T, TName extends string = string> {
   name: TName;
   type: string; // Abstract type, e.g., 'text', 'integer', 'timestamp'
   dialectTypes: {
-    postgres: string; // e.g., 'TEXT', 'INTEGER', 'TIMESTAMP WITH TIME ZONE'
+    pg: string; // e.g., 'TEXT', 'INTEGER', 'TIMESTAMP WITH TIME ZONE'
     spanner: string; // e.g., 'STRING', 'INT64', 'TIMESTAMP'
   };
   notNull?: boolean;
@@ -154,19 +154,19 @@ export function sql(strings: TemplateStringsArray, ...values: unknown[]): SQL {
             // It's a ColumnConfig, interpolate its name as an identifier
             const colName = (value as ColumnConfig<any, any>).name;
             result +=
-              (dialect === "postgres" ? `"${colName}"` : `\`${colName}\``) +
+              (dialect === "pg" ? `"${colName}"` : `\`${colName}\``) + // Changed "postgres" to "pg"
               strings[i + 1];
           } else {
             // It's some other object, treat as a parameter
             result +=
-              (dialect === "postgres"
+              (dialect === "pg" // Changed "postgres" to "pg"
                 ? `$${paramIndexState.value++}`
                 : `@p${paramIndexState.value++}`) + strings[i + 1];
           }
         } else {
           // Primitives are parameters
           result +=
-            (dialect === "postgres"
+            (dialect === "pg" // Changed "postgres" to "pg"
               ? `$${paramIndexState.value++}`
               : `@p${paramIndexState.value++}`) + strings[i + 1];
         }
@@ -181,7 +181,7 @@ export function sql(strings: TemplateStringsArray, ...values: unknown[]): SQL {
 export interface ColumnSnapshot {
   name: string;
   type: string; // Generic type e.g., 'text', 'varchar'
-  dialectTypes: { postgres: string; spanner: string };
+  dialectTypes: { pg: string; spanner: string }; // Changed postgres to pg
   notNull?: boolean;
   default?: unknown | { sql: string } | { function: string }; // Store actual value, SQL, or a marker for function
   primaryKey?: boolean;
@@ -223,7 +223,7 @@ export interface TableSnapshot {
 
 export interface SchemaSnapshot {
   version: string; // Version of the spanner-orm snapshot format
-  dialect: "postgres" | "spanner" | "common"; // Or maybe this isn't needed if snapshot is dialect-agnostic before generation
+  dialect: "pg" | "spanner" | "common"; // Or maybe this isn't needed if snapshot is dialect-agnostic before generation
   tables: Record<string, TableSnapshot>;
   // Potentially other schema-level info in the future (e.g., custom types, extensions)
 }
@@ -272,4 +272,20 @@ export interface SchemaDiff {
   fromVersion: string; // Snapshot version of the 'old' schema
   toVersion: string; // Snapshot version of the 'new' schema
   tableChanges: TableDiffAction[];
+}
+
+// --- Migration Types ---
+
+// Placeholder for DB client types, replace with actual types from 'pg', '@google-cloud/spanner', etc.
+export type PgClient = any;
+export type SpannerClient = any; // This would be Spanner.Database from '@google-cloud/spanner'
+
+export interface MigrationActions {
+  pg: (db: PgClient) => Promise<void>;
+  spanner: (db: SpannerClient) => Promise<void>;
+}
+
+export interface Migration {
+  up: MigrationActions;
+  down: MigrationActions;
 }

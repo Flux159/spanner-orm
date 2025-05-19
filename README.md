@@ -8,7 +8,7 @@ A TypeScript ORM for Google Spanner & PostgreSQL, designed for Node.js and Bun. 
 
 - **Single Object Model for PostgreSQL & Spanner:** Define your database schema once using a Drizzle-inspired syntax that supports both PostgreSQL and Google Spanner. This unified approach simplifies development and ensures consistency across database environments.
 
-- **Dual-Dialect Migration Generation:** Automatically produce migration files with the appropriate DDL for both PostgreSQL and Spanner. Migrations can be executed via the `spanner-orm-cli migrate` command or programmatically within your application.
+- **Dual-Dialect Migration Generation & CLI:** Automatically produce migration files with the appropriate DDL for both PostgreSQL and Spanner. Manage your database schema evolution effortlessly with the `spanner-orm-cli migrate` command (supporting `latest`, `down`, `create`) or run migrations programmatically.
 
 - **Flexible Query Construction:** Build type-safe queries using an intuitive query builder, or fall back to raw SQL (via the `sql` template literal tag) when you need fine-grained control or dialect-specific features.
 
