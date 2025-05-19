@@ -109,7 +109,7 @@ This project will be developed in phases. Here's a high-level overview:
 - [x] **T3.4: Transaction Support API.**
   - Implemented `transaction(callback)` method in PostgreSQL, Spanner, and Pglite adapters.
 
-### Phase 4: Migration Engine
+### Phase 4: Migration Engine - COMPLETED
 
 - [x] **T4.1: Schema Snapshotting/Introspection.**
 - [x] **T4.2: Schema Diffing Logic.**
