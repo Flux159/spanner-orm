@@ -5,20 +5,25 @@ A TypeScript ORM for Google Spanner & PostgreSQL, designed for Node.js and Bun. 
 ## Core Features
 
 - **Unified Object Model:** Define your database schema once using a Drizzle-like syntax and use it for both PostgreSQL and Google Spanner.
-- **Dual Dialect Support:**
-  - Generates Google SQL for Spanner.
-  - Generates standard SQL for PostgreSQL (and Pglite for local development).
-- **Migration Generation:** Produces migration files with DDL for both PostgreSQL and Spanner.
-- **Migration Execution:** Run migrations via a CLI tool or programmatically.
+- **Dual Dialect SQL Generation:**
+  - Generates Google SQL specifically tailored for Spanner.
+  - Generates standard, highly compatible SQL for PostgreSQL (and Pglite for local/embedded use).
+- **Comprehensive Migration Support:**
+  - Produces migration files with DDL for both PostgreSQL and Spanner.
+  - Enables migration execution via a CLI tool or programmatically.
 - **Flexible Querying:**
-  - Powerful query builder for type-safe queries.
-  - Fallback to raw SQL when needed.
-- **Composable Schemas:** Easily create reusable schema components (e.g., for timestamps, base entity fields).
-- **TypeScript First:** Designed for a strong, type-safe developer experience.
+  - Construct type-safe queries with an intuitive query builder.
+  - Seamlessly fall back to raw SQL for complex or dialect-specific operations.
+- **Composable Schemas:** Easily create and reuse schema components (e.g., for common fields like timestamps, base entity structures).
+- **TypeScript First:** Built from the ground up with TypeScript for a robust, type-safe, and enjoyable developer experience.
 
 ## Why spanner-orm?
 
-Developing applications that need the global scale of Google Spanner but also want the flexibility of PostgreSQL for other deployments (or local development with Pglite) currently lacks a dedicated ORM solution in the Node.js/Bun ecosystem. `spanner-orm` aims to fill this gap by providing a seamless and productive development experience.
+`spanner-orm` addresses a critical need for developers building applications that require the immense scalability of Google Spanner while also desiring the versatility of PostgreSQL for other deployment scenarios (e.g., non-Spanner enterprise deployments, local development with Pglite, or applications where data resides locally). Currently, the Node.js/Bun ecosystem lacks a dedicated ORM that elegantly bridges these two powerful database systems with a single, consistent object model. `spanner-orm` fills this gap by:
+
+- Allowing a single codebase for data modeling across different database backends.
+- Simplifying the transition between local/testing environments (using Pglite/Postgres) and production environments (using Spanner or Postgres).
+- Providing a productive and familiar Drizzle-inspired API.
 
 ## Architecture Overview
 
@@ -31,8 +36,8 @@ graph TD
     B --> E[Query Builder AST];
     E --> D1;
     E --> D2;
-    D1 --> F1[PostgreSQL Adapter (pg, pglite)];
-    D2 --> F2[Spanner Adapter (@google-cloud/spanner)];
+    D1 --> F1[PostgreSQL Adapter pg, pglite];
+    D2 --> F2[Spanner Adapter @google-cloud/spanner];
     F1 --> G1[PostgreSQL/Pglite Database];
     F2 --> G2[Google Spanner Database];
 
@@ -67,7 +72,7 @@ This project will be developed in phases. Here's a high-level overview:
   - Generate `CREATE TABLE` SQL for PostgreSQL from schema definitions.
 - [x] **T1.4: Spanner DDL Generator (Initial):**
   - Generate `CREATE TABLE` SQL for Google Spanner, handling type and constraint differences.
-- [ ] **T1.5: Basic CLI for DDL Output:**
+- [x] **T1.5: Basic CLI for DDL Output:**
   - Command to output generated DDL for a specified dialect.
 
 ### Phase 2: Query Building & Execution (Read Operations)
@@ -130,11 +135,63 @@ This project will be developed in phases. Here's a high-level overview:
 
 ## Getting Started
 
-_(To be added once initial functionality is available)_
+1.  **Installation:**
+
+    ```bash
+    # (Once published to npm)
+    # npm install spanner-orm
+    # bun install spanner-orm
+    # yarn add spanner-orm
+
+    # For now, clone and build locally:
+    git clone https://github.com/your-repo/spanner-orm.git # Replace with actual repo
+    cd spanner-orm
+    bun install
+    bun run build
+    ```
+
+2.  **Define your schema:** Create a `schema.ts` (or similar) file:
+
+    ```typescript
+    // src/schema.ts
+    import { table, text, integer, pg } from "spanner-orm"; // Adjust import path
+
+    export const users = table("users", {
+      id: integer("id").primaryKey(),
+      name: text("name").notNull(),
+      email: text("email").unique(),
+    });
+
+    export const posts = table("posts", {
+      id: integer("id").primaryKey(),
+      title: text("title").notNull(),
+      userId: integer("user_id").references(() => users.id), // Example, references not fully implemented yet
+    });
+    ```
+
+    _(Note: `references()` and full foreign key support is part of a later phase)_
 
 ## Usage Examples
 
-_(To be added once initial functionality is available)_
+### Generating DDL with the CLI
+
+Once you have defined your schema (e.g., in `src/schema.ts`), you can generate DDL for PostgreSQL or Spanner:
+
+```bash
+# Ensure the project is built (bun run build)
+# The CLI will be available via the 'bin' script in package.json
+
+# Generate PostgreSQL DDL
+npx spanner-orm-cli --schema ./path/to/your/schema.ts --dialect pg
+
+# Example with a schema file in dist (after build)
+npx spanner-orm-cli --schema ./dist/schema.js --dialect pg
+
+# Generate Spanner DDL
+npx spanner-orm-cli --schema ./dist/schema.js --dialect spanner
+```
+
+This will print the generated `CREATE TABLE` statements to standard output.
 
 ---
 
