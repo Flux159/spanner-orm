@@ -2,6 +2,22 @@
 
 export type Dialect = "postgres" | "spanner";
 
+export type OnDeleteAction =
+  | "cascade"
+  | "restrict"
+  | "no action"
+  | "set null"
+  | "set default";
+
+export interface ForeignKeyConfig {
+  // Using a function to avoid circular dependencies and ensure table is defined
+  referencesFn: () => ColumnConfig<any, any>; // Function that returns the target column config
+  onDelete?: OnDeleteAction;
+  // Internally resolved fields after all tables are processed by DDL generator:
+  // _referencedTableName?: string;
+  // _referencedColumnName?: string;
+}
+
 export interface ColumnConfig<T, TName extends string = string> {
   name: TName;
   type: string; // Abstract type, e.g., 'text', 'integer', 'timestamp'
@@ -11,8 +27,10 @@ export interface ColumnConfig<T, TName extends string = string> {
   };
   notNull?: boolean;
   default?: T | (() => T) | { sql: string }; // SQL string for default like sql`CURRENT_TIMESTAMP`
-  primaryKey?: boolean;
+  primaryKey?: boolean; // For single column primary key
   unique?: boolean; // For unique constraints on a single column
+  references?: ForeignKeyConfig;
+  _tableName?: string; // Internal: Name of the table this column belongs to
   // Placeholder for more advanced properties like $onUpdate, $type from example
 }
 
@@ -21,6 +39,11 @@ export interface IndexConfig {
   columns: string[];
   unique?: boolean;
   // Spanner specific: nullFiltered, interleaveIn
+}
+
+export interface CompositePrimaryKeyConfig {
+  columns: string[];
+  name?: string; // Optional name for the constraint
 }
 
 export type TableColumns = Record<string, ColumnConfig<unknown, string>>;
@@ -32,8 +55,12 @@ export interface TableConfig<
   name: TName;
   columns: TColumns;
   indexes?: IndexConfig[];
+  compositePrimaryKey?: CompositePrimaryKeyConfig;
+  interleave?: {
+    parentTable: string; // Name of the parent table
+    onDelete: "cascade" | "no action";
+  };
   _isTable?: boolean; // Added for CLI detection
-  // Spanner specific: interleave?: { parent: string; onDelete: 'cascade' | 'no action' }
 }
 
 // Utility type to infer the TS type from a ColumnConfig

@@ -3,9 +3,11 @@
 import type {
   ColumnConfig,
   TableConfig,
-  // TableColumns, // Unused
   IndexConfig,
   SQL,
+  // ForeignKeyConfig, // Not directly used as a type annotation here
+  OnDeleteAction,
+  CompositePrimaryKeyConfig,
 } from "../types/common.js";
 import { sql } from "../types/common.js"; // Import the sql tagged template literal
 
@@ -57,6 +59,17 @@ abstract class BaseColumnBuilder<
     // This is for a single-column unique constraint.
     // For multi-column unique constraints, use uniqueIndex in table definition.
     this.config.unique = true;
+    return this;
+  }
+
+  references(
+    referencesFn: () => ColumnConfig<any, any>,
+    options?: { onDelete?: OnDeleteAction }
+  ): this {
+    this.config.references = {
+      referencesFn,
+      onDelete: options?.onDelete,
+    };
     return this;
   }
 
@@ -222,10 +235,20 @@ export function table<
 >(
   name: TTableName,
   columns: TColumns,
-  extra?: (table: TableBuilderColumns<TColumns>) => { indexes?: IndexConfig[] } // For defining indexes, etc.
+  extra?: (table: TableBuilderColumns<TColumns>) => {
+    indexes?: IndexConfig[];
+    primaryKey?: CompositePrimaryKeyConfig;
+    interleave?: TableConfig<any, any>["interleave"]; // Spanner specific
+  }
 ): TableConfig<TTableName, TableBuilderColumns<TColumns>> {
+  const builtColumnsArray = Object.entries(columns).map(([key, builder]) => {
+    const colConfig = builder.build();
+    colConfig._tableName = name; // Assign table name to column config
+    return [key, colConfig];
+  });
+
   const builtColumns = Object.fromEntries(
-    Object.entries(columns).map(([key, builder]) => [key, builder.build()])
+    builtColumnsArray
   ) as TableBuilderColumns<TColumns>;
 
   const tableConfig: TableConfig<TTableName, TableBuilderColumns<TColumns>> = {
@@ -239,7 +262,24 @@ export function table<
     if (extraConfig.indexes) {
       tableConfig.indexes = extraConfig.indexes;
     }
-    // Handle other extra configurations like Spanner's interleave here
+    if (extraConfig.primaryKey) {
+      // Ensure no individual column is also marked as primaryKey if a composite one is defined
+      const individualPks = Object.values(builtColumns).filter(
+        (c) => c.primaryKey
+      );
+      if (individualPks.length > 0) {
+        throw new Error(
+          `Table "${name}" cannot have both a composite primary key and individual column primary keys (${individualPks
+            .map((c) => c.name)
+            .join(", ")}).`
+        );
+      }
+      tableConfig.compositePrimaryKey = extraConfig.primaryKey;
+    }
+    if (extraConfig.interleave) {
+      tableConfig.interleave = extraConfig.interleave;
+    }
+    // Handle other extra configurations here
   }
 
   return tableConfig;

@@ -1,5 +1,11 @@
 // import { Table } from "./schema.js"; // This was incorrect
-import type { TableConfig, ColumnConfig, SQL } from "../types/common.js";
+import type {
+  TableConfig,
+  ColumnConfig,
+  SQL,
+  InferModelType,
+  Dialect,
+} from "../types/common.js";
 // import { sql } from "../types/common.js"; // Import for potential use in conditions
 
 // Define a type for the selection.
@@ -13,24 +19,60 @@ export type SelectFields = Record<
 // This will be expanded for complex conditions (eq, gt, lt, and, or, etc.)
 export type WhereCondition = SQL | string;
 
+type OperationType = "select" | "insert" | "update" | "delete";
+
+// Type for values in INSERT
+type InsertData<TTable extends TableConfig<any, any>> =
+  | Partial<InferModelType<TTable>>
+  | Partial<InferModelType<TTable>>[];
+
+// Type for values in UPDATE's SET clause
+type UpdateData<TTable extends TableConfig<any, any>> = {
+  [K in keyof InferModelType<TTable>]?: InferModelType<TTable>[K] | SQL;
+};
+
 export class QueryBuilder<TTable extends TableConfig<any, any>> {
+  private _operationType?: OperationType;
+  private _targetTable?: TTable; // Used for all operations
+
+  // SELECT specific
   private _selectedFields?: SelectFields;
-  private _sourceTable?: TTable;
-  private _conditions: WhereCondition[] = [];
   private _limit?: number;
   private _offset?: number;
   // TODO: Add _orderBy
 
+  // INSERT specific
+  private _insertValues?: InsertData<TTable>;
+
+  // UPDATE specific
+  private _updateSetValues?: UpdateData<TTable>;
+
+  // Common for SELECT, UPDATE, DELETE
+  private _conditions: WhereCondition[] = [];
+
   constructor() {}
 
+  private setOperation(type: OperationType, table: TTable) {
+    if (this._operationType) {
+      throw new Error(
+        `Cannot change operation type. Current operation: ${this._operationType}, trying to set: ${type}.`
+      );
+    }
+    this._operationType = type;
+    this._targetTable = table;
+  }
+
+  // --- SELECT Operations ---
   select(fields: SelectFields | "*" = "*"): this {
+    if (this._operationType && this._operationType !== "select") {
+      throw new Error(
+        `Cannot call .select() for an '${this._operationType}' operation.`
+      );
+    }
+    this._operationType = "select"; // Can be called first
+
     if (fields === "*") {
-      // We'll handle actual column resolution for '*' in toSQL or a build step,
-      // as it requires knowing the table columns.
-      // For now, store it as a special marker or a specific structure.
-      // Let's assume for now '*' means selecting all columns from the _sourceTable.
-      // This will be resolved during SQL generation.
-      this._selectedFields = { "*": "*" }; // Special marker for SELECT *
+      this._selectedFields = { "*": "*" };
     } else {
       this._selectedFields = fields;
     }
@@ -38,66 +80,176 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
   }
 
   from(table: TTable): this {
-    this._sourceTable = table;
-    return this;
-  }
-
-  where(condition: WhereCondition): this {
-    // TODO: Implement more sophisticated condition handling, e.g., and, or, operators
-    // For now, conditions are expected to be SQL objects or raw strings.
-    this._conditions.push(condition);
+    if (this._operationType && this._operationType !== "select") {
+      throw new Error(
+        `Cannot call .from() for an '${this._operationType}' operation.`
+      );
+    }
+    if (!this._operationType) this._operationType = "select"; // If select() wasn't called first
+    this._targetTable = table;
     return this;
   }
 
   limit(count: number): this {
+    if (this._operationType !== "select") {
+      throw new Error(`.limit() is only applicable to SELECT queries.`);
+    }
     this._limit = count;
     return this;
   }
 
   offset(count: number): this {
+    if (this._operationType !== "select") {
+      throw new Error(`.offset() is only applicable to SELECT queries.`);
+    }
     this._offset = count;
+    return this;
+  }
+
+  // --- INSERT Operations ---
+  insert(table: TTable): this {
+    this.setOperation("insert", table);
+    return this;
+  }
+
+  values(data: InsertData<TTable>): this {
+    if (this._operationType !== "insert") {
+      throw new Error(
+        `.values() can only be called after .insert() and for an INSERT operation.`
+      );
+    }
+    if (!this._targetTable) {
+      throw new Error(
+        "Target table not set for INSERT. Call .insert(table) first."
+      );
+    }
+    this._insertValues = data;
+    return this;
+  }
+
+  // --- UPDATE Operations ---
+  update(table: TTable): this {
+    this.setOperation("update", table);
+    return this;
+  }
+
+  set(data: UpdateData<TTable>): this {
+    if (this._operationType !== "update") {
+      throw new Error(
+        `.set() can only be called after .update() and for an UPDATE operation.`
+      );
+    }
+    if (!this._targetTable) {
+      throw new Error(
+        "Target table not set for UPDATE. Call .update(table) first."
+      );
+    }
+    this._updateSetValues = data;
+    return this;
+  }
+
+  // --- DELETE Operations ---
+  deleteFrom(table: TTable): this {
+    this.setOperation("delete", table);
+    return this;
+  }
+
+  // --- Common WHERE clause for SELECT, UPDATE, DELETE ---
+  where(condition: WhereCondition): this {
+    if (
+      !this._operationType ||
+      !["select", "update", "delete"].includes(this._operationType)
+    ) {
+      throw new Error(
+        `.where() is not applicable for '${this._operationType}' operations or operation type not set.`
+      );
+    }
+    this._conditions.push(condition);
     return this;
   }
 
   // TODO: orderBy(field: ColumnConfig<any,any> | SQL, direction: 'ASC' | 'DESC' = 'ASC')
 
-  toSQL(dialect: "pg" | "spanner"): string {
-    if (!this._sourceTable) {
+  toSQL(dialect: Dialect): string {
+    if (!this._operationType) {
       throw new Error(
-        "Source table not specified. Use .from() to set the table."
+        "Operation type not set. Call .select(), .insert(), .update(), or .deleteFrom() first."
       );
     }
-
-    if (!this._selectedFields) {
-      // Default to SELECT * if .select() was not called or called with no args.
-      // This requires knowing table columns. For now, let's assume this means '*'
-      this._selectedFields = { "*": "*" };
+    if (
+      !this._targetTable &&
+      this._operationType !== "select" &&
+      !this._selectedFields
+    ) {
+      // select can infer table from from()
+      throw new Error("Target table not specified for the operation.");
+    }
+    // For select, from() sets the target table.
+    if (
+      this._operationType === "select" &&
+      !this._targetTable &&
+      !this._selectedFields?.["*"]
+    ) {
+      if (!this._targetTable)
+        throw new Error(
+          "Source table not specified for SELECT. Use .from() to set the table."
+        );
     }
 
-    if (dialect === "pg") {
+    if (dialect === "postgres") {
       return this.toPgSQL();
     } else if (dialect === "spanner") {
       return this.toSpannerSQL();
     } else {
-      throw new Error(`Unsupported dialect: ${dialect}`); // Should not happen with TS
+      throw new Error(`Unsupported dialect: ${dialect}`);
     }
   }
 
   private toPgSQL(): string {
-    if (!this._sourceTable) throw new Error("FROM clause is missing."); // Should be caught by toSQL
+    const paramIndexState = { value: 1 };
+    switch (this._operationType) {
+      case "select":
+        return this.buildSelectPgSQL(paramIndexState);
+      case "insert":
+        return this.buildInsertPgSQL(paramIndexState);
+      case "update":
+        return this.buildUpdatePgSQL(paramIndexState);
+      case "delete":
+        return this.buildDeletePgSQL(paramIndexState);
+      default:
+        throw new Error(`Unsupported operation type: ${this._operationType}`);
+    }
+  }
+
+  private toSpannerSQL(): string {
+    const paramIndexState = { value: 1 };
+    switch (this._operationType) {
+      case "select":
+        return this.buildSelectSpannerSQL(paramIndexState);
+      case "insert":
+        return this.buildInsertSpannerSQL(paramIndexState);
+      case "update":
+        return this.buildUpdateSpannerSQL(paramIndexState);
+      case "delete":
+        return this.buildDeleteSpannerSQL(paramIndexState);
+      default:
+        throw new Error(`Unsupported operation type: ${this._operationType}`);
+    }
+  }
+
+  private buildSelectPgSQL(paramIndexState: { value: number }): string {
+    if (!this._targetTable)
+      throw new Error("FROM clause is missing for SELECT.");
 
     let selectClause = "";
-    const paramIndexState = { value: 1 }; // Initialize parameter index counter
-
     if (this._selectedFields && this._selectedFields["*"] === "*") {
-      // Handle SELECT *
       selectClause = `SELECT *`;
     } else if (this._selectedFields) {
       const selectedParts = Object.entries(this._selectedFields).map(
         ([alias, field]) => {
           let fieldName: string;
           if (typeof field === "string") {
-            fieldName = field;
+            fieldName = field; // e.g. count(*)
           } else if ("_isSQL" in field) {
             fieldName = (field as SQL).toSqlString("postgres", paramIndexState);
           } else if ("name" in field) {
@@ -105,20 +257,16 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           } else {
             throw new Error(`Invalid field type in select: ${alias}`);
           }
-          // Use alias if it's different from the derived field name, or if it's a complex expression
-          // For simple column selections, alias might be the same as column name.
-          // Drizzle often uses the key as the alias if it's a computed field.
-          if (alias !== fieldName && !fieldName.includes(" AS ")) {
-            // Basic check to avoid double aliasing
-            // Check if fieldName is already an alias from SQL object
-            const sqlObject = field as SQL;
-            if (
+          const sqlObject = field as SQL;
+          if (
+            alias !== fieldName &&
+            !(
               sqlObject &&
               sqlObject._isSQL &&
               sqlObject.toSqlString("postgres").toLowerCase().includes(" as ")
-            ) {
-              return fieldName; // SQL object already handles its aliasing
-            }
+            ) &&
+            !fieldName.toLowerCase().includes(" as ")
+          ) {
             return `${fieldName} AS "${alias}"`;
           }
           return fieldName;
@@ -126,48 +274,25 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       );
       selectClause = `SELECT ${selectedParts.join(", ")}`;
     } else {
-      // This case should ideally be handled by defaulting _selectedFields to '*'
-      throw new Error("SELECT clause is missing or invalid.");
+      selectClause = `SELECT *`; // Default to SELECT * if no fields specified
     }
 
-    const fromClause = `FROM "${this._sourceTable.name}"`;
-
-    let whereClause = "";
-    if (this._conditions.length > 0) {
-      const conditionsStr = this._conditions
-        .map((cond) => {
-          if (typeof cond === "string") {
-            return cond;
-          } else if ("_isSQL" in cond) {
-            return (cond as SQL).toSqlString("postgres", paramIndexState);
-          }
-          throw new Error("Invalid condition type.");
-        })
-        .join(" AND ");
-      whereClause = `WHERE ${conditionsStr}`;
-    }
-
-    let limitClause = "";
-    if (this._limit !== undefined) {
-      limitClause = `LIMIT ${this._limit}`;
-    }
-
-    let offsetClause = "";
-    if (this._offset !== undefined) {
-      offsetClause = `OFFSET ${this._offset}`;
-    }
+    const fromClause = `FROM "${this._targetTable.name}"`;
+    const whereClause = this.buildWhereClause("postgres", paramIndexState);
+    const limitClause = this._limit !== undefined ? `LIMIT ${this._limit}` : "";
+    const offsetClause =
+      this._offset !== undefined ? `OFFSET ${this._offset}` : "";
 
     return [selectClause, fromClause, whereClause, limitClause, offsetClause]
       .filter(Boolean)
       .join(" ");
   }
 
-  private toSpannerSQL(): string {
-    if (!this._sourceTable) throw new Error("FROM clause is missing.");
+  private buildSelectSpannerSQL(paramIndexState: { value: number }): string {
+    if (!this._targetTable)
+      throw new Error("FROM clause is missing for SELECT.");
 
     let selectClause = "";
-    const paramIndexState = { value: 1 }; // Initialize parameter index counter
-
     if (this._selectedFields && this._selectedFields["*"] === "*") {
       selectClause = `SELECT *`;
     } else if (this._selectedFields) {
@@ -183,7 +308,6 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           } else {
             throw new Error(`Invalid field type in select: ${alias}`);
           }
-
           const sqlObject = field as SQL;
           if (
             alias !== fieldName &&
@@ -192,7 +316,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
               sqlObject._isSQL &&
               sqlObject.toSqlString("spanner").toLowerCase().includes(" as ")
             ) &&
-            !fieldName.includes(" AS ") // Basic check
+            !fieldName.toLowerCase().includes(" as ")
           ) {
             return `${fieldName} AS \`${alias}\``;
           }
@@ -201,52 +325,143 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       );
       selectClause = `SELECT ${selectedParts.join(", ")}`;
     } else {
-      throw new Error("SELECT clause is missing or invalid.");
+      selectClause = `SELECT *`; // Default to SELECT *
     }
 
-    const fromClause = `FROM \`${this._sourceTable.name}\``;
-
-    let whereClause = "";
-    if (this._conditions.length > 0) {
-      const conditionsStr = this._conditions
-        .map((cond) => {
-          if (typeof cond === "string") {
-            return cond;
-          } else if ("_isSQL" in cond) {
-            return (cond as SQL).toSqlString("spanner", paramIndexState);
-          }
-          throw new Error("Invalid condition type.");
-        })
-        .join(" AND ");
-      whereClause = `WHERE ${conditionsStr}`;
-    }
-
-    let limitClause = "";
-    if (this._limit !== undefined) {
-      limitClause = `LIMIT ${this._limit}`;
-    }
-
-    let offsetClause = "";
-    if (this._offset !== undefined) {
-      // Spanner's OFFSET requires LIMIT.
-      // "OFFSET requires a LIMIT clause on Spanner" - this is a common Spanner constraint.
-      // However, some contexts might allow OFFSET without LIMIT (e.g. within subqueries or specific APIs)
-      // For direct SQL, it's safer to assume LIMIT is needed if OFFSET is present.
-      // For now, we'll generate it, but this might need adjustment based on how it's used.
-      // Drizzle's Spanner dialect also generates OFFSET if specified.
-      offsetClause = `OFFSET ${this._offset}`;
-    }
+    const fromClause = `FROM \`${this._targetTable.name}\``;
+    const whereClause = this.buildWhereClause("spanner", paramIndexState);
+    const limitClause = this._limit !== undefined ? `LIMIT ${this._limit}` : "";
+    const offsetClause =
+      this._offset !== undefined ? `OFFSET ${this._offset}` : "";
 
     return [selectClause, fromClause, whereClause, limitClause, offsetClause]
       .filter(Boolean)
       .join(" ");
   }
 
+  private buildInsertPgSQL(paramIndexState: { value: number }): string {
+    if (!this._targetTable) throw new Error("Target table not set for INSERT.");
+    if (!this._insertValues) throw new Error("Values not set for INSERT.");
+
+    const valuesArray = Array.isArray(this._insertValues)
+      ? this._insertValues
+      : [this._insertValues];
+    if (valuesArray.length === 0)
+      throw new Error("No values provided for INSERT.");
+
+    const firstRecord = valuesArray[0] as Record<string, any>;
+    const columns = Object.keys(firstRecord)
+      .map((col) => `"${col}"`)
+      .join(", ");
+    const valuePlaceholders = valuesArray
+      .map((record) => {
+        const recordValues = Object.values(record as Record<string, any>);
+        return `(${recordValues
+          .map(() => `$${paramIndexState.value++}`)
+          .join(", ")})`;
+      })
+      .join(", ");
+
+    return `INSERT INTO "${this._targetTable.name}" (${columns}) VALUES ${valuePlaceholders}`;
+  }
+
+  private buildInsertSpannerSQL(paramIndexState: { value: number }): string {
+    if (!this._targetTable) throw new Error("Target table not set for INSERT.");
+    if (!this._insertValues) throw new Error("Values not set for INSERT.");
+
+    const valuesArray = Array.isArray(this._insertValues)
+      ? this._insertValues
+      : [this._insertValues];
+    if (valuesArray.length === 0)
+      throw new Error("No values provided for INSERT.");
+
+    const firstRecord = valuesArray[0] as Record<string, any>;
+    const columns = Object.keys(firstRecord)
+      .map((col) => `\`${col}\``)
+      .join(", ");
+    const valuePlaceholders = valuesArray
+      .map((record) => {
+        const recordValues = Object.values(record as Record<string, any>);
+        return `(${recordValues
+          .map(() => `@p${paramIndexState.value++}`)
+          .join(", ")})`;
+      })
+      .join(", ");
+    return `INSERT INTO \`${this._targetTable.name}\` (${columns}) VALUES ${valuePlaceholders}`;
+  }
+
+  private buildUpdatePgSQL(paramIndexState: { value: number }): string {
+    if (!this._targetTable) throw new Error("Target table not set for UPDATE.");
+    if (!this._updateSetValues)
+      throw new Error("SET values not provided for UPDATE.");
+
+    const setParts = Object.entries(this._updateSetValues)
+      .map(([column, value]) => {
+        if (typeof value === "object" && value !== null && "_isSQL" in value) {
+          return `"${column}" = ${(value as SQL).toSqlString(
+            "postgres",
+            paramIndexState
+          )}`;
+        }
+        return `"${column}" = $${paramIndexState.value++}`;
+      })
+      .join(", ");
+    const whereClause = this.buildWhereClause("postgres", paramIndexState);
+    return `UPDATE "${this._targetTable.name}" SET ${setParts} ${whereClause}`.trim();
+  }
+
+  private buildUpdateSpannerSQL(paramIndexState: { value: number }): string {
+    if (!this._targetTable) throw new Error("Target table not set for UPDATE.");
+    if (!this._updateSetValues)
+      throw new Error("SET values not provided for UPDATE.");
+
+    const setParts = Object.entries(this._updateSetValues)
+      .map(([column, value]) => {
+        if (typeof value === "object" && value !== null && "_isSQL" in value) {
+          return `\`${column}\` = ${(value as SQL).toSqlString(
+            "spanner",
+            paramIndexState
+          )}`;
+        }
+        return `\`${column}\` = @p${paramIndexState.value++}`;
+      })
+      .join(", ");
+    const whereClause = this.buildWhereClause("spanner", paramIndexState);
+    return `UPDATE \`${this._targetTable.name}\` SET ${setParts} ${whereClause}`.trim();
+  }
+
+  private buildDeletePgSQL(paramIndexState: { value: number }): string {
+    if (!this._targetTable) throw new Error("Target table not set for DELETE.");
+    const whereClause = this.buildWhereClause("postgres", paramIndexState);
+    return `DELETE FROM "${this._targetTable.name}" ${whereClause}`.trim();
+  }
+
+  private buildDeleteSpannerSQL(paramIndexState: { value: number }): string {
+    if (!this._targetTable) throw new Error("Target table not set for DELETE.");
+    const whereClause = this.buildWhereClause("spanner", paramIndexState);
+    return `DELETE FROM \`${this._targetTable.name}\` ${whereClause}`.trim();
+  }
+
+  private buildWhereClause(
+    dialect: Dialect,
+    paramIndexState: { value: number }
+  ): string {
+    if (this._conditions.length === 0) return "";
+    const conditionsStr = this._conditions
+      .map((cond) => {
+        if (typeof cond === "string") return cond;
+        if ("_isSQL" in cond)
+          return (cond as SQL).toSqlString(dialect, paramIndexState);
+        throw new Error("Invalid condition type.");
+      })
+      .join(" AND ");
+    return `WHERE ${conditionsStr}`;
+  }
+
   getBoundParameters(): unknown[] {
     const allParams: unknown[] = [];
 
-    // Collect params from selected fields
-    if (this._selectedFields) {
+    if (this._operationType === "select" && this._selectedFields) {
       for (const field of Object.values(this._selectedFields)) {
         if (typeof field === "object" && field !== null && "_isSQL" in field) {
           allParams.push(...(field as SQL).getValues());
@@ -254,7 +469,36 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       }
     }
 
-    // Collect params from conditions
+    if (this._operationType === "insert" && this._insertValues) {
+      const valuesArray = Array.isArray(this._insertValues)
+        ? this._insertValues
+        : [this._insertValues];
+      for (const record of valuesArray) {
+        allParams.push(
+          ...Object.values(record as Record<string, any>).filter(
+            (val) =>
+              !(typeof val === "object" && val !== null && "_isSQL" in val)
+          )
+        );
+        Object.values(record as Record<string, any>).forEach((val) => {
+          if (typeof val === "object" && val !== null && "_isSQL" in val) {
+            allParams.push(...(val as SQL).getValues());
+          }
+        });
+      }
+    }
+
+    if (this._operationType === "update" && this._updateSetValues) {
+      for (const value of Object.values(this._updateSetValues)) {
+        if (typeof value === "object" && value !== null && "_isSQL" in value) {
+          allParams.push(...(value as SQL).getValues());
+        } else {
+          allParams.push(value);
+        }
+      }
+    }
+
+    // Common for SELECT, UPDATE, DELETE
     if (this._conditions) {
       for (const condition of this._conditions) {
         if (
@@ -264,7 +508,6 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
         ) {
           allParams.push(...(condition as SQL).getValues());
         }
-        // Raw string conditions don't have bound parameters here
       }
     }
     return allParams;

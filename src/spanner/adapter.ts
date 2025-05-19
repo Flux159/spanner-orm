@@ -20,9 +20,34 @@ export interface SpannerAdapter {
   // TODO: Add transaction methods (Spanner has specific transaction types: read-only, read-write)
   // TODO: Add methods for batch DML, partitioned DML, etc.
   // TODO: Handle Spanner-specific types like SpannerDate, SpannerStruct, etc.
+
+  transaction: <T>(
+    callback: (tx: SpannerTransaction) => Promise<T>
+  ) => Promise<T>;
 }
 
-import { Spanner, Database } from "@google-cloud/spanner";
+/**
+ * Represents the execution context within a Spanner transaction.
+ * Note: Spanner transactions can be read-only or read-write.
+ * This basic interface assumes read-write for DML.
+ */
+export interface SpannerTransaction {
+  dialect: "spanner";
+  /**
+   * Executes a SQL query. For DML (INSERT, UPDATE, DELETE), use runUpdate.
+   */
+  execute: <TResult = any>(
+    sql: string,
+    params?: Record<string, any>
+  ) => Promise<TResult[]>;
+  /**
+   * Executes a DML statement (INSERT, UPDATE, DELETE).
+   * Returns the number of affected rows.
+   */
+  runUpdate: (sql: string, params?: Record<string, any>) => Promise<number>;
+}
+
+import { Spanner, Database, Transaction } from "@google-cloud/spanner";
 // import { protos } from "@google-cloud/spanner"; // protos was unused
 // type IRunQueryOptions = protos.google.spanner.v1.ExecuteSqlRequest.IQueryOptions; // For more advanced options
 // type IRequestOptions = protos.google.spanner.v1.ExecuteSqlRequest.IRequestOptions; // For more advanced options
@@ -64,6 +89,42 @@ export class ConcreteSpannerAdapter implements SpannerAdapter {
     } catch (error) {
       console.error("Error executing query with Spanner adapter:", error);
       // TODO: Implement more specific error handling or logging
+      throw error;
+    }
+  }
+
+  async transaction<T>(
+    callback: (tx: SpannerTransaction) => Promise<T>
+  ): Promise<T> {
+    try {
+      const result = await this.db.runTransactionAsync(
+        async (transaction: Transaction) => {
+          const txExecutor: SpannerTransaction = {
+            dialect: "spanner" as const,
+            execute: async <TResult = any>(
+              sql: string,
+              params?: Record<string, any>
+            ): Promise<TResult[]> => {
+              const [rows] = await transaction.run({ sql, params, json: true });
+              return rows as TResult[];
+            },
+            runUpdate: async (
+              sql: string,
+              params?: Record<string, any>
+            ): Promise<number> => {
+              const [rowCount] = await transaction.runUpdate({ sql, params });
+              return rowCount;
+            },
+          };
+          const cbResult = await callback(txExecutor);
+          // Commit is handled by runTransactionAsync if callback resolves
+          return cbResult;
+        }
+      );
+      return result;
+    } catch (error) {
+      console.error("Spanner transaction failed:", error);
+      // Rollback is handled by runTransactionAsync if callback throws
       throw error;
     }
   }

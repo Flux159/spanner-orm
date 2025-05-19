@@ -165,4 +165,108 @@ describe("Schema Builder", () => {
       expect(createdAtDefault()).toBeInstanceOf(Date);
     }
   });
+
+  it("should define foreign keys with onDelete actions", () => {
+    const authors = table("authors", {
+      id: integer("id").primaryKey(),
+      name: text("name").notNull(),
+    });
+
+    const books = table("books", {
+      id: integer("id").primaryKey(),
+      title: text("title").notNull(),
+      authorId: integer("author_id").references(() => authors.columns.id, {
+        onDelete: "cascade",
+      }),
+      coAuthorId: integer("co_author_id").references(() => authors.columns.id, {
+        onDelete: "set null",
+      }),
+    });
+
+    expect(books.columns.authorId.references).toBeDefined();
+    expect(books.columns.authorId.references?.onDelete).toBe("cascade");
+    // Check that the referencesFn points to the correct column config
+    // This is a bit tricky to test directly without invoking it in a context where _tableName is set
+    // But we can check if the function exists
+    expect(typeof books.columns.authorId.references?.referencesFn).toBe(
+      "function"
+    );
+
+    // To properly test referencesFn, we'd need to simulate table building or inspect DDL generation
+    // For now, we assume if the function is set and onDelete is correct, it's wired up.
+    // A more robust test would be in DDL generation tests.
+    const referencedAuthorColumn =
+      books.columns.authorId.references?.referencesFn();
+    expect(referencedAuthorColumn?.name).toBe("id");
+    // referencedAuthorColumn._tableName would be 'authors' after DDL processing
+
+    expect(books.columns.coAuthorId.references).toBeDefined();
+    expect(books.columns.coAuthorId.references?.onDelete).toBe("set null");
+  });
+
+  it("should define composite primary keys", () => {
+    const orderItems = table(
+      "order_items",
+      {
+        orderId: integer("order_id"),
+        productId: integer("product_id"),
+        quantity: integer("quantity").notNull(),
+      },
+      () => ({
+        primaryKey: { columns: ["orderId", "productId"] },
+      })
+    );
+
+    expect(orderItems.compositePrimaryKey).toBeDefined();
+    expect(orderItems.compositePrimaryKey?.columns).toEqual([
+      "orderId",
+      "productId",
+    ]);
+    // Ensure individual columns are not marked as PK
+    expect(orderItems.columns.orderId.primaryKey).toBeUndefined();
+    expect(orderItems.columns.productId.primaryKey).toBeUndefined();
+  });
+
+  it("should throw an error if both composite and individual primary keys are defined", () => {
+    expect(() =>
+      table(
+        "conflicting_pk",
+        {
+          id: integer("id").primaryKey(), // Individual PK
+          keyPart: text("key_part"),
+        },
+        () => ({
+          primaryKey: { columns: ["id", "keyPart"] }, // Composite PK
+        })
+      )
+    ).toThrow(
+      'Table "conflicting_pk" cannot have both a composite primary key and individual column primary keys (id).'
+    );
+  });
+
+  it("should define Spanner INTERLEAVE IN PARENT", () => {
+    const parentTable = table("parent_table", {
+      parentId: integer("parent_id").primaryKey(),
+    });
+
+    const childTable = table(
+      "child_table",
+      {
+        parentId: integer("parent_id"), // Part of child's PK, references parent
+        childId: integer("child_id"),
+        data: text("data"),
+      },
+      (_t) => ({
+        primaryKey: { columns: ["parentId", "childId"] },
+        interleave: {
+          parentTable: parentTable.name, // or just "parent_table"
+          onDelete: "cascade",
+        },
+      })
+    );
+
+    expect(childTable.interleave).toBeDefined();
+    expect(childTable.interleave?.parentTable).toBe("parent_table");
+    expect(childTable.interleave?.onDelete).toBe("cascade");
+  });
 });
