@@ -87,24 +87,20 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     if (!this._sourceTable) throw new Error("FROM clause is missing."); // Should be caught by toSQL
 
     let selectClause = "";
+    const paramIndexState = { value: 1 }; // Initialize parameter index counter
+
     if (this._selectedFields && this._selectedFields["*"] === "*") {
       // Handle SELECT *
-      // For true SELECT *, we'd iterate over this._sourceTable.columns
-      // For simplicity here, we just output '*'
-      // In a real scenario, you might want to list all columns explicitly for safety/clarity
-      // or if the DB adapter needs it.
       selectClause = `SELECT *`;
     } else if (this._selectedFields) {
       const selectedParts = Object.entries(this._selectedFields).map(
         ([alias, field]) => {
           let fieldName: string;
           if (typeof field === "string") {
-            // Could be a direct column name (less safe) or a pre-formed expression
             fieldName = field;
           } else if ("_isSQL" in field) {
-            fieldName = (field as SQL).toSqlString("postgres"); // Assuming SQL object
+            fieldName = (field as SQL).toSqlString("postgres", paramIndexState);
           } else if ("name" in field) {
-            // Assuming ColumnConfig
             fieldName = `"${(field as ColumnConfig<any, any>).name}"`;
           } else {
             throw new Error(`Invalid field type in select: ${alias}`);
@@ -141,13 +137,13 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       const conditionsStr = this._conditions
         .map((cond) => {
           if (typeof cond === "string") {
-            return cond; // Raw SQL string
+            return cond;
           } else if ("_isSQL" in cond) {
-            return (cond as SQL).toSqlString("postgres"); // SQL object
+            return (cond as SQL).toSqlString("postgres", paramIndexState);
           }
           throw new Error("Invalid condition type.");
         })
-        .join(" AND "); // Simple AND joining for now
+        .join(" AND ");
       whereClause = `WHERE ${conditionsStr}`;
     }
 
@@ -170,6 +166,8 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     if (!this._sourceTable) throw new Error("FROM clause is missing.");
 
     let selectClause = "";
+    const paramIndexState = { value: 1 }; // Initialize parameter index counter
+
     if (this._selectedFields && this._selectedFields["*"] === "*") {
       selectClause = `SELECT *`;
     } else if (this._selectedFields) {
@@ -177,9 +175,9 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
         ([alias, field]) => {
           let fieldName: string;
           if (typeof field === "string") {
-            fieldName = field; // Could be '*' or a direct column name
+            fieldName = field;
           } else if ("_isSQL" in field) {
-            fieldName = (field as SQL).toSqlString("spanner");
+            fieldName = (field as SQL).toSqlString("spanner", paramIndexState);
           } else if ("name" in field) {
             fieldName = `\`${(field as ColumnConfig<any, any>).name}\``;
           } else {
@@ -215,7 +213,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           if (typeof cond === "string") {
             return cond;
           } else if ("_isSQL" in cond) {
-            return (cond as SQL).toSqlString("spanner");
+            return (cond as SQL).toSqlString("spanner", paramIndexState);
           }
           throw new Error("Invalid condition type.");
         })

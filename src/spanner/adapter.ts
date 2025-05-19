@@ -22,63 +22,63 @@ export interface SpannerAdapter {
   // TODO: Handle Spanner-specific types like SpannerDate, SpannerStruct, etc.
 }
 
-// Example of a concrete implementation (conceptual)
-/*
-import { Spanner, protos } from '@google-cloud/spanner'; // Assuming '@google-cloud/spanner' driver
-type IRunQueryOptions = protos.google.spanner.v1.ExecuteSqlRequest.IQueryOptions;
-type IRequestOptions = protos.google.spanner.v1.ExecuteSqlRequest.IRequestOptions;
-
+import { Spanner, Database } from "@google-cloud/spanner";
+// import { protos } from "@google-cloud/spanner"; // protos was unused
+// type IRunQueryOptions = protos.google.spanner.v1.ExecuteSqlRequest.IQueryOptions; // For more advanced options
+// type IRequestOptions = protos.google.spanner.v1.ExecuteSqlRequest.IRequestOptions; // For more advanced options
 
 export class ConcreteSpannerAdapter implements SpannerAdapter {
-  dialect: "spanner" = "spanner";
-  private spanner: Spanner;
+  readonly dialect = "spanner" as const;
+  private spannerClient: Spanner; // The top-level Spanner client
   private instanceId: string;
   private databaseId: string;
+  private db: Database; // The Database object for operations
 
   constructor(projectId: string, instanceId: string, databaseId: string) {
-    this.spanner = new Spanner({ projectId });
+    this.spannerClient = new Spanner({ projectId });
     this.instanceId = instanceId;
     this.databaseId = databaseId;
+    // Get a Database object. This can be used for multiple operations.
+    this.db = this.spannerClient
+      .instance(this.instanceId)
+      .database(this.databaseId);
   }
 
   async execute<TResult = any>(
     sql: string,
-    params?: Record<string, any>,
-    queryOptions?: IRunQueryOptions, // Spanner specific query options
-    requestOptions?: IRequestOptions // Spanner specific request options
+    params?: Record<string, any> // Spanner uses named parameters, e.g., { p1: value1, p2: value2 }
   ): Promise<TResult[]> {
-    const instance = this.spanner.instance(this.instanceId);
-    const database = instance.database(this.databaseId);
-
     try {
-      // Spanner's run method is versatile. For queries, it returns [rows].
-      // For DML, it might return commit statistics or an update count within a transaction.
-      // This simplified example focuses on query-like behavior.
-      const [rows] = await database.run({
+      // For SELECT queries, database.run() is appropriate.
+      // It returns [rows] for queries.
+      // For DML statements (INSERT, UPDATE, DELETE), they are typically run within a transaction.
+      // database.runTransactionAsync(async (transaction) => { ... transaction.runUpdate(...); await transaction.commit(); });
+      // This basic execute method will focus on SELECT for now.
+      // The QueryBuilder's toSQL currently generates @p1, @p2 style placeholders.
+      const [rows] = await this.db.run({
         sql,
         params,
-        json: true, // Automatically convert rows to JSON objects
-        queryOptions,
-        requestOptions,
+        json: true, // Automatically convert Spanner data types to JSON where possible
       });
-      return rows as TResult[];
+      return rows as TResult[]; // Casting, ensure TResult matches expected row structure
     } catch (error) {
       console.error("Error executing query with Spanner adapter:", error);
+      // TODO: Implement more specific error handling or logging
       throw error;
-    } finally {
-      // Database and instance objects can be closed if they were created for a single operation,
-      // or managed as part of a larger lifecycle.
-      // For simplicity, not closing here, assuming longer-lived adapter.
-      // await database.close(); // If managing connection per request
     }
   }
 
-  // TODO: Implement transaction management, close method, etc.
   async close(): Promise<void> {
-    // Close the Spanner client if necessary
-    // this.spanner.close(); // This might not exist directly on Spanner, but on Instance or Database objects
+    // Close the main Spanner client. This will close all sessions managed by it.
+    // Individual Database or Instance objects don't need separate closing if the main client is closed.
+    try {
+      await this.spannerClient.close();
+      console.log("Spanner adapter closed.");
+    } catch (error) {
+      console.error("Error closing Spanner adapter:", error);
+      // Potentially log and ignore, or rethrow depending on desired behavior
+    }
   }
 }
-*/
 
-console.log("Spanner Adapter placeholder loaded.");
+// console.log("Spanner Adapter placeholder loaded."); // Remove or keep for debugging

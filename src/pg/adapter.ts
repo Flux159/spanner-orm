@@ -12,39 +12,55 @@ export interface PgAdapter {
    * @param params An array of parameters for prepared statements.
    * @returns A promise that resolves with the query results.
    */
-  execute: <TResult = any>(sql: string, params?: any[]) => Promise<TResult[]>;
+  execute: <TResult extends QueryResultRow = any>(
+    sql: string,
+    params?: any[]
+  ) => Promise<TResult[]>;
 
   // TODO: Add transaction methods: begin, commit, rollback
   // TODO: Add methods for streaming results, etc.
 }
 
-// Example of a concrete implementation (conceptual)
-/*
-import { Pool, QueryResult } from 'pg'; // Assuming 'pg' driver
+import { Pool, QueryResult, PoolConfig, QueryResultRow } from "pg";
 
 export class ConcretePgAdapter implements PgAdapter {
-  dialect: "pg" = "pg";
+  readonly dialect = "pg" as const;
   private pool: Pool;
 
-  constructor(connectionString: string) {
-    this.pool = new Pool({ connectionString });
+  constructor(config: PoolConfig | string) {
+    if (typeof config === "string") {
+      this.pool = new Pool({ connectionString: config });
+    } else {
+      this.pool = new Pool(config);
+    }
   }
 
-  async execute<TResult = any>(sql: string, params?: any[]): Promise<TResult[]> {
+  async execute<TResult extends QueryResultRow = any>(
+    sql: string,
+    params?: any[]
+  ): Promise<TResult[]> {
     try {
-      const result: QueryResult<TResult> = await this.pool.query(sql, params);
+      const result: QueryResult<TResult> = await this.pool.query<TResult>(
+        sql,
+        params
+      );
       return result.rows;
     } catch (error) {
       console.error("Error executing query with pg adapter:", error);
+      // TODO: Implement more specific error handling or logging
       throw error;
     }
   }
 
-  // TODO: Implement other methods like close, transactions etc.
   async close(): Promise<void> {
-    await this.pool.end();
+    try {
+      await this.pool.end();
+      console.log("PostgreSQL adapter closed.");
+    } catch (error) {
+      console.error("Error closing PostgreSQL adapter pool:", error);
+      throw error;
+    }
   }
 }
-*/
 
-console.log("PostgreSQL Adapter placeholder loaded.");
+// console.log("PostgreSQL Adapter placeholder loaded."); // Remove or keep for debugging
