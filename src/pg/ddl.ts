@@ -56,7 +56,8 @@ export function generateCreateTablePostgres(tableConfig: TableConfig): string {
 
     columnSql += ` ${column.dialectTypes.postgres}`;
 
-    if (column.notNull) {
+    if (column.notNull || column.primaryKey) {
+      // Add NOT NULL if it's a primary key
       columnSql += " NOT NULL";
     }
 
