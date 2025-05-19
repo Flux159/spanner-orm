@@ -30,7 +30,7 @@ describe("QueryBuilder SQL Generation", () => {
 
   describe("PostgreSQL Dialect", () => {
     it("should generate SELECT *", () => {
-      const query = qb.select("*").from(usersTable).toSQL("pg");
+      const query = qb.select("*").from(usersTable).toSQL("postgres");
       expect(query).toBe('SELECT * FROM "users"');
     });
 
@@ -38,7 +38,7 @@ describe("QueryBuilder SQL Generation", () => {
       const query = qb
         .select({ id: usersTable.columns.id, name: usersTable.columns.name })
         .from(usersTable)
-        .toSQL("pg");
+        .toSQL("postgres");
       expect(query).toBe('SELECT "id" AS "id", "name" AS "name" FROM "users"');
     });
 
@@ -49,7 +49,7 @@ describe("QueryBuilder SQL Generation", () => {
           fullName: usersTable.columns.name,
         })
         .from(usersTable)
-        .toSQL("pg");
+        .toSQL("postgres");
       expect(query).toBe(
         'SELECT "id" AS "userID", "name" AS "fullName" FROM "users"'
       );
@@ -60,17 +60,17 @@ describe("QueryBuilder SQL Generation", () => {
         .select({ id: usersTable.columns.id })
         .from(usersTable)
         .where(sql`${usersTable.columns.age} > ${30}`)
-        .toSQL("pg");
+        .toSQL("postgres");
       expect(query).toBe('SELECT "id" AS "id" FROM "users" WHERE "age" > $1');
     });
 
     it("should generate SELECT with LIMIT", () => {
-      const query = qb.select("*").from(usersTable).limit(10).toSQL("pg");
+      const query = qb.select("*").from(usersTable).limit(10).toSQL("postgres");
       expect(query).toBe('SELECT * FROM "users" LIMIT 10');
     });
 
     it("should generate SELECT with OFFSET", () => {
-      const query = qb.select("*").from(usersTable).offset(5).toSQL("pg");
+      const query = qb.select("*").from(usersTable).offset(5).toSQL("postgres");
       expect(query).toBe('SELECT * FROM "users" OFFSET 5');
     });
 
@@ -80,7 +80,7 @@ describe("QueryBuilder SQL Generation", () => {
         .from(usersTable)
         .limit(10)
         .offset(5)
-        .toSQL("pg");
+        .toSQL("postgres");
       expect(query).toBe('SELECT * FROM "users" LIMIT 10 OFFSET 5');
     });
 
@@ -90,7 +90,7 @@ describe("QueryBuilder SQL Generation", () => {
         .from(usersTable)
         .where(sql`${usersTable.columns.name} = ${"Alice"}`)
         .where(sql`${usersTable.columns.age} < ${30}`)
-        .toSQL("pg");
+        .toSQL("postgres");
       expect(query).toBe(
         'SELECT * FROM "users" WHERE "name" = $1 AND "age" < $2'
       );
@@ -100,7 +100,7 @@ describe("QueryBuilder SQL Generation", () => {
       const query = qb
         .select({ custom: sql`COALESCE(${usersTable.columns.name}, 'N/A')` })
         .from(usersTable)
-        .toSQL("pg");
+        .toSQL("postgres");
       expect(query).toBe(
         'SELECT COALESCE("name", \'N/A\') AS "custom" FROM "users"'
       );
@@ -212,7 +212,7 @@ describe("QueryBuilder SQL Generation", () => {
       const params = qb.getBoundParameters();
       expect(params).toEqual([subQueryValue]);
       // Test generated SQL to ensure placeholder is correct for nested SQL
-      const pgSql = qb.toSQL("pg");
+      const pgSql = qb.toSQL("postgres");
       expect(pgSql).toBe('SELECT * FROM "users" WHERE "email" = LOWER($1)');
     });
   });

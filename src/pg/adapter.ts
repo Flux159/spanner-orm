@@ -19,9 +19,22 @@ export interface PgAdapter {
 
   // TODO: Add transaction methods: begin, commit, rollback
   // TODO: Add methods for streaming results, etc.
+
+  transaction: <T>(callback: (tx: PgTransaction) => Promise<T>) => Promise<T>;
 }
 
-import { Pool, QueryResult, PoolConfig, QueryResultRow } from "pg";
+/**
+ * Represents the execution context within a PostgreSQL transaction.
+ */
+export interface PgTransaction {
+  dialect: "pg";
+  execute: <TResult extends QueryResultRow = any>(
+    sql: string,
+    params?: any[]
+  ) => Promise<TResult[]>;
+}
+
+import { Pool, QueryResult, PoolConfig, QueryResultRow, PoolClient } from "pg";
 
 export class ConcretePgAdapter implements PgAdapter {
   readonly dialect = "pg" as const;
@@ -49,6 +62,39 @@ export class ConcretePgAdapter implements PgAdapter {
       console.error("Error executing query with pg adapter:", error);
       // TODO: Implement more specific error handling or logging
       throw error;
+    }
+  }
+
+  async transaction<T>(
+    callback: (tx: PgTransaction) => Promise<T>
+  ): Promise<T> {
+    const client: PoolClient = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      const txExecutor: PgTransaction = {
+        dialect: "pg" as const,
+        execute: async <TResult extends QueryResultRow = any>(
+          sql: string,
+          params?: any[]
+        ): Promise<TResult[]> => {
+          const result: QueryResult<TResult> = await client.query<TResult>(
+            sql,
+            params
+          );
+          return result.rows;
+        },
+      };
+
+      const result = await callback(txExecutor);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      console.error("Transaction rolled back due to error:", error);
+      throw error;
+    } finally {
+      client.release();
     }
   }
 

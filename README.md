@@ -4,18 +4,18 @@ A TypeScript ORM for Google Spanner & PostgreSQL, designed for Node.js and Bun. 
 
 ## Core Features
 
-- **Unified Object Model:** Define your database schema once using a Drizzle-like syntax and use it for both PostgreSQL and Google Spanner.
+- **Unified Object Model:** Define your database schema once using a Drizzle-like syntax. Supports both PostgreSQL & Google Spanner with this single object model.
 - **Dual Dialect SQL Generation & Versatile Deployment:**
   - Generates Google SQL specifically tailored for Spanner.
   - Generates standard, highly compatible SQL for PostgreSQL.
-  - This allows using PostgreSQL for non-Spanner deployments, Pglite for local development or embedded applications, and Spanner for global-scale web applications, all from the same schema.
+  - This allows users to use PostgreSQL for non-Spanner deployments, Pglite for local development or applications where the user will run the app locally, and Spanner for global-scale web applications, all from the same schema.
 - **Comprehensive Migration Support:**
   - Produces migration files with DDL for both PostgreSQL and Spanner.
-  - Enables migration execution via a CLI tool or programmatically.
+  - Enables migration execution via a CLI tool (`spanner-orm-cli migrate`) or programmatically.
 - **Flexible Querying:**
   - Construct type-safe queries with an intuitive query builder.
-  - Seamlessly fall back to raw SQL for complex or dialect-specific operations.
-- **Composable Schemas:** Easily create and reuse schema components (e.g., for common fields like timestamps, base entity structures).
+  - Seamlessly fall back to raw SQL (`sql` tag function) for complex or dialect-specific operations.
+- **Composable Schemas:** Easily create and reuse schema components (e.g., for common fields like timestamps, base entity structures), inspired by Drizzle ORM's approach.
 - **TypeScript First:** Built from the ground up with TypeScript for a robust, type-safe, and enjoyable developer experience.
 
 ## Why spanner-orm?
@@ -76,32 +76,34 @@ This project will be developed in phases. Here's a high-level overview:
 - [x] **T1.5: Basic CLI for DDL Output:**
   - Command to output generated DDL for a specified dialect.
 
-### Phase 2: Query Building & Execution (Read Operations)
+### Phase 2: Query Building & Execution (Read Operations) - COMPLETED
 
 - [x] **T2.1: Basic Query Builder API:**
-  - Implement `select().from().where()` structure.
+  - Implemented `select().from().where()` structure.
 - [x] **T2.2: PostgreSQL DML Generator (SELECT):**
-  - Translate query builder AST to PostgreSQL `SELECT` statements.
+  - Translated query builder AST to PostgreSQL `SELECT` statements.
 - [x] **T2.3: Spanner DML Generator (SELECT):**
-  - Translate query builder AST to Spanner `SELECT` statements.
+  - Translated query builder AST to Spanner `SELECT` statements.
 - [x] **T2.4: Database Adapters (Initial):**
-  - PostgreSQL adapter (for `pg`/`postgres.js`).
-  - Spanner adapter (for `@google-cloud/spanner`).
-  - Pglite adapter.
+  - Implemented PostgreSQL adapter (for `pg`/`postgres.js`).
+  - Implemented Spanner adapter (for `@google-cloud/spanner`).
+  - Implemented Pglite adapter.
 - [x] **T2.5: `sql` Tag Function for Raw Queries.**
+  - Implemented `sql` tag function for raw query execution.
 
-### Phase 3: Advanced Schema Features & DML (Write Operations)
+### Phase 3: Advanced Schema Features & DML (Write Operations) - COMPLETED
 
-- [ ] **T3.1: Advanced Column Types & Constraints:**
-  - Foreign keys (`references()`, `onDelete`).
-  - Multiple primary keys. Ex: `PRIMARY_KEY(user_id, post_id)`
-  - Spanner-specific features (e.g., `INTERLEAVE IN PARENT`).
-  - Enhanced default value functions (`.$defaultFn()`).
-- [ ] **T3.2: Query Builder Enhancements (Writes):**
-  - Implement `insert()`, `update()`, `deleteFrom()`.
-- [ ] **T3.3: DML Generators (INSERT, UPDATE, DELETE):**
-  - Extend SQL generators for write operations.
-- [ ] **T3.4: Transaction Support API.**
+- [x] **T3.1: Advanced Column Types & Constraints:**
+  - Implemented foreign keys (`references()`, `onDelete`).
+  - Implemented multiple primary keys (via `table` extra options).
+  - Implemented Spanner-specific feature: `INTERLEAVE IN PARENT` (via `table` extra options).
+  - Implemented enhanced default value functions (`.$defaultFn()`).
+- [x] **T3.2: Query Builder Enhancements (Writes):**
+  - Implemented `insert()`, `update()`, `deleteFrom()` methods in QueryBuilder.
+- [x] **T3.3: DML Generators (INSERT, UPDATE, DELETE):**
+  - Extended SQL generators in QueryBuilder for write operations (PostgreSQL & Spanner).
+- [x] **T3.4: Transaction Support API.**
+  - Implemented `transaction(callback)` method in PostgreSQL, Spanner, and Pglite adapters.
 
 ### Phase 4: Migration Engine
 
