@@ -93,6 +93,7 @@ This project will be developed in phases. Here's a high-level overview:
 
 - [ ] **T3.1: Advanced Column Types & Constraints:**
   - Foreign keys (`references()`, `onDelete`).
+  - Multiple primary keys. Ex: `PRIMARY_KEY(user_id, post_id)`
   - Spanner-specific features (e.g., `INTERLEAVE IN PARENT`).
   - Enhanced default value functions (`.$defaultFn()`).
 - [ ] **T3.2: Query Builder Enhancements (Writes):**
