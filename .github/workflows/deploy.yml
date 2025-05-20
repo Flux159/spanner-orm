@@ -1,0 +1,68 @@
+name: cd
+
+on:
+  push:
+    tags:
+      - v*
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build For production
+        run: bun run build
+
+      - name: Run Tests
+        run: bun run test
+        env:
+          ANTHROPIC_API_KEY: "test"
+
+      - name: Update version number
+        uses: reecetech/version-increment@2024.10.1
+        id: version
+        with:
+          scheme: semver
+          increment: patch
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit the new version
+        run: |
+          # Make sure we're on main branch
+          git checkout main
+
+          # Update the version in package.json and commit the change
+          jq --arg v "${{ steps.version.outputs.current-version }}" '.version = $v' package.json > temp.json && mv temp.json package.json
+
+          git add package.json
+          git commit -m "Bump version to ${{ steps.version.outputs.current-version }}"
+
+          # Create and push the tag
+          git tag ${{ steps.version.outputs.current-version }}
+
+          # Push both the commit and the tag
+          git push origin main
+          git push origin ${{ steps.version.outputs.current-version }}
+
+      - name: Publish to NPM
+        run: |
+          echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
+          echo "//registry.npmjs.org/:always-auth=true" >> ~/.npmrc
+          npm publish
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
