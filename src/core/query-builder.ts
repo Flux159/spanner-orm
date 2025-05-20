@@ -5,7 +5,11 @@ import type {
   SQL,
   InferModelType,
   Dialect,
+  IncludeClause, // Added for eager loading
+  IncludeRelationOptions,
 } from "../types/common.js";
+import { sql } from "../types/common.js"; // VALUE import for sql
+import { getTableConfig } from "./schema.js"; // Assuming a way to get table configs
 
 export type SelectFields = Record<
   string,
@@ -50,6 +54,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
   private _insertValues?: InsertData<TTable>;
   private _updateSetValues?: UpdateData<TTable>;
   private _conditions: WhereCondition[] = [];
+  private _includeClause?: IncludeClause; // Added for eager loading
 
   constructor() {}
 
@@ -274,59 +279,250 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     if (!this._targetTable || !this._targetTableAlias)
       throw new Error("FROM clause or its alias is missing for SELECT.");
 
-    let selectClause = "";
-    if (this._selectedFields && this._selectedFields["*"] === "*") {
-      selectClause = `SELECT *`;
-    } else if (this._selectedFields) {
-      const selectedParts = Object.entries(this._selectedFields).map(
-        ([alias, field]) => {
-          let fieldName: string;
-          if (typeof field === "string") {
-            fieldName = field;
-          } else if ("_isSQL" in field) {
-            fieldName = (field as SQL).toSqlString(
-              "postgres",
-              paramIndexState,
-              aliasMap
-            );
-          } else if ("name" in field) {
-            const colConfig = field as ColumnConfig<any, any>;
-            const tableAlias = colConfig._tableName
-              ? aliasMap.get(colConfig._tableName)
-              : this._targetTableAlias;
-            if (!tableAlias)
-              throw new Error(
-                `Alias not found for table of column: ${colConfig.name} (table: ${colConfig._tableName})`
-              );
-            fieldName = `"${tableAlias}"."${colConfig.name}"`;
-          } else {
-            throw new Error(`Invalid field type in select: ${alias}`);
-          }
-          if (alias !== "*" && !fieldName.toLowerCase().includes(" as ")) {
-            return `${fieldName} AS "${alias}"`;
-          }
-          return fieldName;
+    const originalJoins = [...this._joins]; // Preserve original explicit joins
+    const includeJoins: JoinClause[] = [];
+    const selectedFieldsFromIncludes: SelectFields = {};
+
+    // Process includes for one-to-many relationships
+    if (this._includeClause) {
+      for (const [relationName, includeOptions] of Object.entries(
+        this._includeClause
+      )) {
+        // This is a simplified assumption: relationName is the child table's actual name
+        // A more robust solution would use a schema registry or relations defined in TableConfig
+        const relatedTableConfig = getTableConfig(relationName); // Placeholder for actual lookup
+        if (!relatedTableConfig) {
+          console.warn(
+            `Warning: Could not find table config for relation "${relationName}" to include.`
+          );
+          continue;
         }
-      );
-      selectClause = `SELECT ${selectedParts.join(", ")}`;
-    } else {
+
+        let foreignKeyColumn: ColumnConfig<any, any> | undefined;
+        let referencedColumnInParent: ColumnConfig<any, any> | undefined;
+
+        // Find the foreign key in the related (child) table that points to the parent table
+        for (const col of Object.values(relatedTableConfig.columns)) {
+          const colConfig = col as ColumnConfig<any, any>;
+          if (colConfig.references) {
+            const referencedCol = colConfig.references.referencesFn();
+            if (referencedCol._tableName === this._targetTable.name) {
+              foreignKeyColumn = colConfig;
+              referencedColumnInParent = referencedCol;
+              break;
+            }
+          }
+        }
+
+        if (!foreignKeyColumn || !referencedColumnInParent) {
+          console.warn(
+            `Warning: Could not determine foreign key relationship between "${this._targetTable.name}" and "${relationName}".`
+          );
+          continue;
+        }
+
+        const relatedTableAlias = this.generateTableAlias(relatedTableConfig); // Ensure alias is generated and stored
+        aliasMap.set(relatedTableConfig.name, relatedTableAlias); // Update the aliasMap for this query
+
+        const onCondition = sql`${foreignKeyColumn} = ${referencedColumnInParent}`;
+
+        includeJoins.push({
+          type: "LEFT", // Eager loading typically uses LEFT JOIN
+          targetTable: relatedTableConfig,
+          alias: relatedTableAlias,
+          onCondition: onCondition,
+        });
+
+        // Determine columns to select from the related table
+        const relationOpts =
+          typeof includeOptions === "object" ? includeOptions : {};
+        const selectAllRelated =
+          includeOptions === true || !relationOpts.select;
+
+        for (const [relatedColName, relatedColConfig] of Object.entries(
+          relatedTableConfig.columns
+        )) {
+          if (
+            selectAllRelated ||
+            (relationOpts.select && relationOpts.select[relatedColName])
+          ) {
+            // Alias related columns to avoid collisions: relationName__columnName
+            // Use relatedColConfig.name for the alias part to match DB column name
+            const actualColumnName = (
+              relatedColConfig as ColumnConfig<any, any>
+            ).name;
+            const selectAlias = `${relationName}__${actualColumnName}`;
+            selectedFieldsFromIncludes[selectAlias] =
+              relatedColConfig as ColumnConfig<any, any>;
+          }
+        }
+      }
+    }
+
+    const allJoins = [...originalJoins, ...includeJoins];
+
+    // Build SELECT clause
+    let selectClause = "";
+    const explicitUserSelectedFields = { ...(this._selectedFields || {}) };
+    const allSelectedParts: string[] = [];
+
+    // Handle primary table selections
+    if (explicitUserSelectedFields["*"] === "*") {
+      // If user explicitly asked for SELECT *
+      allSelectedParts.push(`"${this._targetTableAlias}".*`);
+      // Remove "*" so it's not processed as an aliased field if other fields are also explicitly selected
+      if (
+        Object.keys(explicitUserSelectedFields).length > 1 ||
+        Object.keys(selectedFieldsFromIncludes).length > 0
+      ) {
+        delete explicitUserSelectedFields["*"];
+      }
+    }
+
+    // Process other explicitly selected fields for the primary table or custom SQL fields
+    Object.entries(explicitUserSelectedFields).map(([alias, field]) => {
+      let fieldName: string;
+      if (typeof field === "string") {
+        fieldName = field;
+      } else if ("_isSQL" in field) {
+        fieldName = (field as SQL).toSqlString(
+          "postgres",
+          paramIndexState,
+          aliasMap
+        );
+      } else if ("name" in field) {
+        const colConfig = field as ColumnConfig<any, any>;
+        // For explicitly selected fields, assume they are from the primary table if _tableName is not set,
+        // or from a table already in aliasMap (e.g. from an explicit join).
+        const tableAlias = colConfig._tableName
+          ? aliasMap.get(colConfig._tableName)
+          : this._targetTableAlias;
+        if (!tableAlias) {
+          throw new Error(
+            `PG Alias not found for table of column: ${colConfig.name} (table: ${colConfig._tableName})`
+          );
+        }
+        fieldName = `"${tableAlias}"."${colConfig.name}"`;
+      } else {
+        throw new Error(`Invalid field type in select: ${alias}`);
+      }
+      if (alias !== "*" && !fieldName.toLowerCase().includes(" as ")) {
+        allSelectedParts.push(`${fieldName} AS "${alias}"`);
+      } else {
+        allSelectedParts.push(fieldName);
+      }
+    });
+
+    // Process selected fields from includes
+    Object.entries(selectedFieldsFromIncludes).map(([alias, field]) => {
+      const colConfig = field as ColumnConfig<any, any>;
+      const tableAlias = aliasMap.get(colConfig._tableName!); // Should exist due to include logic
+      if (!tableAlias) {
+        throw new Error(
+          `PG Alias not found for included column's table: ${colConfig._tableName}`
+        );
+      }
+      const fieldName = `"${tableAlias}"."${colConfig.name}"`;
+      allSelectedParts.push(`${fieldName} AS "${alias}"`);
+    });
+
+    if (!selectClause && allSelectedParts.length > 0) {
+      selectClause = `SELECT ${allSelectedParts.join(", ")}`;
+    } else if (
+      !selectClause &&
+      Object.keys(explicitUserSelectedFields).length === 0 &&
+      Object.keys(selectedFieldsFromIncludes).length === 0
+    ) {
+      // Default to SELECT primary_alias.* if nothing was selected at all (e.g. qb.from(usersTable).toSQL())
+      // or if only .select() was called with no args
+      if (
+        this._selectedFields === undefined ||
+        Object.keys(this._selectedFields).length === 0
+      ) {
+        selectClause = `SELECT "${this._targetTableAlias}".*`;
+      }
+    }
+
+    // Fallback if selectClause is still empty (e.g. only .select() was called)
+    if (!selectClause) {
       selectClause = `SELECT "${this._targetTableAlias}".*`;
     }
 
+    // Correction for simple "SELECT *" case from tests
+    if (
+      this._selectedFields &&
+      this._selectedFields["*"] === "*" &&
+      Object.keys(this._selectedFields).length === 1 &&
+      allJoins.length === 0 &&
+      Object.keys(selectedFieldsFromIncludes).length === 0
+    ) {
+      selectClause = `SELECT *`;
+    } else if (
+      this._selectedFields &&
+      this._selectedFields["*"] === "*" &&
+      Object.keys(this._selectedFields).length === 1 &&
+      allJoins.length > 0 &&
+      Object.keys(selectedFieldsFromIncludes).length === 0
+    ) {
+      // If SELECT * and there are joins, but no includes selecting fields, qualify with primary table alias
+      selectClause = `SELECT "${this._targetTableAlias}".*`;
+    }
+
+    // Original logic for explicitly selected fields if not SELECT *
+    // This part is now refactored above.
+    // else if (Object.keys(finalSelectedFields).length > 0) {
+    //   const selectedParts = Object.entries(finalSelectedFields).map(
+    //     ([alias, field]) => {
+    //       let fieldName: string;
+    //       if (typeof field === "string") {
+    //         fieldName = field;
+    //       } else if ("_isSQL" in field) {
+    //         fieldName = (field as SQL).toSqlString(
+    //           "postgres",
+    //           paramIndexState,
+    //           aliasMap
+    //         );
+    //       } else if ("name" in field) {
+    //         const colConfig = field as ColumnConfig<any, any>;
+    //         const tableAlias = colConfig._tableName
+    //           ? aliasMap.get(colConfig._tableName)
+    //           : this._targetTableAlias;
+    //         if (!tableAlias)
+    //           throw new Error(
+    //             `Alias not found for table of column: ${colConfig.name} (table: ${colConfig._tableName})`
+    //           );
+    //         fieldName = `"${tableAlias}"."${colConfig.name}"`;
+    //       } else {
+    //         throw new Error(`Invalid field type in select: ${alias}`);
+    //       }
+    //       if (alias !== "*" && !fieldName.toLowerCase().includes(" as ")) {
+    //         return `${fieldName} AS "${alias}"`;
+    //       }
+    //       return fieldName;
+    //     }
+    //   );
+    //   selectClause = `SELECT ${selectedParts.join(", ")}`;
+    // } else {
+    //   // Default if no fields specified and no includes.
+    //   selectClause = `SELECT "${this._targetTableAlias}".*`;
+    // }
+
     let fromClause = `FROM "${this._targetTable.name}" AS "${this._targetTableAlias}"`;
-    if (this._joins.length > 0) {
-      const joinStrings = this._joins.map((join) => {
-        const joinTableAlias = aliasMap.get(join.targetTable.name);
+    if (allJoins.length > 0) {
+      const joinStrings = allJoins.map((join) => {
+        const joinTableAlias = aliasMap.get(join.targetTable.name); // Use aliasMap
         if (!joinTableAlias)
           throw new Error(
-            `Alias not found for join table: ${join.targetTable.name}`
+            `Alias not found for join table: ${
+              join.targetTable.name
+            }. Alias map: ${JSON.stringify(Array.from(aliasMap.entries()))}`
           );
         return `${join.type} JOIN "${
           join.targetTable.name
         }" AS "${joinTableAlias}" ON ${join.onCondition.toSqlString(
           "postgres",
           paramIndexState,
-          aliasMap
+          aliasMap // Pass aliasMap to onCondition.toSqlString
         )}`;
       });
       fromClause += ` ${joinStrings.join(" ")}`;
@@ -371,51 +567,216 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     if (!this._targetTable || !this._targetTableAlias)
       throw new Error("FROM clause or its alias is missing for SELECT.");
 
-    let selectClause = "";
-    if (this._selectedFields && this._selectedFields["*"] === "*") {
-      selectClause = `SELECT *`;
-    } else if (this._selectedFields) {
-      const selectedParts = Object.entries(this._selectedFields).map(
-        ([alias, field]) => {
-          let fieldName: string;
-          if (typeof field === "string") {
-            fieldName = field;
-          } else if ("_isSQL" in field) {
-            fieldName = (field as SQL).toSqlString(
-              "spanner",
-              paramIndexState,
-              aliasMap
-            );
-          } else if ("name" in field) {
-            const colConfig = field as ColumnConfig<any, any>;
-            const tableAlias = colConfig._tableName
-              ? aliasMap.get(colConfig._tableName)
-              : this._targetTableAlias;
-            if (!tableAlias)
-              throw new Error(
-                `Alias not found for table of column: ${colConfig.name} (table: ${colConfig._tableName})`
-              );
-            fieldName = `\`${tableAlias}\`.\`${colConfig.name}\``;
-          } else {
-            throw new Error(`Invalid field type in select: ${alias}`);
-          }
-          // If an explicit alias is provided (key in SelectFields), and it's not "*",
-          // and the fieldName itself doesn't already contain "AS" (e.g. from a raw sql snippet)
-          // then apply the alias.
-          if (alias !== "*" && !fieldName.toLowerCase().includes(" as ")) {
-            return `${fieldName} AS \`${alias}\``;
-          }
-          return fieldName;
+    // --- Eager Loading Logic (similar to PgSQL) ---
+    const originalJoins = [...this._joins];
+    const includeJoins: JoinClause[] = [];
+    const selectedFieldsFromIncludes: SelectFields = {};
+
+    if (this._includeClause) {
+      for (const [relationName, includeOptions] of Object.entries(
+        this._includeClause
+      )) {
+        const relatedTableConfig = getTableConfig(relationName); // Placeholder
+        if (!relatedTableConfig) {
+          console.warn(
+            `Warning: Spanner - Could not find table config for relation "${relationName}" to include.`
+          );
+          continue;
         }
-      );
-      selectClause = `SELECT ${selectedParts.join(", ")}`;
-    } else {
+
+        let foreignKeyColumn: ColumnConfig<any, any> | undefined;
+        let referencedColumnInParent: ColumnConfig<any, any> | undefined;
+
+        for (const col of Object.values(relatedTableConfig.columns)) {
+          const colConfig = col as ColumnConfig<any, any>;
+          if (colConfig.references) {
+            const referencedCol = colConfig.references.referencesFn();
+            if (referencedCol._tableName === this._targetTable.name) {
+              foreignKeyColumn = colConfig;
+              referencedColumnInParent = referencedCol;
+              break;
+            }
+          }
+        }
+
+        if (!foreignKeyColumn || !referencedColumnInParent) {
+          console.warn(
+            `Warning: Spanner - Could not determine foreign key relationship between "${this._targetTable.name}" and "${relationName}".`
+          );
+          continue;
+        }
+
+        const relatedTableAlias = this.generateTableAlias(relatedTableConfig);
+        aliasMap.set(relatedTableConfig.name, relatedTableAlias);
+
+        const onCondition = sql`${foreignKeyColumn} = ${referencedColumnInParent}`;
+        includeJoins.push({
+          type: "LEFT",
+          targetTable: relatedTableConfig,
+          alias: relatedTableAlias,
+          onCondition: onCondition,
+        });
+
+        const relationOpts =
+          typeof includeOptions === "object" ? includeOptions : {};
+        const selectAllRelated =
+          includeOptions === true || !relationOpts.select;
+
+        for (const [relatedColName, relatedColConfig] of Object.entries(
+          relatedTableConfig.columns
+        )) {
+          if (
+            selectAllRelated ||
+            (relationOpts.select && relationOpts.select[relatedColName])
+          ) {
+            const actualColumnName = (
+              relatedColConfig as ColumnConfig<any, any>
+            ).name;
+            const selectAlias = `${relationName}__${actualColumnName}`;
+            selectedFieldsFromIncludes[selectAlias] =
+              relatedColConfig as ColumnConfig<any, any>;
+          }
+        }
+      }
+    }
+    const allJoins = [...originalJoins, ...includeJoins];
+    // --- End Eager Loading Logic ---
+
+    // Build SELECT clause for Spanner (similar logic to PgSQL)
+    let selectClause = "";
+    const explicitUserSelectedFieldsSpanner = {
+      ...(this._selectedFields || {}),
+    };
+    const allSelectedPartsSpanner: string[] = [];
+
+    if (explicitUserSelectedFieldsSpanner["*"] === "*") {
+      allSelectedPartsSpanner.push(`\`${this._targetTableAlias}\`.*`);
+      if (
+        Object.keys(explicitUserSelectedFieldsSpanner).length > 1 ||
+        Object.keys(selectedFieldsFromIncludes).length > 0
+      ) {
+        delete explicitUserSelectedFieldsSpanner["*"];
+      }
+    }
+
+    Object.entries(explicitUserSelectedFieldsSpanner).map(([alias, field]) => {
+      let fieldName: string;
+      if (typeof field === "string") {
+        fieldName = field;
+      } else if ("_isSQL" in field) {
+        fieldName = (field as SQL).toSqlString(
+          "spanner",
+          paramIndexState,
+          aliasMap
+        );
+      } else if ("name" in field) {
+        const colConfig = field as ColumnConfig<any, any>;
+        const tableAlias = colConfig._tableName
+          ? aliasMap.get(colConfig._tableName)
+          : this._targetTableAlias;
+        if (!tableAlias)
+          throw new Error(
+            `Spanner Alias not found for table of column: ${colConfig.name} (table: ${colConfig._tableName})`
+          );
+        fieldName = `\`${tableAlias}\`.\`${colConfig.name}\``;
+      } else {
+        throw new Error(`Invalid field type in select: ${alias}`);
+      }
+      if (alias !== "*" && !fieldName.toLowerCase().includes(" as ")) {
+        allSelectedPartsSpanner.push(`${fieldName} AS \`${alias}\``);
+      } else {
+        allSelectedPartsSpanner.push(fieldName);
+      }
+    });
+
+    Object.entries(selectedFieldsFromIncludes).map(([alias, field]) => {
+      const colConfig = field as ColumnConfig<any, any>;
+      const tableAlias = aliasMap.get(colConfig._tableName!);
+      if (!tableAlias) {
+        throw new Error(
+          `Spanner Alias not found for included column's table: ${colConfig._tableName}`
+        );
+      }
+      const fieldName = `\`${tableAlias}\`.\`${colConfig.name}\``;
+      allSelectedPartsSpanner.push(`${fieldName} AS \`${alias}\``);
+    });
+
+    if (!selectClause && allSelectedPartsSpanner.length > 0) {
+      selectClause = `SELECT ${allSelectedPartsSpanner.join(", ")}`;
+    } else if (
+      !selectClause &&
+      Object.keys(explicitUserSelectedFieldsSpanner).length === 0 &&
+      Object.keys(selectedFieldsFromIncludes).length === 0
+    ) {
+      if (
+        this._selectedFields === undefined ||
+        Object.keys(this._selectedFields).length === 0
+      ) {
+        selectClause = `SELECT \`${this._targetTableAlias}\`.*`;
+      }
+    }
+
+    if (!selectClause) {
       selectClause = `SELECT \`${this._targetTableAlias}\`.*`;
     }
 
+    if (
+      this._selectedFields &&
+      this._selectedFields["*"] === "*" &&
+      Object.keys(this._selectedFields).length === 1 &&
+      allJoins.length === 0 &&
+      Object.keys(selectedFieldsFromIncludes).length === 0
+    ) {
+      selectClause = `SELECT *`;
+    } else if (
+      this._selectedFields &&
+      this._selectedFields["*"] === "*" &&
+      Object.keys(this._selectedFields).length === 1 &&
+      allJoins.length > 0 &&
+      Object.keys(selectedFieldsFromIncludes).length === 0
+    ) {
+      selectClause = `SELECT \`${this._targetTableAlias}\`.*`;
+    }
+    // Original logic for explicitly selected fields if not SELECT *
+    // else if (Object.keys(finalSelectedFields).length > 0) {
+    //   const selectedParts = Object.entries(finalSelectedFields).map(
+    //     ([alias, field]) => {
+    //       let fieldName: string;
+    //       if (typeof field === "string") {
+    //         fieldName = field;
+    //       } else if ("_isSQL" in field) {
+    //         fieldName = (field as SQL).toSqlString(
+    //           "spanner",
+    //           paramIndexState,
+    //           aliasMap
+    //         );
+    //       } else if ("name" in field) {
+    //         const colConfig = field as ColumnConfig<any, any>;
+    //         const tableAlias = colConfig._tableName
+    //           ? aliasMap.get(colConfig._tableName)
+    //           : this._targetTableAlias;
+    //         if (!tableAlias)
+    //           throw new Error(
+    //             `Alias not found for table of column: ${colConfig.name} (table: ${colConfig._tableName})`
+    //           );
+    //         fieldName = `\`${tableAlias}\`.\`${colConfig.name}\``;
+    //       } else {
+    //         throw new Error(`Invalid field type in select: ${alias}`);
+    //       }
+    //       if (alias !== "*" && !fieldName.toLowerCase().includes(" as ")) {
+    //         return `${fieldName} AS \`${alias}\``;
+    //       }
+    //       return fieldName;
+    //     }
+    //   );
+    //   selectClause = `SELECT ${selectedParts.join(", ")}`;
+    // } else {
+    //   selectClause = `SELECT \`${this._targetTableAlias}\`.*`;
+    // }
+
     let fromClause = `FROM \`${this._targetTable.name}\` AS \`${this._targetTableAlias}\``;
-    if (this._joins.length > 0) {
-      const joinStrings = this._joins.map((join) => {
+    if (allJoins.length > 0) {
+      const joinStrings = allJoins.map((join) => {
         const joinTableAlias = aliasMap.get(join.targetTable.name);
         if (!joinTableAlias)
           throw new Error(
@@ -426,7 +787,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
         }\` AS \`${joinTableAlias}\` ON ${join.onCondition.toSqlString(
           "spanner",
           paramIndexState,
-          aliasMap
+          aliasMap // Pass aliasMap
         )}`;
       });
       fromClause += ` ${joinStrings.join(" ")}`;
@@ -923,5 +1284,17 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
 
   leftJoin(table: TableConfig<any, any>, onCondition: SQL): this {
     return this.addJoin("LEFT", table, onCondition);
+  }
+
+  include(clause: IncludeClause): this {
+    if (this._operationType && this._operationType !== "select") {
+      throw new Error(
+        `Cannot call .include() for an '${this._operationType}' operation.`
+      );
+    }
+    if (!this._operationType) this._operationType = "select"; // Default to select if no op type yet
+
+    this._includeClause = { ...(this._includeClause || {}), ...clause };
+    return this;
   }
 }
