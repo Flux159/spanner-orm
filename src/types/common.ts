@@ -76,6 +76,65 @@ export type InferModelType<T extends TableConfig<string, TableColumns>> = {
   [K in keyof T["columns"]]: InferColumnType<T["columns"][K]>;
 };
 
+// --- Function Descriptors ---
+export type FunctionArg =
+  | ColumnConfig<any, any>
+  | SQL
+  | string
+  | number
+  | boolean
+  | Date;
+
+export interface BaseFunctionDescriptor {
+  readonly _isOrmFunctionDescriptor: true; // Marker property
+  readonly functionName: string; // e.g., 'LOWER', 'CONCAT', 'COUNT'
+}
+
+export interface UnaryFunctionDescriptor extends BaseFunctionDescriptor {
+  readonly argument: FunctionArg;
+}
+
+export interface VariadicFunctionDescriptor extends BaseFunctionDescriptor {
+  readonly args: FunctionArg[];
+}
+
+// Specific descriptor examples (can be expanded)
+export interface LowerFunctionDescriptor extends UnaryFunctionDescriptor {
+  readonly functionName: "LOWER";
+}
+export interface UpperFunctionDescriptor extends UnaryFunctionDescriptor {
+  readonly functionName: "UPPER";
+}
+export interface CountFunctionDescriptor extends UnaryFunctionDescriptor {
+  readonly functionName: "COUNT";
+  readonly argument: FunctionArg | "*"; // COUNT can take '*'
+}
+export interface ConcatFunctionDescriptor extends VariadicFunctionDescriptor {
+  readonly functionName: "CONCAT";
+}
+export interface LikeFunctionDescriptor extends BaseFunctionDescriptor {
+  readonly functionName: "LIKE" | "ILIKE";
+  readonly column: FunctionArg; // Column or SQL expression
+  readonly pattern: string;
+  readonly escapeChar?: string;
+}
+export interface RegexpContainsFunctionDescriptor
+  extends BaseFunctionDescriptor {
+  readonly functionName: "REGEXP_CONTAINS";
+  readonly column: FunctionArg; // Column or SQL expression
+  readonly pattern: string;
+}
+
+// Union of all possible function descriptors
+export type OrmFunctionDescriptor =
+  | LowerFunctionDescriptor
+  | UpperFunctionDescriptor
+  | CountFunctionDescriptor
+  | ConcatFunctionDescriptor
+  | LikeFunctionDescriptor
+  | RegexpContainsFunctionDescriptor;
+// Add other aggregate/string function descriptors here (SUM, AVG, etc.)
+
 // For SQL tagged template literal
 export interface SQL {
   /**

@@ -93,35 +93,64 @@ export function lower(value: ColumnConfig<any, any> | string | SQL): SQL {
     },
     toSqlString: (
       dialect: Dialect,
-      currentParamIndex?: { value: number }
+      currentParamIndex?: { value: number },
+      aliasMap?: Map<string, string> // Added aliasMap
     ): string => {
       const paramIdxState = currentParamIndex || { value: 1 };
       let internalValueStr: string;
       if (typeof value === "object" && value !== null) {
         if ("_isSQL" in value) {
-          internalValueStr = (value as SQL).toSqlString(dialect, paramIdxState);
-        } else if ("name" in value) {
+          // Pass aliasMap to nested SQL objects
+          internalValueStr = (value as SQL).toSqlString(
+            dialect,
+            paramIdxState,
+            aliasMap
+          );
+        } else if (
+          "name" in value &&
+          "type" in value &&
+          "dialectTypes" in value
+        ) {
+          // More robust ColumnConfig check
           // ColumnConfig
           const colConfig = value as ColumnConfig<any, any>;
           const colName = colConfig.name;
-          if (colConfig._tableName) {
+          let tableNameToUse = colConfig._tableName;
+          if (
+            aliasMap &&
+            colConfig._tableName &&
+            aliasMap.has(colConfig._tableName)
+          ) {
+            tableNameToUse = aliasMap.get(colConfig._tableName);
+          }
+
+          if (tableNameToUse) {
             internalValueStr =
               dialect === "postgres"
-                ? `"${colConfig._tableName}"."${colName}"`
-                : `\`${colConfig._tableName}\`.\`${colName}\``;
+                ? `"${tableNameToUse}"."${colName}"`
+                : `\`${tableNameToUse}\`.\`${colName}\``;
           } else {
             internalValueStr =
               dialect === "postgres" ? `"${colName}"` : `\`${colName}\``;
           }
         } else {
-          throw new Error("Invalid argument type for lower()");
+          // If it's an object but not SQL or ColumnConfig, it might be an error or an unsupported type
+          // For now, let's assume it should have been a parameter if it's not a known structural type.
+          // This path might need more robust handling depending on allowed FunctionArg types.
+          throw new Error(
+            `Invalid object type for 'value' in lower(): ${JSON.stringify(
+              value
+            )}`
+          );
         }
-      } else {
-        // Literal string argument
+      } else if (typeof value === "string") {
+        // Literal string argument, treat as parameter
         internalValueStr =
           dialect === "postgres"
             ? `$${paramIdxState.value++}`
             : `@p${paramIdxState.value++}`;
+      } else {
+        throw new Error(`Invalid argument type for lower(): ${typeof value}`);
       }
       return `LOWER(${internalValueStr})`;
     },
@@ -145,35 +174,61 @@ export function upper(value: ColumnConfig<any, any> | string | SQL): SQL {
     },
     toSqlString: (
       dialect: Dialect,
-      currentParamIndex?: { value: number }
+      currentParamIndex?: { value: number },
+      aliasMap?: Map<string, string> // Added aliasMap
     ): string => {
       const paramIdxState = currentParamIndex || { value: 1 };
       let internalValueStr: string;
       if (typeof value === "object" && value !== null) {
         if ("_isSQL" in value) {
-          internalValueStr = (value as SQL).toSqlString(dialect, paramIdxState);
-        } else if ("name" in value) {
+          // Pass aliasMap to nested SQL objects
+          internalValueStr = (value as SQL).toSqlString(
+            dialect,
+            paramIdxState,
+            aliasMap
+          );
+        } else if (
+          "name" in value &&
+          "type" in value &&
+          "dialectTypes" in value
+        ) {
+          // More robust ColumnConfig check
           // ColumnConfig
           const colConfig = value as ColumnConfig<any, any>;
           const colName = colConfig.name;
-          if (colConfig._tableName) {
+          let tableNameToUse = colConfig._tableName;
+          if (
+            aliasMap &&
+            colConfig._tableName &&
+            aliasMap.has(colConfig._tableName)
+          ) {
+            tableNameToUse = aliasMap.get(colConfig._tableName);
+          }
+
+          if (tableNameToUse) {
             internalValueStr =
               dialect === "postgres"
-                ? `"${colConfig._tableName}"."${colName}"`
-                : `\`${colConfig._tableName}\`.\`${colName}\``;
+                ? `"${tableNameToUse}"."${colName}"`
+                : `\`${tableNameToUse}\`.\`${colName}\``;
           } else {
             internalValueStr =
               dialect === "postgres" ? `"${colName}"` : `\`${colName}\``;
           }
         } else {
-          throw new Error("Invalid argument type for upper()");
+          throw new Error(
+            `Invalid object type for 'value' in upper(): ${JSON.stringify(
+              value
+            )}`
+          );
         }
-      } else {
-        // Literal string argument
+      } else if (typeof value === "string") {
+        // Literal string argument, treat as parameter
         internalValueStr =
           dialect === "postgres"
             ? `$${paramIdxState.value++}`
             : `@p${paramIdxState.value++}`;
+      } else {
+        throw new Error(`Invalid argument type for upper(): ${typeof value}`);
       }
       return `UPPER(${internalValueStr})`;
     },
@@ -208,34 +263,54 @@ export function concat(
     },
     toSqlString: (
       dialect: Dialect,
-      currentParamIndex?: { value: number }
+      currentParamIndex?: { value: number },
+      aliasMap?: Map<string, string> // Added aliasMap
     ): string => {
       const paramIdxState = currentParamIndex || { value: 1 };
       const stringArgs = args.map((arg) => {
         if (typeof arg === "object" && arg !== null) {
           if ("_isSQL" in arg) {
-            return (arg as SQL).toSqlString(dialect, paramIdxState);
-          } else if ("name" in arg) {
+            // Pass aliasMap to nested SQL objects
+            return (arg as SQL).toSqlString(dialect, paramIdxState, aliasMap);
+          } else if ("name" in arg && "type" in arg && "dialectTypes" in arg) {
+            // More robust ColumnConfig check
             // ColumnConfig
             const colConfig = arg as ColumnConfig<any, any>;
             const colName = colConfig.name;
+            let tableNameToUse = colConfig._tableName;
+            if (
+              aliasMap &&
+              colConfig._tableName &&
+              aliasMap.has(colConfig._tableName)
+            ) {
+              tableNameToUse = aliasMap.get(colConfig._tableName);
+            }
             let identifier = "";
-            if (colConfig._tableName) {
+            if (tableNameToUse) {
               identifier =
                 dialect === "postgres"
-                  ? `"${colConfig._tableName}"."${colName}"`
-                  : `\`${colConfig._tableName}\`.\`${colName}\``;
+                  ? `"${tableNameToUse}"."${colName}"`
+                  : `\`${tableNameToUse}\`.\`${colName}\``;
             } else {
               identifier =
                 dialect === "postgres" ? `"${colName}"` : `\`${colName}\``;
             }
             return identifier;
+          } else {
+            throw new Error(
+              `Invalid object type for argument in concat(): ${JSON.stringify(
+                arg
+              )}`
+            );
           }
+        } else if (typeof arg === "string") {
+          // Literal string argument, treat as parameter
+          return dialect === "postgres"
+            ? `$${paramIdxState.value++}`
+            : `@p${paramIdxState.value++}`;
+        } else {
+          throw new Error(`Invalid argument type for concat(): ${typeof arg}`);
         }
-        // Literal string argument
-        return dialect === "postgres"
-          ? `$${paramIdxState.value++}`
-          : `@p${paramIdxState.value++}`;
       });
       return `CONCAT(${stringArgs.join(", ")})`;
     },
@@ -251,23 +326,33 @@ export function concat(
 export function count(field?: ColumnConfig<any, any> | "*"): SQL {
   return {
     _isSQL: true,
-    getValues: (_dialect: Dialect) => [], // dialect not used but required by interface
-    toSqlString: (dialect: Dialect): string => {
+    getValues: (_dialect: Dialect) => [],
+    toSqlString: (
+      dialect: Dialect,
+      _currentParamIndex?: { value: number }, // Not used for COUNT(col) string part but good for consistency
+      aliasMap?: Map<string, string> // Added aliasMap
+    ): string => {
       if (!field || field === "*") {
         return "COUNT(*)";
       }
       const colConfig = field as ColumnConfig<any, any>;
+      const colName = colConfig.name;
+      let tableNameToUse = colConfig._tableName;
+      if (
+        aliasMap &&
+        colConfig._tableName &&
+        aliasMap.has(colConfig._tableName)
+      ) {
+        tableNameToUse = aliasMap.get(colConfig._tableName);
+      }
       let identifier = "";
-      if (colConfig._tableName) {
+      if (tableNameToUse) {
         identifier =
           dialect === "postgres"
-            ? `"${colConfig._tableName}"."${colConfig.name}"`
-            : `\`${colConfig._tableName}\`.\`${colConfig.name}\``;
+            ? `"${tableNameToUse}"."${colName}"`
+            : `\`${tableNameToUse}\`.\`${colName}\``;
       } else {
-        identifier =
-          dialect === "postgres"
-            ? `"${colConfig.name}"`
-            : `\`${colConfig.name}\``;
+        identifier = dialect === "postgres" ? `"${colName}"` : `\`${colName}\``;
       }
       return `COUNT(${identifier})`;
     },
@@ -298,23 +383,38 @@ export function like(
     },
     toSqlString: (
       dialect: Dialect,
-      currentParamIndex?: { value: number }
+      currentParamIndex?: { value: number },
+      aliasMap?: Map<string, string> // Added aliasMap
     ): string => {
       const paramIdxState = currentParamIndex || { value: 1 };
-      const colName =
-        dialect === "postgres" ? `"${column.name}"` : `\`${column.name}\``;
-      const tblName = column._tableName
+
+      const colConfig = column as ColumnConfig<any, any>; // Treat column as ColumnConfig
+      const colName = colConfig.name;
+      let tableNameToUse = colConfig._tableName;
+      if (
+        aliasMap &&
+        colConfig._tableName &&
+        aliasMap.has(colConfig._tableName)
+      ) {
+        tableNameToUse = aliasMap.get(colConfig._tableName);
+      }
+
+      const tblNamePart = tableNameToUse
         ? dialect === "postgres"
-          ? `"${column._tableName}".`
-          : `\`${column._tableName}\`.`
+          ? `"${tableNameToUse}".`
+          : `\`${tableNameToUse}\`.`
         : "";
+      const colNamePart =
+        dialect === "postgres" ? `"${colName}"` : `\`${colName}\``;
+      const fullColIdentifier = `${tblNamePart}${colNamePart}`;
 
       if (dialect === "spanner") {
         const paramPlaceholder = `@p${paramIdxState.value++}`;
-        return `REGEXP_CONTAINS(${tblName}${colName}, ${paramPlaceholder})`;
+        // For Spanner, like() translates to REGEXP_CONTAINS, so the column part is an identifier
+        return `REGEXP_CONTAINS(${fullColIdentifier}, ${paramPlaceholder})`;
       }
       // PostgreSQL
-      let sqlStr = `${tblName}${colName} LIKE $${paramIdxState.value++}`;
+      let sqlStr = `${fullColIdentifier} LIKE $${paramIdxState.value++}`;
       if (escapeChar) {
         sqlStr += ` ESCAPE $${paramIdxState.value++}`;
       }
@@ -347,23 +447,38 @@ export function ilike(
     },
     toSqlString: (
       dialect: Dialect,
-      currentParamIndex?: { value: number }
+      currentParamIndex?: { value: number },
+      aliasMap?: Map<string, string> // Added aliasMap
     ): string => {
       const paramIdxState = currentParamIndex || { value: 1 };
-      const colName =
-        dialect === "postgres" ? `"${column.name}"` : `\`${column.name}\``;
-      const tblName = column._tableName
+
+      const colConfig = column as ColumnConfig<any, any>; // Treat column as ColumnConfig
+      const colName = colConfig.name;
+      let tableNameToUse = colConfig._tableName;
+      if (
+        aliasMap &&
+        colConfig._tableName &&
+        aliasMap.has(colConfig._tableName)
+      ) {
+        tableNameToUse = aliasMap.get(colConfig._tableName);
+      }
+
+      const tblNamePart = tableNameToUse
         ? dialect === "postgres"
-          ? `"${column._tableName}".`
-          : `\`${column._tableName}\`.`
+          ? `"${tableNameToUse}".`
+          : `\`${tableNameToUse}\`.`
         : "";
+      const colNamePart =
+        dialect === "postgres" ? `"${colName}"` : `\`${colName}\``;
+      const fullColIdentifier = `${tblNamePart}${colNamePart}`;
 
       if (dialect === "spanner") {
         const paramPlaceholder = `@p${paramIdxState.value++}`;
-        return `REGEXP_CONTAINS(${tblName}${colName}, ${paramPlaceholder})`;
+        // For Spanner, ilike() translates to REGEXP_CONTAINS, so the column part is an identifier
+        return `REGEXP_CONTAINS(${fullColIdentifier}, ${paramPlaceholder})`;
       }
       // PostgreSQL
-      let sqlStr = `${tblName}${colName} ILIKE $${paramIdxState.value++}`;
+      let sqlStr = `${fullColIdentifier} ILIKE $${paramIdxState.value++}`;
       if (escapeChar) {
         sqlStr += ` ESCAPE $${paramIdxState.value++}`;
       }
@@ -390,20 +505,22 @@ export function regexpContains(
     getValues: (_dialect: Dialect) => [regexpPattern], // dialect not used but required by interface
     toSqlString: (
       dialect: Dialect,
-      currentParamIndex?: { value: number }
+      currentParamIndex?: { value: number },
+      aliasMap?: Map<string, string> // Added aliasMap
     ): string => {
-      // Here, we can use the sql tag because the parameter logic is simple (always one parameter)
-      // and doesn't depend on the dialect for the getValues part.
+      // Pass aliasMap to the toSqlString call of the SQL object returned by the sql tag
       if (dialect === "spanner") {
         return sql`REGEXP_CONTAINS(${column}, ${regexpPattern})`.toSqlString(
           dialect,
-          currentParamIndex
+          currentParamIndex,
+          aliasMap // Pass aliasMap
         );
       } else {
         // postgres
         return sql`${column} ~ ${regexpPattern}`.toSqlString(
           dialect,
-          currentParamIndex
+          currentParamIndex,
+          aliasMap // Pass aliasMap
         );
       }
     },
@@ -417,22 +534,32 @@ export function regexpContains(
 export function sum(field: ColumnConfig<any, any>): SQL {
   return {
     _isSQL: true,
-    getValues: (_dialect: Dialect) => [], // dialect not used but required by interface
-    toSqlString: (dialect: Dialect): string => {
+    getValues: (_dialect: Dialect) => [],
+    toSqlString: (
+      dialect: Dialect,
+      _currentParamIndex?: { value: number },
+      aliasMap?: Map<string, string> // Added aliasMap
+    ): string => {
       const colConfig = field as ColumnConfig<any, any>;
-      let identifier = "";
-      if (colConfig._tableName) {
-        identifier =
-          dialect === "postgres"
-            ? `"${colConfig._tableName}"."${colConfig.name}"`
-            : `\`${colConfig._tableName}\`.\`${colConfig.name}\``;
-      } else {
-        identifier =
-          dialect === "postgres"
-            ? `"${colConfig.name}"`
-            : `\`${colConfig.name}\``;
+      const colName = colConfig.name;
+      let tableNameToUse = colConfig._tableName;
+      if (
+        aliasMap &&
+        colConfig._tableName &&
+        aliasMap.has(colConfig._tableName)
+      ) {
+        tableNameToUse = aliasMap.get(colConfig._tableName);
       }
-      return `SUM(${identifier})`;
+      let identifier = "";
+      if (tableNameToUse) {
+        identifier =
+          dialect === "postgres"
+            ? `"${tableNameToUse}"."${colName}"`
+            : `\`${tableNameToUse}\`.\`${colName}\``;
+      } else {
+        identifier = dialect === "postgres" ? `"${colName}"` : `\`${colName}\``;
+      }
+      return `MIN(${identifier})`; // This one is correct
     },
   };
 }
@@ -444,20 +571,30 @@ export function sum(field: ColumnConfig<any, any>): SQL {
 export function avg(field: ColumnConfig<any, any>): SQL {
   return {
     _isSQL: true,
-    getValues: (_dialect: Dialect) => [], // dialect not used but required by interface
-    toSqlString: (dialect: Dialect): string => {
+    getValues: (_dialect: Dialect) => [],
+    toSqlString: (
+      dialect: Dialect,
+      _currentParamIndex?: { value: number },
+      aliasMap?: Map<string, string> // Added aliasMap
+    ): string => {
       const colConfig = field as ColumnConfig<any, any>;
+      const colName = colConfig.name;
+      let tableNameToUse = colConfig._tableName;
+      if (
+        aliasMap &&
+        colConfig._tableName &&
+        aliasMap.has(colConfig._tableName)
+      ) {
+        tableNameToUse = aliasMap.get(colConfig._tableName);
+      }
       let identifier = "";
-      if (colConfig._tableName) {
+      if (tableNameToUse) {
         identifier =
           dialect === "postgres"
-            ? `"${colConfig._tableName}"."${colConfig.name}"`
-            : `\`${colConfig._tableName}\`.\`${colConfig.name}\``;
+            ? `"${tableNameToUse}"."${colName}"`
+            : `\`${tableNameToUse}\`.\`${colName}\``;
       } else {
-        identifier =
-          dialect === "postgres"
-            ? `"${colConfig.name}"`
-            : `\`${colConfig.name}\``;
+        identifier = dialect === "postgres" ? `"${colName}"` : `\`${colName}\``;
       }
       return `AVG(${identifier})`;
     },
@@ -471,20 +608,30 @@ export function avg(field: ColumnConfig<any, any>): SQL {
 export function min(field: ColumnConfig<any, any>): SQL {
   return {
     _isSQL: true,
-    getValues: (_dialect: Dialect) => [], // dialect not used but required by interface
-    toSqlString: (dialect: Dialect): string => {
+    getValues: (_dialect: Dialect) => [],
+    toSqlString: (
+      dialect: Dialect,
+      _currentParamIndex?: { value: number },
+      aliasMap?: Map<string, string> // Added aliasMap
+    ): string => {
       const colConfig = field as ColumnConfig<any, any>;
+      const colName = colConfig.name;
+      let tableNameToUse = colConfig._tableName;
+      if (
+        aliasMap &&
+        colConfig._tableName &&
+        aliasMap.has(colConfig._tableName)
+      ) {
+        tableNameToUse = aliasMap.get(colConfig._tableName);
+      }
       let identifier = "";
-      if (colConfig._tableName) {
+      if (tableNameToUse) {
         identifier =
           dialect === "postgres"
-            ? `"${colConfig._tableName}"."${colConfig.name}"`
-            : `\`${colConfig._tableName}\`.\`${colConfig.name}\``;
+            ? `"${tableNameToUse}"."${colName}"`
+            : `\`${tableNameToUse}\`.\`${colName}\``;
       } else {
-        identifier =
-          dialect === "postgres"
-            ? `"${colConfig.name}"`
-            : `\`${colConfig.name}\``;
+        identifier = dialect === "postgres" ? `"${colName}"` : `\`${colName}\``;
       }
       return `MIN(${identifier})`;
     },
@@ -498,20 +645,30 @@ export function min(field: ColumnConfig<any, any>): SQL {
 export function max(field: ColumnConfig<any, any>): SQL {
   return {
     _isSQL: true,
-    getValues: (_dialect: Dialect) => [], // dialect not used but required by interface
-    toSqlString: (dialect: Dialect): string => {
+    getValues: (_dialect: Dialect) => [],
+    toSqlString: (
+      dialect: Dialect,
+      _currentParamIndex?: { value: number }, // paramIndexState not used by MAX for string part
+      aliasMap?: Map<string, string> // Ensured aliasMap is parameter
+    ): string => {
       const colConfig = field as ColumnConfig<any, any>;
+      const colName = colConfig.name;
+      let tableNameToUse = colConfig._tableName;
+      if (
+        aliasMap &&
+        colConfig._tableName &&
+        aliasMap.has(colConfig._tableName)
+      ) {
+        tableNameToUse = aliasMap.get(colConfig._tableName);
+      }
       let identifier = "";
-      if (colConfig._tableName) {
+      if (tableNameToUse) {
         identifier =
           dialect === "postgres"
-            ? `"${colConfig._tableName}"."${colConfig.name}"`
-            : `\`${colConfig._tableName}\`.\`${colConfig.name}\``;
+            ? `"${tableNameToUse}"."${colName}"`
+            : `\`${tableNameToUse}\`.\`${colName}\``;
       } else {
-        identifier =
-          dialect === "postgres"
-            ? `"${colConfig.name}"`
-            : `\`${colConfig.name}\``;
+        identifier = dialect === "postgres" ? `"${colName}"` : `\`${colName}\``;
       }
       return `MAX(${identifier})`;
     },

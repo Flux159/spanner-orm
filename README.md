@@ -167,7 +167,7 @@ Make sure to read notes/Phase5.md and notes/GoogleSQLSpanner.md when working on 
   - [x] Confirmed support for `boolean` and `jsonb` column types.
   - [x] Implemented `uuid()` helper function.
   - [x] Implemented Foreign Key DDL generation.
-  - [ ] **T5.2.1: Basic Relational Awareness in Query Builder:** Allow query methods to understand and correctly alias columns from tables with defined relationships.
+  - [x] **T5.2.1: Basic Relational Awareness in Query Builder:** Allow query methods to understand and correctly alias columns from tables with defined relationships. (Includes aliasing within SQL helper functions).
   - [ ] **T5.2.2: Simple Eager Loading (One Level Deep):** Implement fetching of directly related data (e.g., user's posts). Start with one-to-many.
   - [ ] **T5.2.3: Fluent Join API based on Schema Relations:** Enable joins based on pre-defined schema relations for a more ORM-like experience.
 - [x] **T5.3: Performance Optimizations (e.g., batching for Spanner).**
