@@ -5,7 +5,8 @@ import type {
   SQL,
   InferModelType,
   Dialect,
-  IncludeClause,
+  IncludeClause, // Old type, kept for include() method parameter for now
+  EnhancedIncludeClause, // New type
   PreparedQuery,
 } from "../types/common.js";
 import { sql } from "../types/common.js";
@@ -54,7 +55,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
   private _insertValues?: InsertData<TTable>;
   private _updateSetValues?: UpdateData<TTable>;
   private _conditions: WhereCondition[] = [];
-  private _includeClause?: IncludeClause;
+  private _includeClause?: EnhancedIncludeClause; // Changed to EnhancedIncludeClause
 
   constructor() {}
 
@@ -206,7 +207,24 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       );
     }
     if (!this._operationType) this._operationType = "select";
-    this._includeClause = { ...(this._includeClause || {}), ...clause };
+
+    const currentEnhancedInclude = this._includeClause || {};
+    for (const [relationName, relationOptions] of Object.entries(clause)) {
+      const relatedTable = getTableConfig(relationName);
+      if (!relatedTable) {
+        console.warn(
+          `QueryBuilder: Table configuration for relation "${relationName}" not found. Skipping include.`
+        );
+        continue;
+      }
+      // The relationOptions (boolean | {select?: Record<string, boolean>})
+      // is compatible with TypedIncludeRelationOptions
+      currentEnhancedInclude[relationName] = {
+        relationTable: relatedTable,
+        options: relationOptions as EnhancedIncludeClause[string]["options"],
+      };
+    }
+    this._includeClause = currentEnhancedInclude;
     return this;
   }
 
@@ -215,7 +233,9 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
    * @param dialect The SQL dialect.
    * @returns A PreparedQuery object.
    */
-  prepare(dialect: Dialect): PreparedQuery<TTable> {
+  prepare(
+    dialect: Dialect
+  ): PreparedQuery<TTable, EnhancedIncludeClause | undefined> {
     if (!this._operationType) {
       throw new Error("Operation type not set.");
     }
@@ -311,11 +331,15 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     const selectedFieldsFromIncludes: SelectFields = {};
 
     if (this._includeClause) {
-      for (const [relationName, includeOptions] of Object.entries(
+      for (const [relationName, enhancedIncludeEntry] of Object.entries(
         this._includeClause
       )) {
-        const relatedTableConfig = getTableConfig(relationName);
+        // const relatedTableConfig = getTableConfig(relationName); // Now directly available
+        const relatedTableConfig = enhancedIncludeEntry.relationTable;
+        const includeOptions = enhancedIncludeEntry.options; // This is the boolean or {select?: ...}
+
         if (!relatedTableConfig) {
+          // Should not happen if include() worked correctly
           console.warn(
             `Warning: Could not find table config for relation "${relationName}" to include.`
           );
@@ -357,9 +381,12 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
         });
 
         const relationOpts =
-          typeof includeOptions === "object" ? includeOptions : {};
+          typeof includeOptions === "object" && includeOptions !== null
+            ? includeOptions
+            : {};
         const selectAllRelated =
-          includeOptions === true || !relationOpts.select;
+          includeOptions === true ||
+          (typeof includeOptions === "object" && !includeOptions.select);
 
         for (const [relatedColKey, relatedColConfigUntyped] of Object.entries(
           relatedTableConfig.columns
@@ -541,11 +568,15 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     const selectedFieldsFromIncludes: SelectFields = {};
 
     if (this._includeClause) {
-      for (const [relationName, includeOptions] of Object.entries(
+      for (const [relationName, enhancedIncludeEntry] of Object.entries(
         this._includeClause
       )) {
-        const relatedTableConfig = getTableConfig(relationName);
+        // const relatedTableConfig = getTableConfig(relationName); // Now directly available
+        const relatedTableConfig = enhancedIncludeEntry.relationTable;
+        const includeOptions = enhancedIncludeEntry.options; // This is the boolean or {select?: ...}
+
         if (!relatedTableConfig) {
+          // Should not happen if include() worked correctly
           console.warn(
             `Warning: Spanner - Could not find table config for relation "${relationName}" to include.`
           );
@@ -586,9 +617,12 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
         });
 
         const relationOpts =
-          typeof includeOptions === "object" ? includeOptions : {};
+          typeof includeOptions === "object" && includeOptions !== null
+            ? includeOptions
+            : {};
         const selectAllRelated =
-          includeOptions === true || !relationOpts.select;
+          includeOptions === true ||
+          (typeof includeOptions === "object" && !includeOptions.select);
 
         for (const [relatedColKey, relatedColConfigUntyped] of Object.entries(
           relatedTableConfig.columns
@@ -1221,5 +1255,76 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
 
   leftJoin(table: TableConfig<any, any>, onCondition: SQL): this {
     return this.addJoin("LEFT", table, onCondition);
+  }
+
+  joinRelation(relationName: string, joinType: JoinType = "LEFT"): this {
+    if (!this._targetTable) {
+      throw new Error(
+        "Cannot join relation: target table not set. Call .from() first."
+      );
+    }
+    if (this._operationType !== "select") {
+      throw new Error(`joinRelation() is only applicable to SELECT queries.`);
+    }
+
+    const relatedTableConfig = getTableConfig(relationName);
+    if (!relatedTableConfig) {
+      throw new Error(
+        `Could not find table configuration for relation: ${relationName}`
+      );
+    }
+
+    let fkColumn: ColumnConfig<any, any> | undefined;
+    let pkColumn: ColumnConfig<any, any> | undefined;
+    let joinTable = relatedTableConfig; // The table we are joining TO
+
+    // Scenario 1: Current _targetTable is PARENT, relatedTableConfig is CHILD (e.g. users.joinRelation('posts'))
+    // We look for an FK in relatedTableConfig (child) that points to _targetTable (parent)
+    for (const col of Object.values(relatedTableConfig.columns)) {
+      const colConfig = col as ColumnConfig<any, any>;
+      if (colConfig.references) {
+        const referencedPkColumn = colConfig.references.referencesFn();
+        if (referencedPkColumn._tableName === this._targetTable.name) {
+          fkColumn = colConfig; // FK in child table (relatedTableConfig)
+          pkColumn = referencedPkColumn; // PK in parent table (_targetTable)
+          joinTable = relatedTableConfig;
+          break;
+        }
+      }
+    }
+
+    // Scenario 2: Current _targetTable is CHILD, relatedTableConfig is PARENT (e.g. posts.joinRelation('user'))
+    // We look for an FK in _targetTable (child) that points to relatedTableConfig (parent)
+    if (!fkColumn) {
+      for (const col of Object.values(this._targetTable.columns)) {
+        const colConfig = col as ColumnConfig<any, any>;
+        if (colConfig.references) {
+          const referencedPkColumn = colConfig.references.referencesFn();
+          if (referencedPkColumn._tableName === relatedTableConfig.name) {
+            fkColumn = colConfig; // FK in child table (_targetTable)
+            pkColumn = referencedPkColumn; // PK in parent table (relatedTableConfig)
+            joinTable = relatedTableConfig; // Still joining TO the relatedTableConfig
+            break;
+          }
+        }
+      }
+    }
+
+    if (fkColumn && pkColumn) {
+      const onCondition = sql`${fkColumn} = ${pkColumn}`;
+      return this.addJoin(joinType, joinTable, onCondition);
+    }
+
+    throw new Error(
+      `Could not automatically determine relationship between ${this._targetTable.name} and ${relationName}. Please use explicit join with ON condition.`
+    );
+  }
+
+  innerJoinRelation(relationName: string): this {
+    return this.joinRelation(relationName, "INNER");
+  }
+
+  leftJoinRelation(relationName: string): this {
+    return this.joinRelation(relationName, "LEFT");
   }
 }

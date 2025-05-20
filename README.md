@@ -4,12 +4,15 @@ A TypeScript ORM for Google Spanner & PostgreSQL, designed for Node.js and Bun. 
 
 ## Key Design Goals
 
-`spanner-orm` is built to meet the following key requirements for modern, flexible database development:
+`spanner-orm` is engineered to deliver a seamless experience across different database backends, focusing on these core requirements:
 
-- **Unified Schema:** Supports both PostgreSQL & Google Spanner with a single, Drizzle-inspired object model.
-- **Automated Migrations:** Produces and manages migrations for both PostgreSQL & Spanner, executable via CLI or programmatically.
-- **Versatile Querying:** Offers a powerful query builder with the ability to fall back to raw SQL when needed.
-- **Dialect-Optimized SQL:** Generates Google SQL for Spanner and near-equivalent, standard SQL for PostgreSQL/Pglite, enabling seamless transitions between local development (Pglite), traditional deployments (PostgreSQL), and global-scale applications (Spanner).
+- **Single Object Model for PostgreSQL & Spanner:** Define your data structures once. `spanner-orm` supports both PostgreSQL (including Pglite) and Google Spanner using a consistent, Drizzle-inspired object model.
+- **Cross-Dialect Migration Generation:** Automatically produce and manage migration files for both PostgreSQL and Google Spanner. Migrations can be executed via a dedicated CLI command or programmatically.
+- **Flexible Query Construction:** Build your database queries using an intuitive query builder, or seamlessly fall back to raw SQL for complex operations or specific dialect features.
+- **Optimized Multi-Dialect SQL Support:**
+  - **Google Spanner:** Leverages Google SQL for optimal performance and feature utilization.
+  - **PostgreSQL/Pglite:** Generates standard, highly compatible SQL.
+    This approach empowers developers to use PostgreSQL for traditional or non-Spanner deployments, Pglite for local development or embedded applications, and Google Spanner for globally scalable web applications, all from a unified codebase.
 
 ## Core Features
 
