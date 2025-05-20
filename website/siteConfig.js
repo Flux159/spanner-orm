@@ -38,7 +38,7 @@ const siteConfig = {
   // e.g., for the https://JoelMarcey.github.io site, it would be set like...
   //   organizationName: 'JoelMarcey'
 
-  customDocsPath: "../docs", // Points to the 'docs' folder at the project root
+  // customDocsPath: "../docs", // Points to the 'docs' folder at the project root
 
   // For no header links in the top nav bar -> headerLinks: [],
   headerLinks: [

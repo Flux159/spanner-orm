@@ -8,6 +8,7 @@
     "version": "docusaurus-version",
     "rename-version": "docusaurus-rename-version"
   },
+  "license": "MIT",
   "devDependencies": {
     "docusaurus": "^1.14.7"
   }

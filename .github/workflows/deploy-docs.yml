@@ -41,4 +41,4 @@ jobs:
           git config --global user.email "action@github.com"
           git config --global user.name "github-actions[bot]"
           cd website
-          yarn run publish-gh-pages
+          # yarn run publish-gh-pages
