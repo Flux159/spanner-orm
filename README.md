@@ -2,33 +2,47 @@
 
 A TypeScript ORM for Google Spanner & PostgreSQL, designed for Node.js and Bun. Inspired by Drizzle ORM, `spanner-orm` aims to provide a single, elegant object model for defining your schema and querying your data across both database systems.
 
+## Key Design Goals
+
+`spanner-orm` is built to meet the following key requirements for modern, flexible database development:
+
+- **Unified Schema:** Supports both PostgreSQL & Google Spanner with a single, Drizzle-inspired object model.
+- **Automated Migrations:** Produces and manages migrations for both PostgreSQL & Spanner, executable via CLI or programmatically.
+- **Versatile Querying:** Offers a powerful query builder with the ability to fall back to raw SQL when needed.
+- **Dialect-Optimized SQL:** Generates Google SQL for Spanner and near-equivalent, standard SQL for PostgreSQL/Pglite, enabling seamless transitions between local development (Pglite), traditional deployments (PostgreSQL), and global-scale applications (Spanner).
+
 ## Core Features
 
 `spanner-orm` is designed to provide a seamless and powerful experience for managing data across PostgreSQL and Google Spanner. Its core capabilities include:
 
-- **Unified Object Model for PostgreSQL & Spanner:** Define your database schema once using a Drizzle-inspired syntax. This single object model seamlessly supports both PostgreSQL and Google Spanner, simplifying development and ensuring consistency across diverse database environments.
+- **Unified Object Model for Diverse Deployments:** Define your database schema _once_ using a Drizzle-inspired syntax. This single object model seamlessly supports both PostgreSQL (including Pglite for local/embedded use) and Google Spanner. This allows for consistent data modeling whether you're targeting a local SQLite database, a traditional PostgreSQL server, or a globally distributed Spanner instance.
 
-- **Comprehensive Migration Generation & Execution:** Automatically produce migration files with the appropriate DDL for both PostgreSQL and Spanner. These migrations can be run via the `spanner-orm-cli migrate` command (e.g., `migrate latest`, `migrate down`) or programmatically within your application, ensuring smooth schema evolution.
+- **Dialect-Specific Migration Generation & Execution:** Automatically produce migration files containing the precise DDL for both PostgreSQL and Google Spanner. These migrations can be executed via the `spanner-orm-cli migrate` command (e.g., `migrate latest`, `migrate down`) or programmatically, ensuring smooth and reliable schema evolution across all supported database systems.
 
-- **Versatile Query Building with SQL Fallback:** Construct type-safe queries using an intuitive query builder. For complex scenarios or dialect-specific needs, seamlessly fall back to raw SQL using the `sql` template literal tag, offering maximum flexibility.
+- **Flexible Query Building with Raw SQL Fallback:** Construct type-safe queries using an intuitive query builder. For complex scenarios, dialect-specific optimizations, or when you simply prefer writing SQL, seamlessly fall back to raw SQL using the `sql` template literal tag. This offers maximum flexibility without sacrificing the benefits of the ORM.
 
-- **Dialect-Optimized SQL for Flexible Deployments:**
+- **Optimized SQL for Each Dialect:**
 
-  - Generates Google SQL specifically tailored for Spanner's unique architecture and capabilities.
-  - Produces standard, highly compatible SQL for PostgreSQL.
-  - This dual-dialect support empowers you to use PostgreSQL for non-Spanner deployments, Pglite for local development or embedded applications, and Google Spanner for demanding web-scale applications, all from a single, consistent codebase.
+  - **Google Spanner:** Generates Google SQL, leveraging Spanner's unique features and syntax for optimal performance and compatibility.
+  - **PostgreSQL/Pglite:** Produces standard, highly compatible SQL, ensuring broad compatibility with PostgreSQL versions and Pglite.
+  - This dual-dialect approach empowers developers to use the right database for the right job—Pglite for ultra-lightweight local development or client-side applications, PostgreSQL for traditional server-based deployments, and Google Spanner for applications requiring web-scale, global distribution—all managed from a single, consistent codebase.
 
-- **Composable Schemas (Drizzle-Inspired):** Easily create and reuse schema components (e.g., for common fields like `id`, `createdAt`, `updatedAt`, or base entity structures), promoting DRY principles and maintainable data models.
+- **Composable Schemas (Drizzle-Inspired):** Easily create and reuse schema components (e.g., for common fields like `id`, `createdAt`, `updatedAt`, or base entity structures like `ownableResource`), promoting DRY principles and highly maintainable data models.
 
-- **TypeScript First:** Built from the ground up with TypeScript, `spanner-orm` offers a robust, type-safe, and enjoyable developer experience, with strong type inference from your schema definitions.
+- **Dynamic Default Value Generation:** Supports dynamic default values at the application level via `$defaultFn()`, allowing you to execute functions (e.g., `crypto.randomUUID()`) to generate default values during insert operations.
+
+- **TypeScript First:** Built from the ground up with TypeScript, `spanner-orm` offers a robust, type-safe, and enjoyable developer experience, with strong type inference from your schema definitions to your query results.
 
 ## Why spanner-orm?
 
-`spanner-orm` addresses a critical need for developers building applications that require the immense scalability of Google Spanner while also desiring the versatility of PostgreSQL for other deployment scenarios (e.g., non-Spanner enterprise deployments, local development with Pglite, or applications where data resides locally). Currently, the Node.js/Bun ecosystem lacks a dedicated ORM that elegantly bridges these two powerful database systems with a single, consistent object model. `spanner-orm` fills this gap by:
+In today's diverse application landscape, developers often need to target multiple database backends. You might start with Pglite for rapid prototyping or local-first applications, move to PostgreSQL for self-hosted or managed deployments, and eventually require the massive scalability and global consistency of Google Spanner. `spanner-orm` addresses the critical challenge of managing data models and queries across these different systems without rewriting your data access layer.
 
-- Allowing a single codebase for data modeling across different database backends.
-- Simplifying the transition between local/testing environments (using Pglite/Postgres) and production environments (using Spanner or Postgres).
-- Providing a productive and familiar Drizzle-inspired API.
+Currently, the Node.js/Bun ecosystem lacks a dedicated ORM that elegantly bridges PostgreSQL and Google Spanner with a single, consistent object model and a unified migration strategy. `spanner-orm` fills this gap by:
+
+- **Enabling a Single Codebase:** Define your schema and write your queries once. `spanner-orm` handles the dialect-specific SQL generation.
+- **Streamlining Development & Deployment:** Simplify the transition between local development (Pglite/Postgres), testing, and production environments (Spanner or Postgres).
+- **Reducing Complexity:** Abstract away the differences between Google SQL and PostgreSQL DDL/DML where possible, while still allowing access to dialect-specific features when needed.
+- **Providing a Productive API:** Offer a familiar and productive Drizzle-inspired API that TypeScript developers will appreciate.
 
 ## Architecture Overview
 
@@ -138,20 +152,29 @@ This project will be developed in phases. Here's a high-level overview:
 
 Make sure to read notes/Phase5.md and notes/GoogleSQLSpanner.md when working on Phase 5.
 
-- [ ] **T5.0: Integrate Database Adapters into Migration CLI:**
-  - Implement a mechanism in `src/cli.ts` (e.g., via environment variables or a config file) to determine which database adapter to use (PostgreSQL, Pglite, Spanner) and its connection details.
-  - Replace placeholder `executeCmdSql` and `queryRowsSql` functions in `handleMigrateLatest` and `handleMigrateDown` with actual calls to the instantiated `DatabaseAdapter` (its `execute` and `query` methods).
-  - This will make `migrate latest` and `migrate down` fully operational.
-- [ ] **T5.1: Advanced Querying:** Joins, aggregations, grouping, ordering, pagination / limit & order by, sql functions like concat, like, ilike (like & ilike not available in Google SQL - see notes/GoogleSQLSpanner.md).
-  - Need to add querying examples to the README.md as well - since we have DDL example, migration example, we should also have common querying examples in the readme so that users know how to use for querying as well as migration generation.
-- [ ] **T5.2: Relational Mappings in Schema & Query Builder.**
-  - Add defaultFn capability into ORM. See notes/DefaultFnTask.md for more info on what this means. Then update the code example below in README.md to show that its supported.
-  - Support for boolean, uniqueIndex, index, json/jsonb
-  - An alias for "uuid" that in spanner is implemented as varchar of length 36 that has defaultFn already setup. In postgres this is a uuid type & could potentially create the uuid inside of postgres itself.
-- [ ] **T5.3: Performance Optimizations (e.g., batching for Spanner).**
-  - Limit DDL statements that require validation to 10 per migration / batch (see notes/GoogleSQLSpanner.md).
-- [ ] **T5.4: Comprehensive Documentation & Examples.**
-- [ ] **T5.5: Robust Testing Suite (unit & integration tests).**
+- [x] **T5.0: Integrate Database Adapters into Migration CLI:**
+  - Implemented database connection configuration via environment variables (`DB_DIALECT`, `DATABASE_URL`, Spanner-specific vars).
+  - Created `getDatabaseAdapter()` factory function in `src/cli.ts` for instantiating and connecting appropriate adapters.
+  - Updated `handleMigrateLatest` and `handleMigrateDown` in `src/cli.ts` to use the live adapter.
+  - Removed the `--dialect` CLI option from `migrate latest` and `migrate down`, relying on `DB_DIALECT`.
+- [x] **T5.1: Advanced Querying:**
+  - [x] Implemented Joins (INNER, LEFT), Aggregations (COUNT, SUM, AVG, MIN, MAX), Grouping (GROUP BY), Ordering (ORDER BY).
+  - [x] Implemented Pagination (LIMIT, OFFSET).
+  - [x] Implemented SQL functions: `like`, `ilike`, `regexpContains`, `concat`, `lower`, `upper`.
+  - [x] Added querying examples to README.md for these features.
+- [ ] **T5.2: Relational Mappings in Schema & Query Builder (To Be Broken Down):**
+  - [x] Implemented `$defaultFn()` for dynamic default values during INSERT operations.
+  - [x] Confirmed support for `boolean` and `jsonb` column types.
+  - [x] Implemented `uuid()` helper function.
+  - [x] Implemented Foreign Key DDL generation.
+  - [ ] **T5.2.1: Basic Relational Awareness in Query Builder:** Allow query methods to understand and correctly alias columns from tables with defined relationships.
+  - [ ] **T5.2.2: Simple Eager Loading (One Level Deep):** Implement fetching of directly related data (e.g., user's posts). Start with one-to-many.
+  - [ ] **T5.2.3: Fluent Join API based on Schema Relations:** Enable joins based on pre-defined schema relations for a more ORM-like experience.
+- [x] **T5.3: Performance Optimizations (e.g., batching for Spanner).**
+  - [x] Implemented selective DDL batching for Spanner, grouping validating DDLs (e.g., CREATE INDEX, ALTER TABLE ADD/ALTER COLUMN, ADD FOREIGN KEY) into batches of up to 5.
+- [ ] **T5.4: Comprehensive Documentation & Examples.** (Ongoing - README updates are part of this).
+- [~] **T5.5: Robust Testing Suite (unit & integration tests).** (Ongoing - Unit tests have been added for current features features, but new features will need more unit tests).
+- [ ] **T5.6: Setup Docusaurus Documentation:** Implement Docusaurus for comprehensive, versioned documentation, deployable to GitHub Pages.
 
 ### Beyond Phase 5: Future Considerations
 
@@ -183,24 +206,25 @@ Make sure to read notes/Phase5.md and notes/GoogleSQLSpanner.md when working on 
     ```typescript
     // src/schema.ts
     import {
-      table, // Replaces pgTable from Drizzle
+      table,
       text,
       timestamp,
       varchar,
       integer,
-      // boolean, // Assuming boolean is available or will be
-      // uniqueIndex, // Assuming uniqueIndex is available or will be
-      // primaryKey, // Often part of column definition, e.g., .primaryKey()
-      // jsonb, // Or json Assuming jsonb or equivalent (e.g., json for PG, JSON/STRING for Spanner)
-      // index, // Assuming index is available or will be
-      sql, // For raw SQL expressions like default values
+      boolean,
+      jsonb,
+      uuid, // New uuid helper
+      index,
+      uniqueIndex,
+      sql,
     } from "spanner-orm"; // Adjust import path as per your project structure
-    import crypto from "crypto"; // For generating UUIDs
+    // No need to import crypto here if uuid() handles it internally via $defaultFn
 
     // --- Define a placeholder 'users' table for demonstrating references ---
-    // This would typically be in your main schema file or imported.
     export const users = table("users", {
-      id: varchar("id", { length: 36 }).primaryKey(), // Assuming user ID is a string UUID
+      id: uuid("id").primaryKey(), // Using the new uuid helper
+      email: text("email").notNull().unique(),
+      name: text("name"),
       // ... other user fields
     });
 
@@ -214,58 +238,59 @@ Make sure to read notes/Phase5.md and notes/GoogleSQLSpanner.md when working on 
       updatedAt: timestamp("updated_at", { withTimezone: true })
         .default(sql`CURRENT_TIMESTAMP`) // Use backticks for sql template literal
         .notNull(),
-      // Drizzle's .$onUpdate(() => new Date()) would require adapter-specific handling or triggers
     };
 
-    // Base model with ID and timestamps
+    // Base model with ID (using uuid helper) and timestamps
     export const baseModel = {
-      id: varchar("id", { length: 36 })
-        // .$defaultFn(() => crypto.randomUUID()) // .$defaultFn is Drizzle-specific;
-        // For spanner-orm, default generation might be handled differently
-        // or you might set it at application level before insert.
-        // For this example, we'll assume a client-generated UUID or a DB default if supported.
-        .primaryKey(), // crypto.randomUUID() can be used by application logic to generate default.
+      id: uuid("id").primaryKey(), // Automatically uses $defaultFn(() => crypto.randomUUID())
       ...timestamps,
     };
 
     // For resources that are owned by a user
     export const ownableResource = {
-      // Removed 'any' type for better practice if possible
       ...baseModel,
-      userId: varchar("user_id", { length: 36 }) // Assuming user_id is also a UUID
+      userId: uuid("user_id") // Assuming user_id is also a UUID
         .notNull()
-        .references(() => users.id, { onDelete: "cascade" }), // Ensure references() is implemented
+        .references(() => users.id, { onDelete: "cascade" }),
     };
 
     // For resources that have visibility permissions
-    // type VisibilityStatus = "private" | "shared" | "public"; // Example type for visibility
+    type VisibilityStatus = "private" | "shared" | "public"; // Example type for visibility
 
     export const permissibleResource = {
-      // Removed 'any' type
       ...ownableResource,
       visibility: varchar("visibility", { length: 10 }) // e.g., 'private', 'shared', 'public'
         .default("private")
-        .notNull(),
-      // .$type<VisibilityStatus>() // .$type is a Drizzle-specific helper for type assertion.
-      // In spanner-orm, this would be managed by TypeScript's inference.
+        .notNull()
+        .$type<VisibilityStatus>(), // For type assertion if needed, or rely on TS inference
     };
 
     // --- Example Table: Uploads (using shared components) ---
-    export const uploads = table("uploads", {
-      // Use `table` from spanner-orm
-      ...permissibleResource, // Includes id, createdAt, updatedAt, userId, visibility
-      gcsObjectName: text("gcs_object_name").notNull(), // Full path in GCS
-      fileName: text("file_name").notNull(),
-      fileType: text("file_type").notNull(), // General type: 'image', 'audio', etc.
-      mimeType: text("mime_type").notNull(), // Specific MIME type: 'image/jpeg'
-      size: integer("size").notNull(), // File size in bytes
-    });
+    export const uploads = table(
+      "uploads",
+      {
+        ...permissibleResource, // Includes id, createdAt, updatedAt, userId, visibility
+        gcsObjectName: text("gcs_object_name").notNull(), // Full path in GCS
+        fileName: text("file_name").notNull(),
+        fileType: text("file_type").notNull(), // General type: 'image', 'audio', etc.
+        mimeType: text("mime_type").notNull(), // Specific MIME type: 'image/jpeg'
+        size: integer("size").notNull(), // File size in bytes
+        isProcessed: boolean("is_processed").default(false),
+        metadata: jsonb("metadata"), // Example for JSONB
+      },
+      (t) => ({
+        indexes: [
+          index({ columns: [t.fileType] }), // Example non-unique index
+          uniqueIndex({ name: "uq_gcs_object", columns: [t.gcsObjectName] }), // Example unique index
+        ],
+      })
+    );
 
     // You can then use these definitions to generate DDL or build queries.
     ```
 
-    This example demonstrates how you can compose schemas from shared building blocks, similar to patterns used in Drizzle ORM.
-    _(Note: Features like `.references()`, `.$defaultFn()`, advanced indexing, and specific type mappings like `jsonb` are part of ongoing development as outlined in the roadmap. The import paths and exact feature set of `spanner-orm` should be adjusted based on the library's actual implementation.)_
+    This example demonstrates how you can compose schemas from shared building blocks, similar to patterns used in Drizzle ORM, and showcases the usage of new features like `uuid()` and `$defaultFn()` (implicitly used by `uuid()`).
+    _(Note: The import paths and exact feature set of `spanner-orm` should be adjusted based on the library's actual implementation as development progresses.)_
 
 ## Usage Examples
 
@@ -314,27 +339,215 @@ This command applies all pending migrations to your database for the specified d
 (Requires database connection to be configured - e.g., via environment variables, specific adapter setup needed).
 
 ```bash
-# Apply latest migrations for PostgreSQL
-npx spanner-orm-cli migrate latest --schema ./dist/schema.js --dialect postgres
+# Apply latest migrations (dialect determined by DB_DIALECT environment variable)
+# Example: export DB_DIALECT=postgres
+#          export DATABASE_URL=postgresql://user:pass@host:port/db
+npx spanner-orm-cli migrate latest --schema ./dist/schema.js
 
-# Apply latest migrations for Spanner
-npx spanner-orm-cli migrate latest --schema ./dist/schema.js --dialect spanner
+# Example for Spanner:
+# export DB_DIALECT=spanner
+# export SPANNER_PROJECT_ID=my-gcp-project
+# export SPANNER_INSTANCE_ID=my-spanner-instance
+# export SPANNER_DATABASE_ID=my-spanner-database
+npx spanner-orm-cli migrate latest --schema ./dist/schema.js
 ```
 
 **3. Revert the last applied migration:**
 
-This command reverts the last applied migration for the specified dialect.
-(Requires database connection to be configured).
+This command reverts the last applied migration (dialect determined by `DB_DIALECT` environment variable).
 
 ```bash
-# Revert the last PostgreSQL migration
-npx spanner-orm-cli migrate down --schema ./dist/schema.js --dialect postgres
-
-# Revert the last Spanner migration
-npx spanner-orm-cli migrate down --schema ./dist/schema.js --dialect spanner
+# Revert the last migration
+npx spanner-orm-cli migrate down --schema ./dist/schema.js
 ```
 
-_(Note: While the core logic for `migrate latest` and `migrate down` is implemented, they require proper database connection configuration and adapter instantiation within the CLI to be fully operational. This is planned for Phase 5.)_
+_(Note: The migration CLI commands `migrate latest` and `migrate down` now use environment variables such as `DB_DIALECT`, `DATABASE_URL` (for PG/Pglite), and Spanner-specific variables like `SPANNER_PROJECT_ID`, `SPANNER_INSTANCE_ID`, `SPANNER_DATABASE_ID` to connect to your database and apply/revert migrations.)_
+
+### Querying Examples
+
+Here's how you can use the `QueryBuilder` to construct and execute queries. Assume you have your schema defined (e.g., `usersTable`, `postsTable` from the "Getting Started" example) and an initialized database adapter.
+
+```typescript
+import { QueryBuilder, sql } from "spanner-orm";
+import { usersTable, postsTable } from "./schema"; // Your schema definitions
+import {
+  count,
+  sum,
+  avg,
+  like,
+  ilike,
+  regexpContains,
+  concat,
+  lower,
+  upper,
+} from "spanner-orm/functions"; // Aggregate and string functions
+// import { getDbAdapter } from './your-adapter-setup'; // Your adapter setup
+
+// const db = getDbAdapter(); // Your initialized adapter instance
+
+async function runExamples() {
+  const qb = new QueryBuilder(); // Generic QueryBuilder, table specified in methods
+
+  // 1. Basic SELECT with WHERE
+  const recentUsersQuery = qb
+    .select({ id: usersTable.columns.id, name: usersTable.columns.name })
+    .from(usersTable)
+    .where(
+      sql`${usersTable.columns.createdAt} > ${new Date(
+        Date.now() - 24 * 60 * 60 * 1000
+      )}`
+    ) // Users created in the last 24 hours
+    .orderBy(usersTable.columns.createdAt, "DESC")
+    .limit(10);
+
+  // const recentUsersSql = recentUsersQuery.toSQL("postgres");
+  // console.log("Recent Users SQL:", recentUsersSql);
+  // const recentUsers = await db.execute(recentUsersSql, recentUsersQuery.getBoundParameters());
+
+  // 2. SELECT with INNER JOIN
+  const usersWithPostsQuery = qb
+    .select({
+      userName: usersTable.columns.name,
+      postTitle: postsTable.columns.title,
+    })
+    .from(usersTable)
+    .innerJoin(
+      postsTable,
+      sql`${usersTable.columns.id} = ${postsTable.columns.userId}`
+    )
+    .where(sql`${usersTable.columns.email} = ${"example@user.com"}`);
+
+  // const usersWithPostsSql = usersWithPostsQuery.toSQL("postgres");
+  // console.log("Users with Posts SQL:", usersWithPostsSql);
+  // const usersWithPosts = await db.execute(usersWithPostsSql, usersWithPostsQuery.getBoundParameters());
+
+  // 3. SELECT with GROUP BY and Aggregates
+  const userPostCountsQuery = qb
+    .select({
+      userId: usersTable.columns.id,
+      userName: usersTable.columns.name,
+      postCount: count(postsTable.columns.id),
+    })
+    .from(usersTable)
+    .leftJoin(
+      postsTable,
+      sql`${usersTable.columns.id} = ${postsTable.columns.userId}`
+    )
+    .groupBy(usersTable.columns.id, usersTable.columns.name)
+    .orderBy(sql`COUNT(${postsTable.columns.id})`, "DESC");
+
+  // const userPostCountsSql = userPostCountsQuery.toSQL("postgres");
+  // console.log("User Post Counts SQL:", userPostCountsSql);
+  // const userPostCounts = await db.execute(userPostCountsSql, userPostCountsQuery.getBoundParameters());
+
+  // 4. INSERT a new user
+  const newUserQuery = qb
+    .insert(usersTable)
+    .values({ name: "New User", email: "new@user.com", age: 28 });
+  // const newUserSql = newUserQuery.toSQL("postgres");
+  // await db.execute(newUserSql, newUserQuery.getBoundParameters());
+
+  // 5. UPDATE an existing user's age
+  const updateUserQuery = qb
+    .update(usersTable)
+    .set({ age: 29 })
+    .where(sql`${usersTable.columns.email} = ${"new@user.com"}`);
+  // const updateUserSql = updateUserQuery.toSQL("postgres");
+  // await db.execute(updateUserSql, updateUserQuery.getBoundParameters());
+
+  // 6. DELETE a user
+  const deleteUserQuery = qb
+    .deleteFrom(usersTable)
+    .where(sql`${usersTable.columns.email} = ${"new@user.com"}`);
+  // const deleteUserSql = deleteUserQuery.toSQL("postgres");
+  // await db.execute(deleteUserSql, deleteUserQuery.getBoundParameters("postgres"));
+
+  // 7. SELECT with LIKE (PostgreSQL specific, translates to REGEXP_CONTAINS for Spanner)
+  const usersLikeQuery = qb
+    .select({ name: usersTable.columns.name })
+    .from(usersTable)
+    .where(like(usersTable.columns.name, "J%")); // Users whose name starts with J
+
+  // const usersLikeSqlPg = usersLikeQuery.toSQL("postgres");
+  // console.log("Users LIKE SQL (PG):", usersLikeSqlPg); // SELECT "name" AS "name" FROM "users" WHERE "users"."name" LIKE $1
+  // const usersLikeParamsPg = usersLikeQuery.getBoundParameters("postgres");
+  // console.log("Users LIKE Params (PG):", usersLikeParamsPg); // ["J%"]
+
+  // const usersLikeSqlSpanner = usersLikeQuery.toSQL("spanner");
+  // console.log("Users LIKE SQL (Spanner):", usersLikeSqlSpanner); // SELECT `name` AS `name` FROM `users` WHERE REGEXP_CONTAINS(`users`.`name`, @p1)
+  // const usersLikeParamsSpanner = usersLikeQuery.getBoundParameters("spanner");
+  // console.log("Users LIKE Params (Spanner):", usersLikeParamsSpanner); // ["^J.*"]
+
+  // 8. SELECT with ILIKE (PostgreSQL specific, translates to REGEXP_CONTAINS with (?i) for Spanner)
+  const usersILikeQuery = qb
+    .select({ email: usersTable.columns.email })
+    .from(usersTable)
+    .where(ilike(usersTable.columns.email, "%@example.com"));
+
+  // const usersILikeSqlPg = usersILikeQuery.toSQL("postgres");
+  // console.log("Users ILIKE SQL (PG):", usersILikeSqlPg); // SELECT "email" AS "email" FROM "users" WHERE "users"."email" ILIKE $1
+  // const usersILikeParamsPg = usersILikeQuery.getBoundParameters("postgres");
+  // console.log("Users ILIKE Params (PG):", usersILikeParamsPg); // ["%@example.com"]
+
+  // const usersILikeSqlSpanner = usersILikeQuery.toSQL("spanner");
+  // console.log("Users ILIKE SQL (Spanner):", usersILikeSqlSpanner); // SELECT `email` AS `email` FROM `users` WHERE REGEXP_CONTAINS(`users`.`email`, @p1)
+  // const usersILikeParamsSpanner = usersILikeQuery.getBoundParameters("spanner");
+  // console.log("Users ILIKE Params (Spanner):", usersILikeParamsSpanner); // ["(?i).*@example\\.com$"]
+
+  // 9. SELECT with REGEXP_CONTAINS (Spanner specific, translates to ~ for PostgreSQL)
+  const usersRegexpQuery = qb
+    .select({ name: usersTable.columns.name })
+    .from(usersTable)
+    .where(regexpContains(usersTable.columns.name, "^[A-C]")); // Names starting with A, B, or C
+
+  // const usersRegexpSqlSpanner = usersRegexpQuery.toSQL("spanner");
+  // console.log("Users REGEXP SQL (Spanner):", usersRegexpSqlSpanner); // SELECT `name` AS `name` FROM `users` WHERE REGEXP_CONTAINS(`users`.`name`, @p1)
+  // const usersRegexpParamsSpanner = usersRegexpQuery.getBoundParameters("spanner");
+  // console.log("Users REGEXP Params (Spanner):", usersRegexpParamsSpanner); // ["^[A-C]"]
+
+  // const usersRegexpSqlPg = usersRegexpQuery.toSQL("postgres");
+  // console.log("Users REGEXP SQL (PG):", usersRegexpSqlPg); // SELECT "name" AS "name" FROM "users" WHERE "users"."name" ~ $1
+  // const usersRegexpParamsPg = usersRegexpQuery.getBoundParameters("postgres");
+  // console.log("Users REGEXP Params (PG):", usersRegexpParamsPg); // ["^[A-C]"]
+
+  // 10. SELECT with CONCAT
+  const userFullNameQuery = qb
+    .select({
+      fullName: concat(
+        usersTable.columns.name,
+        " (",
+        usersTable.columns.email,
+        ")"
+      ),
+    })
+    .from(usersTable)
+    .where(sql`${usersTable.columns.id} = ${1}`);
+
+  // const userFullNameSql = userFullNameQuery.toSQL("postgres");
+  // console.log("User Full Name SQL (PG):", userFullNameSql); // SELECT CONCAT("users"."name", $1, "users"."email", $2) AS "fullName" FROM "users" WHERE "users"."id" = $3
+  // const userFullNameParams = userFullNameQuery.getBoundParameters("postgres");
+  // console.log("User Full Name Params (PG):", userFullNameParams); // [" (", ")", 1]
+
+  // 11. SELECT with LOWER and UPPER
+  const userCaseTransformedQuery = qb
+    .select({
+      lowerName: lower(usersTable.columns.name),
+      upperEmail: upper(usersTable.columns.email),
+      processedName: upper(concat("prefix-", lower(usersTable.columns.name))),
+    })
+    .from(usersTable)
+    .where(sql`${usersTable.columns.id} = ${2}`);
+
+  // const userCaseSql = userCaseTransformedQuery.toSQL("postgres");
+  // console.log("User Case SQL (PG):", userCaseSql); // SELECT LOWER("users"."name") AS "lowerName", UPPER("users"."email") AS "upperEmail", UPPER(CONCAT($1, LOWER("users"."name"))) AS "processedName" FROM "users" WHERE "users"."id" = $2
+  // const userCaseParams = userCaseTransformedQuery.getBoundParameters("postgres");
+  // console.log("User Case Params (PG):", userCaseParams); // ["prefix-", 2]
+}
+
+// runExamples().catch(console.error);
+```
+
+These examples illustrate how to perform common database operations. The actual execution would depend on your specific database adapter setup.
 
 ---
 

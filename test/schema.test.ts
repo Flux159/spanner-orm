@@ -82,9 +82,12 @@ describe("Schema Builder", () => {
       "TIMESTAMP WITH TIME ZONE"
     );
     expect(users.columns.lastLogin.dialectTypes.spanner).toBe("TIMESTAMP");
-    expect(users.columns.lastLogin.default).toEqual({
-      sql: "CURRENT_TIMESTAMP",
-    });
+    // Check that it's an SQL object and its SQL string is correct
+    const lastLoginDefault = users.columns.lastLogin.default as any; // Cast to any to access _isSQL
+    expect(lastLoginDefault).toBeDefined();
+    expect(lastLoginDefault._isSQL).toBe(true);
+    expect(lastLoginDefault.toSqlString("postgres")).toBe("CURRENT_TIMESTAMP");
+    expect(lastLoginDefault.toSqlString("spanner")).toBe("CURRENT_TIMESTAMP");
 
     // Check apiKey column (varchar without explicit length for spanner should be MAX)
     const posts = table("posts", {

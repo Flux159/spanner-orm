@@ -65,7 +65,7 @@ describe("generateMigrationDDL", () => {
         toVersion: V1_SNAPSHOT_VERSION,
         tableChanges: [{ action: "add", table: usersTable }],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
       expect(ddl.length).toBe(1);
       expect(ddl[0]).toBe(
         'CREATE TABLE "users" (\n' +
@@ -113,7 +113,7 @@ describe("generateMigrationDDL", () => {
         toVersion: V1_SNAPSHOT_VERSION,
         tableChanges: [{ action: "add", table: orderItemsTable }],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
       expect(ddl.length).toBe(1);
       expect(ddl[0]).toBe(
         'CREATE TABLE "order_items" (\n' +
@@ -148,7 +148,7 @@ describe("generateMigrationDDL", () => {
         toVersion: V1_SNAPSHOT_VERSION,
         tableChanges: [{ action: "add", table: productsTable }],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
       expect(ddl.length).toBe(2);
       expect(ddl[0]).toContain('CREATE TABLE "products"');
       expect(ddl[1]).toBe(
@@ -162,7 +162,7 @@ describe("generateMigrationDDL", () => {
         toVersion: V1_SNAPSHOT_VERSION,
         tableChanges: [{ action: "remove", tableName: "old_users" }],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
       expect(ddl.length).toBe(1);
       expect(ddl[0]).toBe('DROP TABLE "old_users";');
     });
@@ -189,7 +189,7 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
       expect(ddl[0]).toBe(
         'ALTER TABLE "users" ADD COLUMN "new_col" BOOLEAN NOT NULL DEFAULT false;'
       );
@@ -207,7 +207,7 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
       expect(ddl[0]).toBe('ALTER TABLE "users" DROP COLUMN "old_col";');
     });
 
@@ -232,7 +232,7 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
       expect(ddl[0]).toBe(
         'ALTER TABLE "users" ALTER COLUMN "age" SET DATA TYPE BIGINT;'
       );
@@ -256,7 +256,7 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
       expect(ddl[0]).toBe(
         'ALTER TABLE "users" ALTER COLUMN "email" SET NOT NULL;'
       );
@@ -280,7 +280,7 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
       expect(ddl[0]).toBe(
         'ALTER TABLE "users" ALTER COLUMN "email" DROP NOT NULL;'
       );
@@ -304,7 +304,7 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
       expect(ddl[0]).toBe(
         'ALTER TABLE "users" ALTER COLUMN "score" DEFAULT 0;'
       );
@@ -328,7 +328,7 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
       expect(ddl[0]).toBe(
         'ALTER TABLE "users" ALTER COLUMN "score" DROP DEFAULT;'
       );
@@ -352,7 +352,7 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
       expect(ddl[0]).toBe(
         'ALTER TABLE "products" ADD CONSTRAINT "uq_products_product_code" UNIQUE ("product_code");'
       );
@@ -376,7 +376,7 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
       expect(ddl[0]).toBe(
         'ALTER TABLE "products" DROP CONSTRAINT "uq_products_product_code";'
       );
@@ -403,7 +403,7 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
       expect(ddl[0]).toBe('CREATE INDEX "idx_users_bio" ON "users" ("bio");');
     });
 
@@ -428,7 +428,7 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
       expect(ddl[0]).toBe(
         'CREATE UNIQUE INDEX "uq_users_username" ON "users" ("username");'
       );
@@ -448,7 +448,7 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
       expect(ddl[0]).toBe('DROP INDEX "idx_users_email_old";');
     });
 
@@ -471,7 +471,7 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
       expect(consoleWarnSpy).toHaveBeenCalledWith(
         'Index change for "idx_users_status" on table "users" will be handled as DROP and ADD for PG.'
       );
@@ -498,7 +498,7 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
       expect(ddl.length).toBe(1);
       expect(ddl[0]).toBe(
         'ALTER TABLE "orders" ADD CONSTRAINT "pk_orders" PRIMARY KEY ("order_id", "customer_id");'
@@ -520,7 +520,7 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
       expect(ddl.length).toBe(1);
       expect(ddl[0]).toBe(
         'ALTER TABLE "items" ADD CONSTRAINT "pk_items" PRIMARY KEY ("item_uuid");'
@@ -542,7 +542,7 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
       expect(ddl.length).toBe(1);
       expect(ddl[0]).toBe(
         'ALTER TABLE "orders" DROP CONSTRAINT "pk_orders_old";'
@@ -566,7 +566,7 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
       expect(ddl.length).toBe(1);
       expect(ddl[0]).toBe('ALTER TABLE "items" DROP CONSTRAINT "pk_items";');
       expect(consoleWarnSpy).toHaveBeenCalledWith(
@@ -600,7 +600,7 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
       expect(ddl.length).toBe(1);
       expect(ddl[0]).toBe(
         'ALTER TABLE "posts" ADD CONSTRAINT "fk_posts_user_id" FOREIGN KEY ("user_id") REFERENCES "users" ("id") ON DELETE CASCADE;'
@@ -630,7 +630,7 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
       expect(ddl.length).toBe(1);
       // This will use the placeholder name due to current limitations
       expect(ddl[0]).toBe(
@@ -671,7 +671,7 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres");
+      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
       expect(ddl.length).toBe(2);
       expect(ddl[0]).toBe(
         'ALTER TABLE "profiles" ADD COLUMN "user_account_id" INTEGER;'
@@ -685,7 +685,6 @@ describe("generateMigrationDDL", () => {
   describe("Spanner DDL Generation", () => {
     it("should generate CREATE TABLE DDL for an added table", () => {
       const usersTable = createSampleTable("Users", {
-        // Spanner is case-sensitive for identifiers
         UserId: createSampleColumn(
           "UserId",
           "integer",
@@ -708,9 +707,15 @@ describe("generateMigrationDDL", () => {
         toVersion: V1_SNAPSHOT_VERSION,
         tableChanges: [{ action: "add", table: usersTable }],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "spanner");
-      expect(ddl.length).toBe(1); // CREATE TABLE only, unique indexes are separate
-      expect(ddl[0]).toBe(
+      const ddlBatches = generateMigrationDDL(
+        schemaDiff,
+        "spanner"
+      ) as string[][];
+      // Expecting CREATE TABLE and potentially CREATE UNIQUE INDEX for Email if `unique:true` was set
+      // For this specific test, Email does not have unique:true, so only CREATE TABLE.
+      expect(ddlBatches.length).toBe(1); // One batch
+      expect(ddlBatches[0].length).toBe(1); // One statement in the batch
+      expect(ddlBatches[0][0]).toBe(
         "CREATE TABLE Users (\n" +
           "  UserId INT64 NOT NULL,\n" +
           "  Email STRING(255) NOT NULL,\n" +
@@ -733,7 +738,7 @@ describe("generateMigrationDDL", () => {
             "ProductCode",
             "varchar",
             { pg: "VARCHAR(50)", spanner: "STRING(50)" },
-            { notNull: true }
+            { notNull: true } // Removed unique: true from column, will use table index
           ),
         },
         [{ name: "UQ_ProductCode", columns: ["ProductCode"], unique: true }]
@@ -743,12 +748,26 @@ describe("generateMigrationDDL", () => {
         toVersion: V1_SNAPSHOT_VERSION,
         tableChanges: [{ action: "add", table: productsTable }],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "spanner");
-      expect(ddl.length).toBe(2);
-      expect(ddl[0]).toContain("CREATE TABLE Products");
-      expect(ddl[1]).toBe(
+      const ddlBatches = generateMigrationDDL(
+        schemaDiff,
+        "spanner"
+      ) as string[][];
+      // With selective batching, CREATE TABLE (non-validating) and CREATE UNIQUE INDEX (validating)
+      // will be in separate batches.
+      expect(ddlBatches.length).toBe(2);
+      expect(ddlBatches[0].length).toBe(1);
+      expect(ddlBatches[0][0]).toContain("CREATE TABLE Products");
+      expect(ddlBatches[1].length).toBe(1);
+      expect(ddlBatches[1][0]).toBe(
         "CREATE UNIQUE INDEX UQ_ProductCode ON Products (ProductCode);"
       );
+      const ddl = ddlBatches.flat(); // Keep this for checking total statements if needed, though covered by batch checks.
+      expect(ddl.length).toBe(2); // CREATE TABLE, CREATE UNIQUE INDEX
+      // Original check for ddl[1] is now ddlBatches[1][0]
+      // This specific check is now part of the batch check above.
+      // expect(ddl[1]).toBe(
+      //   "CREATE UNIQUE INDEX UQ_ProductCode ON Products (ProductCode);"
+      // );
     });
 
     it("should generate CREATE TABLE with INTERLEAVE and non-unique index", () => {
@@ -781,7 +800,11 @@ describe("generateMigrationDDL", () => {
         toVersion: V1_SNAPSHOT_VERSION,
         tableChanges: [{ action: "add", table: orderDetailsTable }],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "spanner");
+      const ddlBatches = generateMigrationDDL(
+        schemaDiff,
+        "spanner"
+      ) as string[][];
+      const ddl = ddlBatches.flat();
       expect(ddl.length).toBe(2); // CREATE TABLE, CREATE INDEX
       expect(ddl[0]).toBe(
         "CREATE TABLE OrderDetails (\n" +
@@ -802,9 +825,13 @@ describe("generateMigrationDDL", () => {
         toVersion: V1_SNAPSHOT_VERSION,
         tableChanges: [{ action: "remove", tableName: "OldProducts" }],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "spanner");
-      expect(ddl.length).toBe(1);
-      expect(ddl[0]).toBe("DROP TABLE OldProducts;");
+      const ddlBatches = generateMigrationDDL(
+        schemaDiff,
+        "spanner"
+      ) as string[][];
+      expect(ddlBatches.length).toBe(1);
+      expect(ddlBatches[0].length).toBe(1);
+      expect(ddlBatches[0][0]).toBe("DROP TABLE OldProducts;");
     });
 
     it("should generate ADD COLUMN DDL for Spanner", () => {
@@ -829,7 +856,11 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "spanner");
+      const ddlBatches = generateMigrationDDL(
+        schemaDiff,
+        "spanner"
+      ) as string[][];
+      const ddl = ddlBatches.flat();
       expect(ddl[0]).toBe(
         "ALTER TABLE Users ADD COLUMN PhoneNumber STRING(20) DEFAULT ('N/A');"
       );
@@ -847,11 +878,16 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "spanner");
+      const ddlBatches = generateMigrationDDL(
+        schemaDiff,
+        "spanner"
+      ) as string[][];
+      const ddl = ddlBatches.flat();
       expect(ddl[0]).toBe("ALTER TABLE Users DROP COLUMN Bio;");
     });
 
     it("should generate ALTER COLUMN TYPE DDL for Spanner", () => {
+      const consoleWarnSpy = vi.spyOn(console, "warn");
       const schemaDiff: SchemaDiff = {
         fromVersion: V1_SNAPSHOT_VERSION,
         toVersion: V1_SNAPSHOT_VERSION,
@@ -875,8 +911,16 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "spanner");
+      const ddlBatches = generateMigrationDDL(
+        schemaDiff,
+        "spanner"
+      ) as string[][];
+      const ddl = ddlBatches.flat();
       expect(ddl[0]).toBe("ALTER TABLE Users ALTER COLUMN UserId STRING(36);");
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        `Spanner DDL for changing column type for Users.UserId to STRING(36) generated. Review for compatibility.`
+      );
+      consoleWarnSpy.mockRestore();
     });
 
     it("should generate ALTER COLUMN SET NOT NULL DDL for Spanner", () => {
@@ -897,11 +941,14 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "spanner");
+      const ddlBatches = generateMigrationDDL(
+        schemaDiff,
+        "spanner"
+      ) as string[][];
+      const ddl = ddlBatches.flat();
       expect(ddl[0]).toBe("ALTER TABLE Users ALTER COLUMN Email NOT NULL;");
     });
 
-    // Test for making a column nullable (currently a console.warn in implementation)
     it("should issue a warning when trying to make a Spanner column nullable (as it requires type re-specification)", () => {
       const consoleWarnSpy = vi.spyOn(console, "warn");
       const schemaDiff: SchemaDiff = {
@@ -923,7 +970,7 @@ describe("generateMigrationDDL", () => {
       };
       generateMigrationDDL(schemaDiff, "spanner");
       expect(consoleWarnSpy).toHaveBeenCalledWith(
-        `Spanner DDL for making Users.Email nullable may require re-specifying the full column type without NOT NULL. Automatic generation is limited here.`
+        `Spanner DDL for making Users.Email nullable may require re-specifying type.`
       );
       consoleWarnSpy.mockRestore();
     });
@@ -949,7 +996,7 @@ describe("generateMigrationDDL", () => {
       };
       generateMigrationDDL(schemaDiff, "spanner");
       expect(consoleWarnSpy).toHaveBeenCalledWith(
-        `Spanner does not support ALTER COLUMN SET DEFAULT directly for Users.Bio. Default value changes require manual DDL or column recreation.`
+        `Spanner does not support ALTER COLUMN SET DEFAULT for Users.Bio.`
       );
       consoleWarnSpy.mockRestore();
     });
@@ -974,7 +1021,7 @@ describe("generateMigrationDDL", () => {
       };
       generateMigrationDDL(schemaDiff, "spanner");
       expect(consoleWarnSpy).toHaveBeenCalledWith(
-        `Spanner 'unique' constraint changes for Users.Email should be handled via index diffs (CREATE/DROP UNIQUE INDEX).`
+        `Spanner 'unique' constraint changes for Users.Email handled via index diffs.`
       );
       consoleWarnSpy.mockRestore();
     });
@@ -997,10 +1044,14 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "spanner");
-      expect(ddl.length).toBe(0); // No DDL should be generated
+      const ddlBatches = generateMigrationDDL(
+        schemaDiff,
+        "spanner"
+      ) as string[][];
+      const ddl = ddlBatches.flat();
+      expect(ddl.length).toBe(0);
       expect(consoleWarnSpy).toHaveBeenCalledWith(
-        `Spanner does not support altering primary keys (add, remove, or change) on existing table "Users". This operation usually requires table recreation and data migration. No DDL will be generated by the ORM for this PK change.`
+        `Spanner does not support altering PKs on existing table "Users".`
       );
       consoleWarnSpy.mockRestore();
     });
@@ -1023,10 +1074,14 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "spanner");
-      expect(ddl.length).toBe(0); // No DDL should be generated
+      const ddlBatches = generateMigrationDDL(
+        schemaDiff,
+        "spanner"
+      ) as string[][];
+      const ddl = ddlBatches.flat();
+      expect(ddl.length).toBe(0);
       expect(consoleWarnSpy).toHaveBeenCalledWith(
-        `Spanner does not support altering primary keys (add, remove, or change) on existing table "Products". This operation usually requires table recreation and data migration. No DDL will be generated by the ORM for this PK change.`
+        `Spanner does not support altering PKs on existing table "Products".`
       );
       consoleWarnSpy.mockRestore();
     });
@@ -1043,16 +1098,20 @@ describe("generateMigrationDDL", () => {
             action: "change",
             tableName: "OrderItems",
             interleaveChange: {
-              action: "set", // Could be 'set' or 'remove'
+              action: "set",
               interleave: { parentTable: "NewParent", onDelete: "no action" },
             },
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "spanner");
-      expect(ddl.length).toBe(0); // No DDL should be generated
+      const ddlBatches = generateMigrationDDL(
+        schemaDiff,
+        "spanner"
+      ) as string[][];
+      const ddl = ddlBatches.flat();
+      expect(ddl.length).toBe(0);
       expect(consoleWarnSpy).toHaveBeenCalledWith(
-        `Spanner does not support altering the interleave configuration (parent table or ON DELETE rule) for existing table "OrderItems". This operation usually requires table recreation and data migration. No DDL will be generated by the ORM for this interleave change.`
+        `Spanner does not support altering interleave for table "OrderItems".`
       );
       consoleWarnSpy.mockRestore();
     });
@@ -1071,7 +1130,7 @@ describe("generateMigrationDDL", () => {
                 columnName: "ArtistId",
                 changes: {
                   references: {
-                    name: "FK_Albums_ArtistId", // Spanner FK names are global
+                    name: "FK_Albums_ArtistId",
                     referencedTable: "Artists",
                     referencedColumn: "ArtistId",
                     onDelete: "no action",
@@ -1082,7 +1141,11 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "spanner");
+      const ddlBatches = generateMigrationDDL(
+        schemaDiff,
+        "spanner"
+      ) as string[][];
+      const ddl = ddlBatches.flat();
       expect(ddl.length).toBe(1);
       expect(ddl[0]).toBe(
         "ALTER TABLE Albums ADD CONSTRAINT FK_Albums_ArtistId FOREIGN KEY (ArtistId) REFERENCES Artists (ArtistId) ON DELETE NO ACTION;"
@@ -1105,20 +1168,24 @@ describe("generateMigrationDDL", () => {
                 action: "change",
                 columnName: "AlbumId",
                 changes: {
-                  references: null, // Signal to remove FK
+                  references: null,
                 },
               },
             ],
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "spanner");
+      const ddlBatches = generateMigrationDDL(
+        schemaDiff,
+        "spanner"
+      ) as string[][];
+      const ddl = ddlBatches.flat();
       expect(ddl.length).toBe(1);
       expect(ddl[0]).toBe(
         "ALTER TABLE Tracks DROP CONSTRAINT FK_Tracks_AlbumId_TO_BE_DROPPED;"
       );
       expect(consoleWarnSpy).toHaveBeenCalledWith(
-        "Attempting to DROP foreign key for Spanner table Tracks.AlbumId because its 'references' property was set to null. The specific constraint name is required. Using placeholder name \"FK_Tracks_AlbumId_TO_BE_DROPPED\". This DDL will likely FAIL. The schema diff process should provide the correct constraint name."
+        `Dropping FK for Tracks.AlbumId. Constraint name needed.`
       );
       consoleWarnSpy.mockRestore();
     });
@@ -1143,7 +1210,7 @@ describe("generateMigrationDDL", () => {
                       name: "FK_Playlists_UserId",
                       referencedTable: "Users",
                       referencedColumn: "UserId",
-                    }, // Default ON DELETE NO ACTION
+                    },
                   }
                 ),
               },
@@ -1151,7 +1218,11 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "spanner");
+      const ddlBatches = generateMigrationDDL(
+        schemaDiff,
+        "spanner"
+      ) as string[][];
+      const ddl = ddlBatches.flat();
       expect(ddl.length).toBe(2);
       expect(ddl[0]).toBe(
         "ALTER TABLE Playlists ADD COLUMN UserId STRING(36);"
@@ -1159,6 +1230,240 @@ describe("generateMigrationDDL", () => {
       expect(ddl[1]).toBe(
         "ALTER TABLE Playlists ADD CONSTRAINT FK_Playlists_UserId FOREIGN KEY (UserId) REFERENCES Users (UserId);"
       );
+    });
+  });
+
+  describe("Spanner DDL Batching Logic", () => {
+    it("should batch multiple validating DDL statements correctly", () => {
+      const schemaDiff: SchemaDiff = {
+        fromVersion: V1_SNAPSHOT_VERSION,
+        toVersion: V1_SNAPSHOT_VERSION,
+        tableChanges: [
+          {
+            action: "add", // Results in CREATE TABLE (non-validating by current helper) + CREATE INDEX (validating)
+            table: createSampleTable(
+              "TestTable1",
+              {
+                id: createSampleColumn(
+                  "id",
+                  "INT64",
+                  { pg: "INT", spanner: "INT64" },
+                  { primaryKey: true }
+                ),
+                field1: createSampleColumn("field1", "STRING(100)", {
+                  pg: "VARCHAR(100)",
+                  spanner: "STRING(100)",
+                }),
+              },
+              [{ name: "idx_field1", columns: ["field1"], unique: false }] // CREATE INDEX - validating
+            ),
+          },
+          {
+            action: "change", // Results in ALTER TABLE ADD COLUMN (validating)
+            tableName: "TestTable1",
+            columnChanges: [
+              {
+                action: "add",
+                column: createSampleColumn("field2", "BOOL", {
+                  pg: "BOOL",
+                  spanner: "BOOL",
+                }),
+              }, // validating
+              {
+                action: "add",
+                column: createSampleColumn("field3", "DATE", {
+                  pg: "DATE",
+                  spanner: "DATE",
+                }),
+              }, // validating
+              {
+                action: "add",
+                column: createSampleColumn("field4", "FLOAT64", {
+                  pg: "FLOAT8",
+                  spanner: "FLOAT64",
+                }),
+              }, // validating
+              {
+                action: "add",
+                column: createSampleColumn("field5", "TIMESTAMP", {
+                  pg: "TIMESTAMP",
+                  spanner: "TIMESTAMP",
+                }),
+              }, // validating
+              {
+                action: "add",
+                column: createSampleColumn("field6", "BYTES(10)", {
+                  pg: "BYTEA",
+                  spanner: "BYTES(10)",
+                }),
+              }, // validating - 6th validating
+            ],
+          },
+          {
+            action: "add", // Another CREATE TABLE + CREATE INDEX
+            table: createSampleTable(
+              "TestTable2",
+              {
+                id2: createSampleColumn(
+                  "id2",
+                  "INT64",
+                  { pg: "INT", spanner: "INT64" },
+                  { primaryKey: true }
+                ),
+                data: createSampleColumn("data", "STRING(MAX)", {
+                  pg: "TEXT",
+                  spanner: "STRING(MAX)",
+                }),
+              },
+              [{ name: "idx_data", columns: ["data"], unique: true }] // CREATE UNIQUE INDEX - validating
+            ),
+          },
+        ],
+      };
+
+      // Expected DDLs (order might vary slightly based on generation logic, but types are important):
+      // 1. CREATE TABLE TestTable1 ...; (non-validating)
+      // 2. CREATE INDEX idx_field1 ON TestTable1 (field1); (validating)
+      // 3. ALTER TABLE TestTable1 ADD COLUMN field2 BOOL; (validating)
+      // 4. ALTER TABLE TestTable1 ADD COLUMN field3 DATE; (validating)
+      // 5. ALTER TABLE TestTable1 ADD COLUMN field4 FLOAT64; (validating)
+      // 6. ALTER TABLE TestTable1 ADD COLUMN field5 TIMESTAMP; (validating)
+      // 7. ALTER TABLE TestTable1 ADD COLUMN field6 BYTES(10); (validating)
+      // 8. CREATE TABLE TestTable2 ...; (non-validating)
+      // 9. CREATE UNIQUE INDEX idx_data ON TestTable2 (data); (validating)
+      // Total: 2 non-validating, 7 validating. SPANNER_DDL_BATCH_SIZE = 5.
+
+      // Expected batching:
+      // Batch 1: [CREATE TABLE TestTable1] (non-validating batch ends because next is validating)
+      // Batch 2: [CREATE INDEX idx_field1, ALTER...field2, ALTER...field3, ALTER...field4, ALTER...field5] (validating, size 5)
+      // Batch 3: [ALTER...field6] (validating, size 1, new batch because previous validating batch was full)
+      // Batch 4: [CREATE TABLE TestTable2] (non-validating batch ends because next is validating)
+      // Batch 5: [CREATE UNIQUE INDEX idx_data] (validating, size 1)
+
+      const ddlBatches = generateMigrationDDL(
+        schemaDiff,
+        "spanner"
+      ) as string[][];
+
+      expect(ddlBatches.length).toBe(5);
+      // Batch 1 (Non-validating)
+      expect(ddlBatches[0].length).toBe(1);
+      expect(ddlBatches[0][0]).toContain("CREATE TABLE TestTable1");
+
+      // Batch 2 (Validating)
+      expect(ddlBatches[1].length).toBe(5);
+      expect(ddlBatches[1][0]).toContain("CREATE INDEX idx_field1");
+      expect(ddlBatches[1][1]).toContain(
+        "ALTER TABLE TestTable1 ADD COLUMN field2"
+      );
+      expect(ddlBatches[1][2]).toContain(
+        "ALTER TABLE TestTable1 ADD COLUMN field3"
+      );
+      expect(ddlBatches[1][3]).toContain(
+        "ALTER TABLE TestTable1 ADD COLUMN field4"
+      );
+      expect(ddlBatches[1][4]).toContain(
+        "ALTER TABLE TestTable1 ADD COLUMN field5"
+      );
+
+      // Batch 3 (Validating)
+      expect(ddlBatches[2].length).toBe(1);
+      expect(ddlBatches[2][0]).toContain(
+        "ALTER TABLE TestTable1 ADD COLUMN field6"
+      );
+
+      // Batch 4 (Non-validating)
+      expect(ddlBatches[3].length).toBe(1);
+      expect(ddlBatches[3][0]).toContain("CREATE TABLE TestTable2");
+
+      // Batch 5 (Validating)
+      expect(ddlBatches[4].length).toBe(1);
+      expect(ddlBatches[4][0]).toContain("CREATE UNIQUE INDEX idx_data");
+    });
+
+    it("should handle a sequence of non-validating DDLs correctly", () => {
+      const schemaDiff: SchemaDiff = {
+        fromVersion: V1_SNAPSHOT_VERSION,
+        toVersion: V1_SNAPSHOT_VERSION,
+        tableChanges: [
+          { action: "remove", tableName: "OldTable1" },
+          { action: "remove", tableName: "OldTable2" },
+          { action: "remove", tableName: "OldTable3" },
+          { action: "remove", tableName: "OldTable4" },
+          { action: "remove", tableName: "OldTable5" },
+          { action: "remove", tableName: "OldTable6" }, // 6th non-validating
+        ],
+      };
+      const ddlBatches = generateMigrationDDL(
+        schemaDiff,
+        "spanner"
+      ) as string[][];
+      // All are non-validating, so they should be batched by SPANNER_DDL_BATCH_SIZE
+      expect(ddlBatches.length).toBe(2);
+      expect(ddlBatches[0].length).toBe(5);
+      expect(ddlBatches[1].length).toBe(1);
+      expect(ddlBatches[0][0]).toBe("DROP TABLE OldTable1;");
+      expect(ddlBatches[1][0]).toBe("DROP TABLE OldTable6;");
+    });
+
+    it("should correctly batch when a non-validating DDL follows a full validating batch", () => {
+      const schemaDiff: SchemaDiff = {
+        fromVersion: V1_SNAPSHOT_VERSION,
+        toVersion: V1_SNAPSHOT_VERSION,
+        tableChanges: [
+          {
+            action: "change",
+            tableName: "T1",
+            columnChanges: [
+              {
+                action: "add",
+                column: createSampleColumn("c1", "BOOL", {
+                  pg: "BOOL",
+                  spanner: "BOOL",
+                }),
+              }, // V1
+              {
+                action: "add",
+                column: createSampleColumn("c2", "BOOL", {
+                  pg: "BOOL",
+                  spanner: "BOOL",
+                }),
+              }, // V2
+              {
+                action: "add",
+                column: createSampleColumn("c3", "BOOL", {
+                  pg: "BOOL",
+                  spanner: "BOOL",
+                }),
+              }, // V3
+              {
+                action: "add",
+                column: createSampleColumn("c4", "BOOL", {
+                  pg: "BOOL",
+                  spanner: "BOOL",
+                }),
+              }, // V4
+              {
+                action: "add",
+                column: createSampleColumn("c5", "BOOL", {
+                  pg: "BOOL",
+                  spanner: "BOOL",
+                }),
+              }, // V5 - batch full
+            ],
+          },
+          { action: "remove", tableName: "OldTableDrop" }, // Non-validating
+        ],
+      };
+      const ddlBatches = generateMigrationDDL(
+        schemaDiff,
+        "spanner"
+      ) as string[][];
+      expect(ddlBatches.length).toBe(2);
+      expect(ddlBatches[0].length).toBe(5); // Validating batch
+      expect(ddlBatches[0][0]).toContain("ALTER TABLE T1 ADD COLUMN c1 BOOL;");
+      expect(ddlBatches[1].length).toBe(1); // Non-validating batch
+      expect(ddlBatches[1][0]).toBe("DROP TABLE OldTableDrop;");
     });
   });
 });

@@ -19,6 +19,24 @@ export type SelectFields = Record<
 // This will be expanded for complex conditions (eq, gt, lt, and, or, etc.)
 export type WhereCondition = SQL | string;
 
+// --- JOIN Types ---
+export type JoinType = "INNER" | "LEFT" | "RIGHT" | "FULL";
+export interface JoinClause {
+  type: JoinType;
+  targetTable: TableConfig<any, any>;
+  onCondition: SQL;
+}
+
+// --- ORDER BY Types ---
+export type OrderDirection = "ASC" | "DESC";
+export interface OrderClause {
+  field: ColumnConfig<any, any> | SQL;
+  direction: OrderDirection;
+}
+
+// --- GROUP BY Types ---
+export type GroupByField = ColumnConfig<any, any> | SQL;
+
 type OperationType = "select" | "insert" | "update" | "delete";
 
 // Type for values in INSERT
@@ -39,7 +57,9 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
   private _selectedFields?: SelectFields;
   private _limit?: number;
   private _offset?: number;
-  // TODO: Add _orderBy
+  private _joins: JoinClause[] = [];
+  private _orderBy: OrderClause[] = [];
+  private _groupBy: GroupByField[] = [];
 
   // INSERT specific
   private _insertValues?: InsertData<TTable>;
@@ -168,7 +188,24 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     return this;
   }
 
-  // TODO: orderBy(field: ColumnConfig<any,any> | SQL, direction: 'ASC' | 'DESC' = 'ASC')
+  orderBy(
+    field: ColumnConfig<any, any> | SQL,
+    direction: OrderDirection = "ASC"
+  ): this {
+    if (this._operationType !== "select") {
+      throw new Error(`.orderBy() is only applicable to SELECT queries.`);
+    }
+    this._orderBy.push({ field, direction });
+    return this;
+  }
+
+  groupBy(...fields: GroupByField[]): this {
+    if (this._operationType !== "select") {
+      throw new Error(`.groupBy() is only applicable to SELECT queries.`);
+    }
+    this._groupBy.push(...fields);
+    return this;
+  }
 
   toSQL(dialect: Dialect): string {
     if (!this._operationType) {
@@ -253,6 +290,10 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           } else if ("_isSQL" in field) {
             fieldName = (field as SQL).toSqlString("postgres", paramIndexState);
           } else if ("name" in field) {
+            // When selecting specific columns, they might be from joined tables.
+            // Users should use sql`${table.column}` or ensure aliases are unique.
+            // For simplicity, we assume column names are unique or aliased if not.
+            // If ColumnConfig included table info, we could prefix here.
             fieldName = `"${(field as ColumnConfig<any, any>).name}"`;
           } else {
             throw new Error(`Invalid field type in select: ${alias}`);
@@ -265,7 +306,8 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
               sqlObject._isSQL &&
               sqlObject.toSqlString("postgres").toLowerCase().includes(" as ")
             ) &&
-            !fieldName.toLowerCase().includes(" as ")
+            !fieldName.toLowerCase().includes(" as ") &&
+            alias !== "*" // Don't alias '*'
           ) {
             return `${fieldName} AS "${alias}"`;
           }
@@ -277,13 +319,33 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       selectClause = `SELECT *`; // Default to SELECT * if no fields specified
     }
 
-    const fromClause = `FROM "${this._targetTable.name}"`;
+    let fromClause = `FROM "${this._targetTable.name}"`;
+    if (this._joins.length > 0) {
+      const joinStrings = this._joins.map(
+        (join) =>
+          `${join.type} JOIN "${
+            join.targetTable.name
+          }" ON ${join.onCondition.toSqlString("postgres", paramIndexState)}`
+      );
+      fromClause += ` ${joinStrings.join(" ")}`;
+    }
+
     const whereClause = this.buildWhereClause("postgres", paramIndexState);
+    const groupByClause = this.buildGroupByClause("postgres", paramIndexState);
+    const orderByClause = this.buildOrderByClause("postgres", paramIndexState);
     const limitClause = this._limit !== undefined ? `LIMIT ${this._limit}` : "";
     const offsetClause =
       this._offset !== undefined ? `OFFSET ${this._offset}` : "";
 
-    return [selectClause, fromClause, whereClause, limitClause, offsetClause]
+    return [
+      selectClause,
+      fromClause,
+      whereClause,
+      groupByClause,
+      orderByClause,
+      limitClause,
+      offsetClause,
+    ]
       .filter(Boolean)
       .join(" ");
   }
@@ -316,7 +378,8 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
               sqlObject._isSQL &&
               sqlObject.toSqlString("spanner").toLowerCase().includes(" as ")
             ) &&
-            !fieldName.toLowerCase().includes(" as ")
+            !fieldName.toLowerCase().includes(" as ") &&
+            alias !== "*" // Don't alias '*'
           ) {
             return `${fieldName} AS \`${alias}\``;
           }
@@ -328,13 +391,33 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       selectClause = `SELECT *`; // Default to SELECT *
     }
 
-    const fromClause = `FROM \`${this._targetTable.name}\``;
+    let fromClause = `FROM \`${this._targetTable.name}\``;
+    if (this._joins.length > 0) {
+      const joinStrings = this._joins.map(
+        (join) =>
+          `${join.type} JOIN \`${
+            join.targetTable.name
+          }\` ON ${join.onCondition.toSqlString("spanner", paramIndexState)}`
+      );
+      fromClause += ` ${joinStrings.join(" ")}`;
+    }
+
     const whereClause = this.buildWhereClause("spanner", paramIndexState);
+    const groupByClause = this.buildGroupByClause("spanner", paramIndexState);
+    const orderByClause = this.buildOrderByClause("spanner", paramIndexState);
     const limitClause = this._limit !== undefined ? `LIMIT ${this._limit}` : "";
     const offsetClause =
       this._offset !== undefined ? `OFFSET ${this._offset}` : "";
 
-    return [selectClause, fromClause, whereClause, limitClause, offsetClause]
+    return [
+      selectClause,
+      fromClause,
+      whereClause,
+      groupByClause,
+      orderByClause,
+      limitClause,
+      offsetClause,
+    ]
       .filter(Boolean)
       .join(" ");
   }
@@ -343,21 +426,68 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     if (!this._targetTable) throw new Error("Target table not set for INSERT.");
     if (!this._insertValues) throw new Error("Values not set for INSERT.");
 
-    const valuesArray = Array.isArray(this._insertValues)
-      ? this._insertValues
-      : [this._insertValues];
-    if (valuesArray.length === 0)
-      throw new Error("No values provided for INSERT.");
+    let processedInsertData: Partial<InferModelType<TTable>>[];
+    if (Array.isArray(this._insertValues)) {
+      processedInsertData = this._insertValues.map((record) => ({ ...record }));
+    } else {
+      processedInsertData = [{ ...this._insertValues }];
+    }
 
-    const firstRecord = valuesArray[0] as Record<string, any>;
-    const columns = Object.keys(firstRecord)
-      .map((col) => `"${col}"`)
-      .join(", ");
-    const valuePlaceholders = valuesArray
+    if (processedInsertData.length === 0) {
+      throw new Error("No values provided for INSERT.");
+    }
+
+    for (const record of processedInsertData) {
+      for (const [columnName, columnConfigUnk] of Object.entries(
+        this._targetTable.columns
+      )) {
+        const columnConfig = columnConfigUnk as ColumnConfig<any, any>;
+        if (record[columnName as keyof typeof record] === undefined) {
+          if (typeof columnConfig.default === "function") {
+            const defaultValue = (columnConfig.default as () => any)();
+            (record as Record<string, any>)[columnName] = defaultValue;
+          } else if (
+            columnConfig.default !== undefined &&
+            typeof columnConfig.default === "object" &&
+            (columnConfig.default as SQL)._isSQL
+          ) {
+            // If default is an SQL object, add it to the record to be processed
+            (record as Record<string, any>)[columnName] = columnConfig.default;
+          } else if (columnConfig.default !== undefined) {
+            // For non-function, non-SQL direct default values
+            (record as Record<string, any>)[columnName] = columnConfig.default;
+          }
+        }
+      }
+    }
+
+    // Determine columns from ALL keys present in ANY processed record,
+    // ensuring columns with only SQL defaults are included.
+    const allKeys = new Set<string>();
+    processedInsertData.forEach((record) => {
+      Object.keys(record as Record<string, any>).forEach((key) =>
+        allKeys.add(key)
+      );
+    });
+    const orderedKeys = Array.from(allKeys).sort();
+    const columns = orderedKeys.map((col) => `"${col}"`).join(", ");
+
+    const valuePlaceholders = processedInsertData
       .map((record) => {
-        const recordValues = Object.values(record as Record<string, any>);
-        return `(${recordValues
-          .map(() => `$${paramIndexState.value++}`)
+        const orderedValues = orderedKeys.map(
+          (key) => (record as Record<string, any>)[key]
+        );
+        return `(${orderedValues
+          .map((val) => {
+            if (
+              typeof val === "object" &&
+              val !== null &&
+              (val as SQL)._isSQL === true
+            ) {
+              return (val as SQL).toSqlString("postgres", paramIndexState);
+            }
+            return `$${paramIndexState.value++}`;
+          })
           .join(", ")})`;
       })
       .join(", ");
@@ -369,21 +499,64 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     if (!this._targetTable) throw new Error("Target table not set for INSERT.");
     if (!this._insertValues) throw new Error("Values not set for INSERT.");
 
-    const valuesArray = Array.isArray(this._insertValues)
-      ? this._insertValues
-      : [this._insertValues];
-    if (valuesArray.length === 0)
-      throw new Error("No values provided for INSERT.");
+    let processedInsertData: Partial<InferModelType<TTable>>[];
+    if (Array.isArray(this._insertValues)) {
+      processedInsertData = this._insertValues.map((record) => ({ ...record }));
+    } else {
+      processedInsertData = [{ ...this._insertValues }];
+    }
 
-    const firstRecord = valuesArray[0] as Record<string, any>;
-    const columns = Object.keys(firstRecord)
-      .map((col) => `\`${col}\``)
-      .join(", ");
-    const valuePlaceholders = valuesArray
+    if (processedInsertData.length === 0) {
+      throw new Error("No values provided for INSERT.");
+    }
+
+    for (const record of processedInsertData) {
+      for (const [columnName, columnConfigUnk] of Object.entries(
+        this._targetTable.columns
+      )) {
+        const columnConfig = columnConfigUnk as ColumnConfig<any, any>;
+        if (record[columnName as keyof typeof record] === undefined) {
+          if (typeof columnConfig.default === "function") {
+            const defaultValue = (columnConfig.default as () => any)();
+            (record as Record<string, any>)[columnName] = defaultValue;
+          } else if (
+            columnConfig.default !== undefined &&
+            typeof columnConfig.default === "object" &&
+            (columnConfig.default as SQL)._isSQL
+          ) {
+            (record as Record<string, any>)[columnName] = columnConfig.default;
+          } else if (columnConfig.default !== undefined) {
+            (record as Record<string, any>)[columnName] = columnConfig.default;
+          }
+        }
+      }
+    }
+
+    const allKeys = new Set<string>();
+    processedInsertData.forEach((record) => {
+      Object.keys(record as Record<string, any>).forEach((key) =>
+        allKeys.add(key)
+      );
+    });
+    const orderedKeys = Array.from(allKeys).sort();
+    const columns = orderedKeys.map((col) => `\`${col}\``).join(", ");
+
+    const valuePlaceholders = processedInsertData
       .map((record) => {
-        const recordValues = Object.values(record as Record<string, any>);
-        return `(${recordValues
-          .map(() => `@p${paramIndexState.value++}`)
+        const orderedValues = orderedKeys.map(
+          (key) => (record as Record<string, any>)[key]
+        );
+        return `(${orderedValues
+          .map((val) => {
+            if (
+              typeof val === "object" &&
+              val !== null &&
+              (val as SQL)._isSQL === true
+            ) {
+              return (val as SQL).toSqlString("spanner", paramIndexState);
+            }
+            return `@p${paramIndexState.value++}`;
+          })
           .join(", ")})`;
       })
       .join(", ");
@@ -458,40 +631,153 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     return `WHERE ${conditionsStr}`;
   }
 
-  getBoundParameters(): unknown[] {
+  private buildOrderByClause(
+    dialect: Dialect,
+    paramIndexState: { value: number }
+  ): string {
+    if (this._orderBy.length === 0) return "";
+    const orderByParts = this._orderBy.map((item) => {
+      let fieldSql: string;
+      if ("_isSQL" in item.field) {
+        fieldSql = (item.field as SQL).toSqlString(dialect, paramIndexState);
+      } else {
+        // It's a ColumnConfig
+        const colConfig = item.field as ColumnConfig<any, any>;
+        if (colConfig._tableName) {
+          fieldSql =
+            dialect === "postgres"
+              ? `"${colConfig._tableName}"."${colConfig.name}"`
+              : `\`${colConfig._tableName}\`.\`${colConfig.name}\``;
+        } else {
+          fieldSql =
+            dialect === "postgres"
+              ? `"${colConfig.name}"`
+              : `\`${colConfig.name}\``;
+        }
+      }
+      return `${fieldSql} ${item.direction}`;
+    });
+    return `ORDER BY ${orderByParts.join(", ")}`;
+  }
+
+  private buildGroupByClause(
+    dialect: Dialect,
+    paramIndexState: { value: number }
+  ): string {
+    if (this._groupBy.length === 0) return "";
+    const groupByParts = this._groupBy.map((field) => {
+      if ("_isSQL" in field) {
+        return (field as SQL).toSqlString(dialect, paramIndexState);
+      } else {
+        // It's a ColumnConfig
+        const colConfig = field as ColumnConfig<any, any>;
+        if (colConfig._tableName) {
+          return dialect === "postgres"
+            ? `"${colConfig._tableName}"."${colConfig.name}"`
+            : `\`${colConfig._tableName}\`.\`${colConfig.name}\``;
+        } else {
+          return dialect === "postgres"
+            ? `"${colConfig.name}"`
+            : `\`${colConfig.name}\``;
+        }
+      }
+    });
+    return `GROUP BY ${groupByParts.join(", ")}`;
+  }
+
+  getBoundParameters(dialect: Dialect): unknown[] {
     const allParams: unknown[] = [];
 
     if (this._operationType === "select" && this._selectedFields) {
       for (const field of Object.values(this._selectedFields)) {
         if (typeof field === "object" && field !== null && "_isSQL" in field) {
-          allParams.push(...(field as SQL).getValues());
+          allParams.push(...(field as SQL).getValues(dialect));
         }
       }
     }
 
-    if (this._operationType === "insert" && this._insertValues) {
-      const valuesArray = Array.isArray(this._insertValues)
-        ? this._insertValues
-        : [this._insertValues];
-      for (const record of valuesArray) {
-        allParams.push(
-          ...Object.values(record as Record<string, any>).filter(
-            (val) =>
-              !(typeof val === "object" && val !== null && "_isSQL" in val)
-          )
-        );
-        Object.values(record as Record<string, any>).forEach((val) => {
-          if (typeof val === "object" && val !== null && "_isSQL" in val) {
-            allParams.push(...(val as SQL).getValues());
+    if (
+      this._operationType === "insert" &&
+      this._insertValues &&
+      this._targetTable
+    ) {
+      let processedInsertDataForParams: Partial<InferModelType<TTable>>[];
+      if (Array.isArray(this._insertValues)) {
+        processedInsertDataForParams = this._insertValues.map((record) => ({
+          ...record,
+        }));
+      } else {
+        processedInsertDataForParams = [{ ...this._insertValues }];
+      }
+
+      for (const record of processedInsertDataForParams) {
+        for (const [columnName, columnConfigUnk] of Object.entries(
+          this._targetTable.columns
+        )) {
+          const columnConfig = columnConfigUnk as ColumnConfig<any, any>;
+          if (record[columnName as keyof typeof record] === undefined) {
+            if (typeof columnConfig.default === "function") {
+              const defaultValue = (columnConfig.default as () => any)();
+              (record as Record<string, any>)[columnName] = defaultValue;
+            } else if (
+              columnConfig.default !== undefined &&
+              typeof columnConfig.default === "object" &&
+              (columnConfig.default as SQL)._isSQL
+            ) {
+              // SQL defaults don't produce bound parameters themselves,
+              // but ensure the column is present if it was added.
+              // The actual SQL string is inlined.
+              // However, if the SQL object itself contains parameters, they need to be extracted.
+              // This part is tricky: if the default is sql`FUNC(${param})`, that param needs to be collected.
+              // For now, we assume SQL defaults are parameter-less or their params are handled by their .getValues()
+              // when they are eventually stringified.
+              // The key is that the `record` now has the SQL object.
+              (record as Record<string, any>)[columnName] =
+                columnConfig.default;
+            } else if (columnConfig.default !== undefined) {
+              (record as Record<string, any>)[columnName] =
+                columnConfig.default;
+            }
           }
-        });
+        }
+      }
+
+      // Extract parameters based on the final state of processedInsertDataForParams
+      const allKeysForParams = new Set<string>();
+      processedInsertDataForParams.forEach((record) => {
+        Object.keys(record as Record<string, any>).forEach((key) =>
+          allKeysForParams.add(key)
+        );
+      });
+      // Ensure consistent order for parameter collection, matching column order in SQL
+      const orderedColumnNames = Array.from(allKeysForParams).sort();
+
+      for (const record of processedInsertDataForParams) {
+        for (const columnName of orderedColumnNames) {
+          const value = (record as Record<string, any>)[columnName];
+          if (value === undefined) {
+            // This case should ideally not be hit if defaults are processed correctly
+            // and all columns in allKeysForParams have a value in each record.
+            continue;
+          }
+
+          if (
+            typeof value === "object" &&
+            value !== null &&
+            (value as SQL)._isSQL === true
+          ) {
+            allParams.push(...(value as SQL).getValues(dialect));
+          } else {
+            allParams.push(value);
+          }
+        }
       }
     }
 
     if (this._operationType === "update" && this._updateSetValues) {
       for (const value of Object.values(this._updateSetValues)) {
         if (typeof value === "object" && value !== null && "_isSQL" in value) {
-          allParams.push(...(value as SQL).getValues());
+          allParams.push(...(value as SQL).getValues(dialect));
         } else {
           allParams.push(value);
         }
@@ -506,10 +792,44 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           condition !== null &&
           "_isSQL" in condition
         ) {
-          allParams.push(...(condition as SQL).getValues());
+          allParams.push(...(condition as SQL).getValues(dialect));
         }
       }
     }
+
+    // Collect params from JOIN ON conditions
+    if (this._joins) {
+      for (const join of this._joins) {
+        allParams.push(...join.onCondition.getValues(dialect));
+      }
+    }
+
+    // Collect params from ORDER BY clauses (if any field is SQL with params)
+    if (this._orderBy) {
+      for (const orderItem of this._orderBy) {
+        if (
+          typeof orderItem.field === "object" &&
+          orderItem.field !== null &&
+          "_isSQL" in orderItem.field
+        ) {
+          allParams.push(...(orderItem.field as SQL).getValues(dialect));
+        }
+      }
+    }
+
+    // Collect params from GROUP BY clauses (if any field is SQL with params)
+    if (this._groupBy) {
+      for (const groupItem of this._groupBy) {
+        if (
+          typeof groupItem === "object" &&
+          groupItem !== null &&
+          "_isSQL" in groupItem
+        ) {
+          allParams.push(...(groupItem as SQL).getValues(dialect));
+        }
+      }
+    }
+
     return allParams;
   }
 
@@ -534,6 +854,35 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
   //   }
   //   return adapter.execute(sqlString, params);
   // }
+
+  // --- JOIN Methods ---
+  private addJoin(
+    type: JoinType,
+    table: TableConfig<any, any>,
+    onCondition: SQL
+  ): this {
+    if (this._operationType !== "select") {
+      throw new Error(`JOIN operations are only applicable to SELECT queries.`);
+    }
+    this._joins.push({ type, targetTable: table, onCondition });
+    return this;
+  }
+
+  innerJoin(table: TableConfig<any, any>, onCondition: SQL): this {
+    return this.addJoin("INNER", table, onCondition);
+  }
+
+  leftJoin(table: TableConfig<any, any>, onCondition: SQL): this {
+    return this.addJoin("LEFT", table, onCondition);
+  }
+
+  // rightJoin(table: TableConfig<any, any>, onCondition: SQL): this {
+  //   return this.addJoin("RIGHT", table, onCondition);
+  // }
+
+  // fullJoin(table: TableConfig<any, any>, onCondition: SQL): this {
+  //   return this.addJoin("FULL", table, onCondition);
+  // }
 }
 
 // Example usage (conceptual, won't run without table definitions and adapters)
@@ -551,7 +900,10 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
 // const query1 = qb
 //   .select({ userId: usersTable.columns.id, userName: usersTable.columns.name })
 //   .from(usersTable)
+//   .innerJoin(postsTable, sql`${usersTable.columns.id} = ${postsTable.columns.userId}`) // Example Join
 //   .where(sql`${usersTable.columns.age} > 30`) // Assuming sql tag and column access
+//   .orderBy(usersTable.columns.age, "DESC") // Example Order By
+//   .groupBy(usersTable.columns.name) // Example Group By
 //   .limit(10)
 //   .offset(5)
 //   .toSQL('pg');

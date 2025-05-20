@@ -26,7 +26,7 @@ export interface ColumnConfig<T, TName extends string = string> {
     spanner: string; // e.g., 'STRING', 'INT64', 'TIMESTAMP'
   };
   notNull?: boolean;
-  default?: T | (() => T) | { sql: string }; // SQL string for default like sql`CURRENT_TIMESTAMP`
+  default?: T | (() => T) | SQL | { sql: string }; // Added SQL here, {sql: string} is for DDL representation of raw SQL
   primaryKey?: boolean; // For single column primary key
   unique?: boolean; // For unique constraints on a single column
   references?: ForeignKeyConfig;
@@ -87,20 +87,21 @@ export interface SQL {
   toSqlString(dialect: Dialect, currentParamIndex?: { value: number }): string;
   /**
    * Gets the array of parameter values corresponding to the placeholders in the SQL string.
+   * @param dialect The SQL dialect ('postgres' or 'spanner').
    * @returns An array of parameter values.
    */
-  getValues(): unknown[];
+  getValues(dialect: Dialect): unknown[];
   readonly _isSQL: true;
 }
 
 export function sql(strings: TemplateStringsArray, ...values: unknown[]): SQL {
-  const getValuesRecursive = (vals: unknown[]): unknown[] => {
+  const getValuesRecursive = (vals: unknown[], dialect: Dialect): unknown[] => {
     const params: unknown[] = [];
     for (const val of vals) {
       if (typeof val === "object" && val !== null) {
         if ("_isSQL" in val) {
           // Check if it's an SQL object
-          params.push(...(val as SQL).getValues());
+          params.push(...(val as SQL).getValues(dialect));
         } else if (
           // Check if it's NOT a ColumnConfig object
           // A ColumnConfig has 'name', 'type', and 'dialectTypes'
@@ -125,7 +126,7 @@ export function sql(strings: TemplateStringsArray, ...values: unknown[]): SQL {
 
   return {
     _isSQL: true,
-    getValues: () => getValuesRecursive(values),
+    getValues: (dialect: Dialect) => getValuesRecursive(values, dialect),
     toSqlString: (
       dialect: Dialect,
       currentParamIndex?: { value: number }
@@ -152,10 +153,19 @@ export function sql(strings: TemplateStringsArray, ...values: unknown[]): SQL {
             typeof (value as any).dialectTypes === "object"
           ) {
             // It's a ColumnConfig, interpolate its name as an identifier
-            const colName = (value as ColumnConfig<any, any>).name;
-            result +=
-              (dialect === "postgres" ? `"${colName}"` : `\`${colName}\``) +
-              strings[i + 1];
+            const colConfig = value as ColumnConfig<any, any>;
+            const colName = colConfig.name;
+            let identifier = "";
+            if (colConfig._tableName) {
+              identifier =
+                dialect === "postgres"
+                  ? `"${colConfig._tableName}"."${colName}"`
+                  : `\`${colConfig._tableName}\`.\`${colName}\``;
+            } else {
+              identifier =
+                dialect === "postgres" ? `"${colName}"` : `\`${colName}\``;
+            }
+            result += identifier + strings[i + 1];
           } else {
             // It's some other object, treat as a parameter
             result +=

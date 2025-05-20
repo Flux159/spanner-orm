@@ -1,6 +1,6 @@
 // src/spanner/ddl.ts
 
-import type { TableConfig, ColumnConfig } from "../types/common.js";
+import type { TableConfig, ColumnConfig, SQL } from "../types/common.js"; // Added SQL import
 import { reservedKeywords } from "./reservedKeywords.js";
 
 // Spanner uses backticks for escaping, but often identifiers are unquoted if simple.
@@ -30,15 +30,28 @@ function formatDefaultValueSpanner(
   if (
     typeof column.default === "object" &&
     column.default !== null &&
-    "sql" in column.default
+    (column.default as SQL)._isSQL === true
   ) {
-    // For sql tagged literals like sql\`CURRENT_TIMESTAMP\`
-    // Spanner's CURRENT_TIMESTAMP()
-    const sqlValue = column.default.sql as string;
+    // For SQL objects created by the sql`` tag
+    // Spanner's CURRENT_TIMESTAMP() needs to be CURRENT_TIMESTAMP() not just CURRENT_TIMESTAMP
+    const sqlString = (column.default as SQL).toSqlString("spanner");
+    if (sqlString.toUpperCase() === "CURRENT_TIMESTAMP") {
+      return `DEFAULT (CURRENT_TIMESTAMP())`;
+    }
+    return `DEFAULT (${sqlString})`;
+  }
+  if (
+    // This handles the { sql: "RAW_SQL" } case
+    typeof column.default === "object" &&
+    column.default !== null &&
+    "sql" in column.default &&
+    typeof (column.default as { sql: string }).sql === "string"
+  ) {
+    const sqlValue = (column.default as { sql: string }).sql;
     if (sqlValue.toUpperCase() === "CURRENT_TIMESTAMP") {
       return `DEFAULT (CURRENT_TIMESTAMP())`;
     }
-    return `DEFAULT (${sqlValue})`; // General SQL default
+    return `DEFAULT (${sqlValue})`;
   }
   if (typeof column.default === "string") {
     // Spanner strings are typically single-quoted, but can use triple quotes.
@@ -72,6 +85,7 @@ export function generateCreateTableSpanner(tableConfig: TableConfig): string {
   const tableName = escapeIdentifierSpanner(tableConfig.name);
   const columnsSql: string[] = [];
   const primaryKeyColumns: string[] = [];
+  const foreignKeySqls: string[] = [];
 
   for (const columnName in tableConfig.columns) {
     const column = tableConfig.columns[columnName];
@@ -97,15 +111,87 @@ export function generateCreateTableSpanner(tableConfig: TableConfig): string {
     if (column.primaryKey) {
       primaryKeyColumns.push(escapeIdentifierSpanner(column.name));
     }
+
+    if (column.references) {
+      const referencedColumnConfig = column.references.referencesFn();
+      const referencedTableName = referencedColumnConfig._tableName;
+      const referencedColumnName = referencedColumnConfig.name;
+
+      if (!referencedTableName) {
+        console.warn(
+          `Could not determine referenced table name for column "${column.name}" in table "${tableConfig.name}". FK constraint skipped for Spanner.`
+        );
+      } else {
+        // Spanner FK constraint names are optional but good practice. Auto-generate one.
+        const fkName = escapeIdentifierSpanner(
+          `fk_${tableConfig.name}_${column.name}_${referencedTableName}`
+        );
+        let fkSql = `CONSTRAINT ${fkName} FOREIGN KEY (${escapeIdentifierSpanner(
+          column.name
+        )}) REFERENCES ${escapeIdentifierSpanner(
+          referencedTableName
+        )}(${escapeIdentifierSpanner(referencedColumnName)})`;
+
+        // Spanner only supports ON DELETE CASCADE and ON DELETE NO ACTION (default)
+        if (column.references.onDelete?.toLowerCase() === "cascade") {
+          fkSql += ` ON DELETE CASCADE`;
+        }
+        // ON DELETE NO ACTION is the default and doesn't need to be specified.
+        // Other actions like SET NULL, SET DEFAULT, RESTRICT are not directly supported by Spanner FKs.
+        else if (
+          column.references.onDelete &&
+          column.references.onDelete.toLowerCase() !== "no action"
+        ) {
+          console.warn(
+            `Spanner does not support ON DELETE ${column.references.onDelete.toUpperCase()} for FK on ${
+              tableConfig.name
+            }.${column.name}. Defaulting to NO ACTION.`
+          );
+        }
+        foreignKeySqls.push(fkSql);
+      }
+    }
     columnsSql.push(columnSql);
   }
 
-  let createTableSql = `CREATE TABLE ${tableName} (\n  ${columnsSql.join(
+  const definitionParts = [...columnsSql]; // Changed to const
+
+  if (
+    tableConfig.compositePrimaryKey &&
+    tableConfig.compositePrimaryKey.columns.length > 0
+  ) {
+    // Spanner defines PK as part of the table, not as a separate constraint line usually
+    // The primaryKeyColumns array is used below.
+    // const compositePkCols = tableConfig.compositePrimaryKey.columns.map(escapeIdentifierSpanner); // This was unused here
+  } else if (primaryKeyColumns.length > 0 && !tableConfig.compositePrimaryKey) {
+    // Handled by primaryKeyColumns below
+  }
+
+  // Add collected foreign keys as table-level constraints
+  definitionParts.push(...foreignKeySqls);
+
+  let createTableSql = `CREATE TABLE ${tableName} (\n  ${definitionParts.join(
     ",\n  "
   )}\n)`;
 
-  if (primaryKeyColumns.length > 0) {
+  // Spanner PRIMARY KEY is defined outside the parentheses of column definitions
+  if (
+    tableConfig.compositePrimaryKey &&
+    tableConfig.compositePrimaryKey.columns.length > 0
+  ) {
+    const compositePkCols = tableConfig.compositePrimaryKey.columns.map(
+      escapeIdentifierSpanner
+    );
+    createTableSql += ` PRIMARY KEY (${compositePkCols.join(", ")})`;
+  } else if (primaryKeyColumns.length > 0) {
     createTableSql += ` PRIMARY KEY (${primaryKeyColumns.join(", ")})`;
+  }
+
+  // Spanner INTERLEAVE IN PARENT clause
+  if (tableConfig.interleave) {
+    createTableSql += `,\n  INTERLEAVE IN PARENT ${escapeIdentifierSpanner(
+      tableConfig.interleave.parentTable
+    )} ON DELETE ${tableConfig.interleave.onDelete.toUpperCase()}`;
   }
 
   createTableSql += ";";
