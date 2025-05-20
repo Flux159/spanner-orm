@@ -589,3 +589,145 @@ describe("QueryBuilder String Matching Functions with Aliasing", () => {
     );
   });
 });
+
+describe("QueryBuilder Eager Loading (Include) with Aliasing", () => {
+  let qbInclude: QueryBuilder<typeof usersTable>;
+
+  beforeEach(() => {
+    qbInclude = new QueryBuilder<typeof usersTable>();
+  });
+
+  // usersTable (t1) has many postsTable (t2 via postsTable.userId -> usersTable.id)
+  // relationName in include clause is assumed to be the table name of the related table.
+
+  it("PostgreSQL: should fetch users and include all columns from their posts", () => {
+    const query = qbInclude
+      .select({ id: usersTable.columns.id, name: usersTable.columns.name })
+      .from(usersTable)
+      .include({ posts: true }) // "posts" is the name of postsTable
+      .toSQL("postgres");
+
+    // Expect a LEFT JOIN to posts table (t2)
+    // Expect selected columns from users (t1.id, t1.name)
+    // Expect all columns from posts (t2.*) aliased as posts__<colName>
+    expect(query).toContain('SELECT "t1"."id" AS "id"');
+    expect(query).toContain('"t1"."name" AS "name"');
+    expect(query).toContain(
+      '"t2"."id" AS "posts__id", "t2"."title" AS "posts__title", "t2"."user_id" AS "posts__user_id", "t2"."content" AS "posts__content"'
+    ); // Order of aliased columns might vary based on Object.entries iteration
+    expect(query).toContain(
+      'FROM "users" AS "t1" LEFT JOIN "posts" AS "t2" ON "t2"."user_id" = "t1"."id"'
+    );
+  });
+
+  it("Spanner: should fetch users and include all columns from their posts", () => {
+    const query = qbInclude
+      .select({ id: usersTable.columns.id, email: usersTable.columns.email })
+      .from(usersTable)
+      .include({ posts: true })
+      .toSQL("spanner");
+
+    expect(query).toContain("SELECT `t1`.`id` AS `id`");
+    expect(query).toContain("`t1`.`email` AS `email`");
+    expect(query).toContain(
+      "`t2`.`id` AS `posts__id`, `t2`.`title` AS `posts__title`, `t2`.`user_id` AS `posts__user_id`, `t2`.`content` AS `posts__content`"
+    );
+    expect(query).toContain(
+      "FROM `users` AS `t1` LEFT JOIN `posts` AS `t2` ON `t2`.`user_id` = `t1`.`id`"
+    );
+  });
+
+  it("PostgreSQL: should fetch users and include specific columns from posts", () => {
+    const query = qbInclude
+      .select({ userName: usersTable.columns.name })
+      .from(usersTable)
+      .include({ posts: { select: { title: true, content: true } } })
+      .toSQL("postgres");
+
+    expect(query).toContain('"t1"."name" AS "userName"');
+    expect(query).toContain(
+      '"t2"."title" AS "posts__title", "t2"."content" AS "posts__content"'
+    );
+    expect(query).not.toContain('"posts__id"');
+    expect(query).not.toContain('"posts__user_id"');
+    expect(query).toContain(
+      'FROM "users" AS "t1" LEFT JOIN "posts" AS "t2" ON "t2"."user_id" = "t1"."id"'
+    );
+  });
+
+  it("Spanner: should fetch users and include specific columns from posts", () => {
+    const query = qbInclude
+      .select({ userName: usersTable.columns.name })
+      .from(usersTable)
+      .include({ posts: { select: { id: true } } })
+      .toSQL("spanner");
+
+    expect(query).toContain("`t1`.`name` AS `userName`");
+    expect(query).toContain("`t2`.`id` AS `posts__id`");
+    expect(query).not.toContain("`posts__title`");
+    expect(query).not.toContain("`posts__content`");
+    expect(query).toContain(
+      "FROM `users` AS `t1` LEFT JOIN `posts` AS `t2` ON `t2`.`user_id` = `t1`.`id`"
+    );
+  });
+
+  it("PostgreSQL: should handle SELECT * from primary table when including relations", () => {
+    const query = qbInclude
+      .select("*") // Select all from usersTable
+      .from(usersTable)
+      .include({ posts: { select: { title: true } } })
+      .toSQL("postgres");
+
+    // Expect all columns from users (t1.*)
+    // Expect selected columns from posts (t2.title aliased as posts__title)
+    expect(query).toContain('"t1".*'); // This needs to be handled carefully by the SELECT clause builder.
+    // The current implementation might expand t1.* and then add posts__title.
+    // A more precise test would check for specific user columns if "*" isn't expanded literally with other selections.
+    // For now, let's assume the logic correctly prioritizes explicit selections or expands "*" appropriately.
+    // The key is that "posts__title" is present and the join is correct.
+    expect(query).toContain('"t2"."title" AS "posts__title"');
+    expect(query).toContain(
+      'FROM "users" AS "t1" LEFT JOIN "posts" AS "t2" ON "t2"."user_id" = "t1"."id"'
+    );
+  });
+
+  it("PostgreSQL: should correctly alias columns when multiple relations are included (conceptual)", () => {
+    // This test is more conceptual as it requires another table, e.g., 'comments'
+    // const commentsTable = table("comments", {
+    //   id: integer("id").primaryKey(),
+    //   text: text("text").notNull(),
+    //   postId: integer("post_id").references(() => postsTable.columns.id),
+    // });
+    // If we were to include posts and then comments for posts (nested include, future task)
+    // or two separate includes from users (e.g. user.posts and user.activityLogs)
+    // the aliasing like 'relationName__columnName' should prevent collision.
+    // For one-level deep, this is already tested by including 'posts'.
+    // If we had another table, say 'profiles', related to 'users':
+    const profilesTable = table("profiles", {
+      id: integer("id").primaryKey(),
+      bio: text("bio"),
+      userId: integer("user_id")
+        .references(() => usersTable.columns.id)
+        .unique(), // One-to-one
+    });
+
+    const query = qbInclude
+      .select({ userName: usersTable.columns.name })
+      .from(usersTable)
+      .include({
+        posts: { select: { title: true } },
+        profiles: { select: { bio: true } },
+      })
+      .toSQL("postgres");
+
+    expect(query).toContain('"t1"."name" AS "userName"');
+    expect(query).toContain('"t2"."title" AS "posts__title"'); // posts is t2
+    expect(query).toContain('"t3"."bio" AS "profiles__bio"'); // profiles becomes t3
+    expect(query).toContain(
+      'LEFT JOIN "posts" AS "t2" ON "t2"."user_id" = "t1"."id"'
+    );
+    expect(query).toContain(
+      'LEFT JOIN "profiles" AS "t3" ON "t3"."user_id" = "t1"."id"'
+    );
+  });
+});

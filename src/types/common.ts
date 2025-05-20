@@ -76,6 +76,17 @@ export type InferModelType<T extends TableConfig<string, TableColumns>> = {
   [K in keyof T["columns"]]: InferColumnType<T["columns"][K]>;
 };
 
+// --- Eager Loading / Include Types ---
+export type IncludeRelationOptions =
+  | boolean
+  | {
+      select?: Record<string, boolean>; // Select specific columns from the related table
+      // where?: any; // Future: conditions for the related data
+      // include?: IncludeClause; // Future: nested includes
+    };
+
+export type IncludeClause = Record<string, IncludeRelationOptions>;
+
 // --- Function Descriptors ---
 export type FunctionArg =
   | ColumnConfig<any, any>

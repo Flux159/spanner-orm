@@ -12,6 +12,15 @@ import type {
 } from "../types/common.js";
 import { sql } from "../types/common.js"; // Import the sql tagged template literal
 
+// Global registry for table configurations
+const tableRegistry = new Map<string, TableConfig<any, any>>();
+
+export function getTableConfig(
+  tableName: string
+): TableConfig<any, any> | undefined {
+  return tableRegistry.get(tableName);
+}
+
 // --- Column Builder ---
 
 // Base class for all column builders to provide common methods
@@ -291,6 +300,7 @@ export function table<
     // Handle other extra configurations here
   }
 
+  tableRegistry.set(name, tableConfig); // Register the table
   return tableConfig;
 }
 
