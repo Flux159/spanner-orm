@@ -276,14 +276,23 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       throw new Error(`Unsupported dialect: ${dialect}`);
     }
 
+    if (!this._operationType) {
+      // Should have been caught earlier, but as a safeguard
+      throw new Error("Operation type is undefined during prepare.");
+    }
     return {
       sql: sqlString,
       parameters: this.getBoundParameters(dialect),
       dialect: dialect,
+      action: this._operationType, // Add the action here
       includeClause:
         this._operationType === "select" ? this._includeClause : undefined,
       primaryTable:
         this._operationType === "select" ? this._targetTable : undefined,
+      fields:
+        this._operationType === "select"
+          ? (this._selectedFields as any)
+          : undefined, // Add selected fields
     };
   }
 

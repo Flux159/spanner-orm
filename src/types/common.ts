@@ -76,6 +76,12 @@ export type InferModelType<T extends TableConfig<string, TableColumns>> = {
   [K in keyof T["columns"]]: InferColumnType<T["columns"][K]>;
 };
 
+// Type for selecting specific fields, used by QueryBuilder and OrmClient
+export type SelectFields<TTable extends TableConfig<any, any>> =
+  | Partial<Record<keyof InferModelType<TTable>, boolean>>
+  | { [columnAlias: string]: SQL | ColumnConfig<any, any> | true } // Allow SQL expressions or column configs for aliasing
+  | undefined;
+
 // --- Eager Loading / Include Types ---
 export type IncludeRelationOptions =
   | boolean
@@ -245,20 +251,33 @@ export function sql(strings: TemplateStringsArray, ...values: unknown[]): SQL {
           // Check if it's an SQL object
           params.push(...(val as SQL).getValues(dialect));
         } else if (
-          // Check if it's NOT a ColumnConfig object
+          // Check if it's NOT a ColumnConfig object AND NOT a TableConfig object
           // A ColumnConfig has 'name', 'type', and 'dialectTypes'
+          // A TableConfig has 'name', 'columns', and '_isTable'
           !(
-            "name" in val &&
-            typeof (val as any).name === "string" &&
-            "type" in val &&
-            typeof (val as any).type === "string" &&
-            "dialectTypes" in val &&
-            typeof (val as any).dialectTypes === "object"
+            (
+              "name" in val &&
+              typeof (val as any).name === "string" &&
+              "type" in val &&
+              typeof (val as any).type === "string" &&
+              "dialectTypes" in val &&
+              typeof (val as any).dialectTypes === "object"
+            ) // It's a ColumnConfig
+          ) &&
+          !(
+            (
+              "name" in val &&
+              typeof (val as any).name === "string" &&
+              "columns" in val &&
+              typeof (val as any).columns === "object" &&
+              "_isTable" in val &&
+              (val as any)._isTable === true
+            ) // It's a TableConfig
           )
         ) {
-          params.push(val); // It's some other object, treat as parameter
+          params.push(val); // It's some other object (not SQL, not ColumnConfig, not TableConfig), treat as parameter
         }
-        // If it is a ColumnConfig, it's not a parameter, so it's skipped here.
+        // If it is a ColumnConfig or TableConfig, it's not a parameter, so it's skipped here.
       } else {
         params.push(val); // Primitives are parameters
       }
@@ -298,34 +317,55 @@ export function sql(strings: TemplateStringsArray, ...values: unknown[]): SQL {
             // It's a ColumnConfig, interpolate its name as an identifier
             const colConfig = value as ColumnConfig<any, any>;
             const colName = colConfig.name;
-            const originalTableName = colConfig._tableName;
-            let nameToUseForTable: string | undefined = originalTableName; // Default to original
+            const originalTableNameFromCol = colConfig._tableName; // Table name from column's context
+            let tableQualifier: string | undefined = originalTableNameFromCol;
 
-            if (aliasMap && originalTableName) {
-              const alias = aliasMap.get(originalTableName);
+            if (aliasMap && originalTableNameFromCol) {
+              const alias = aliasMap.get(originalTableNameFromCol);
               if (alias) {
-                // If an alias is found in the map
-                nameToUseForTable = alias;
+                tableQualifier = alias;
               }
-              // If not found, nameToUseForTable remains originalTableName
             }
-            // If originalTableName was undefined, nameToUseForTable is also undefined
 
             let identifier = "";
-            if (nameToUseForTable) {
-              // Check if we have a table name/alias to use
+            if (tableQualifier) {
               identifier =
                 dialect === "postgres"
-                  ? `"${nameToUseForTable}"."${colName}"`
-                  : `\`${nameToUseForTable}\`.\`${colName}\``;
+                  ? `"${tableQualifier}"."${colName}"`
+                  : `\`${tableQualifier}\`.\`${colName}\``;
             } else {
-              // Fallback: just use column name if no table context
+              // Fallback: just use column name if no table context (e.g. in SELECT COUNT(col) FROM table)
+              // This case should be less common if columns are always associated with tables.
               identifier =
                 dialect === "postgres" ? `"${colName}"` : `\`${colName}\``;
             }
             result += identifier + strings[i + 1];
+          } else if (
+            // Check if it IS a TableConfig object
+            "name" in value &&
+            typeof (value as any).name === "string" &&
+            "columns" in value && // Check for 'columns' to differentiate from ColumnConfig
+            typeof (value as any).columns === "object" &&
+            "_isTable" in value &&
+            (value as any)._isTable === true
+          ) {
+            // It's a TableConfig, interpolate its name as an identifier
+            const tableConfig = value as TableConfig<any, any>;
+            const originalTableName = tableConfig.name;
+            // Table names themselves are not typically aliased in the aliasMap in the same way
+            // columns are qualified by aliases. The aliasMap is for `OriginalName -> QueryAlias`.
+            // When a TableConfig is used directly like `FROM ${myTable}`, we use its actual name.
+            // If it's `FROM ${myTable} AS t_alias`, the `AS t_alias` is part of the raw string.
+            const tableNameToUse = originalTableName; // For now, direct table references use their defined name.
+            // Aliasing like `FROM ${myTable} AS someAlias` is handled by the string part.
+
+            const identifier =
+              dialect === "postgres"
+                ? `"${tableNameToUse}"`
+                : `\`${tableNameToUse}\``;
+            result += identifier + strings[i + 1];
           } else {
-            // It's some other object, treat as a parameter
+            // It's some other object (not SQL, not ColumnConfig, not TableConfig), treat as a parameter
             result +=
               (dialect === "postgres"
                 ? `$${paramIndexState.value++}`
@@ -443,8 +483,14 @@ export interface SchemaDiff {
 }
 
 // --- Migration Executor Type ---
+// The executeSql function should align with DatabaseAdapter['execute']
+export type MigrationExecuteSql = (
+  sql: string,
+  params?: unknown[]
+) => Promise<number | import("./adapter.js").AffectedRows>;
+
 export type MigrationExecutor = (
-  executeSql: (sql: string, params?: unknown[]) => Promise<void>,
+  executeSql: MigrationExecuteSql,
   dialect: Dialect
 ) => Promise<void>;
 
@@ -456,7 +502,9 @@ export interface PreparedQuery<
   sql: string;
   parameters: unknown[];
   dialect: Dialect;
+  action: "select" | "insert" | "update" | "delete"; // Added action
   includeClause?: TInclude; // Updated to use EnhancedIncludeClause
   primaryTable?: TPrimaryTable; // For result shaping
   // Potentially add selectedFields map here if needed for more advanced shaping or type inference
+  fields?: SelectFields<TPrimaryTable>; // Added to carry selected fields info
 }

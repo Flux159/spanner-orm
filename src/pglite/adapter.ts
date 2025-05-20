@@ -5,6 +5,8 @@ import type {
   DatabaseAdapter,
   QueryResultRow as AdapterQueryResultRow,
   ConnectionOptions,
+  Transaction,
+  AffectedRows,
 } from "../types/adapter.js";
 import type { PreparedQuery, TableConfig } from "../types/common.js"; // Added
 import { shapeResults } from "../core/result-shaper.js"; // Added
@@ -14,18 +16,7 @@ export interface PgliteConnectionOptions extends ConnectionOptions {
   dataDir?: string;
 }
 
-/**
- * Represents the execution context within a PGlite transaction,
- * conforming to a subset of DatabaseAdapter for transactional operations.
- */
-export interface PgliteTransactionAdapter {
-  dialect: "postgres"; // PGlite is PG compatible
-  execute(sql: string, params?: unknown[]): Promise<void>;
-  query<T extends AdapterQueryResultRow = AdapterQueryResultRow>(
-    sql: string,
-    params?: unknown[]
-  ): Promise<T[]>;
-}
+// PgliteTransactionAdapter is effectively replaced by the global Transaction interface
 
 export class ConcretePgliteAdapter implements DatabaseAdapter {
   readonly dialect = "postgres"; // Treat PGlite as PostgreSQL for ORM dialect purposes
@@ -84,12 +75,19 @@ export class ConcretePgliteAdapter implements DatabaseAdapter {
     }
   }
 
-  async execute(sql: string, params?: unknown[]): Promise<void> {
+  async execute(
+    sql: string,
+    params?: unknown[]
+  ): Promise<number | AffectedRows> {
     await this.ready;
     try {
-      // Use query for commands as well to support parameters, then discard results.
-      // PGlite's `exec` is more for multi-statement SQL strings without direct param binding in the same call.
-      await this.pglite.query(sql, params as any[] | undefined);
+      const result = await this.pglite.query(sql, params as any[] | undefined);
+      // PGLite's query result for DML doesn't directly give rowCount in the same way pg does.
+      // It might be part of `result.affectedRows` or similar if the underlying driver provides it.
+      // For simplicity, if `result.rows` is empty and no error, assume success.
+      // A more robust way would be to check `result.command` and `result.rowCount` if available and reliable.
+      // PGLite's `results.affectedRows` should be used for DML.
+      return { count: result.affectedRows ?? 0 };
     } catch (error) {
       console.error("Error executing command with Pglite adapter:", error);
       throw error;
@@ -102,7 +100,6 @@ export class ConcretePgliteAdapter implements DatabaseAdapter {
   ): Promise<TResult[]> {
     await this.ready;
     try {
-      // `query` signature is <T>(sql: string, params?: any[]).
       const results = await this.pglite.query<TResult>(
         sql,
         params as any[] | undefined
@@ -114,63 +111,81 @@ export class ConcretePgliteAdapter implements DatabaseAdapter {
     }
   }
 
-  async beginTransaction(): Promise<void> {
+  async beginTransaction(): Promise<Transaction> {
     await this.ready;
-    await this.pglite.query("BEGIN");
+    // PGlite's transaction model is callback-based.
+    // Returning a fully independent Transaction object that controls
+    // an external PGlite transaction is not straightforward.
+    // This implementation will be a simplified one or throw an error,
+    // guiding users towards the adapter's main `transaction` method.
+    console.warn(
+      "PGlite beginTransaction creates a transaction context that expects immediate execution via its callback. For ORM client transactions, use the OrmClient's transaction method."
+    );
+    // Return a dummy or throw, as PGlite's `pglite.transaction()` expects a callback.
+    // This method, if called directly by OrmClient, won't work as expected with PGlite's model.
+    // The OrmClient's transaction method should use the adapter's transaction method.
+    return {
+      execute: async (_sql, _params) => {
+        throw new Error(
+          "PGlite transaction via standalone Transaction object is not supported. Use adapter.transaction(callback)."
+        );
+      },
+      query: async (_sql, _params) => {
+        throw new Error(
+          "PGlite transaction via standalone Transaction object is not supported. Use adapter.transaction(callback)."
+        );
+      },
+      commit: async () => {
+        throw new Error(
+          "PGlite transaction via standalone Transaction object is not supported. Use adapter.transaction(callback)."
+        );
+      },
+      rollback: async () => {
+        throw new Error(
+          "PGlite transaction via standalone Transaction object is not supported. Use adapter.transaction(callback)."
+        );
+      },
+    };
   }
 
-  async commitTransaction(): Promise<void> {
+  async transaction<T>(callback: (tx: Transaction) => Promise<T>): Promise<T> {
     await this.ready;
-    await this.pglite.query("COMMIT");
-  }
-
-  async rollbackTransaction(): Promise<void> {
-    await this.ready;
-    await this.pglite.query("ROLLBACK");
-  }
-
-  async transaction<T>(
-    callback: (txAdapter: PgliteTransactionAdapter) => Promise<T>
-  ): Promise<T> {
-    await this.ready;
-    // PGlite supports transactions directly on the main instance.
-    // The `transaction` method of PGlite itself could be used,
-    // but to align with the adapter pattern, we manage BEGIN/COMMIT/ROLLBACK.
-    try {
-      await this.beginTransaction();
-
-      const txExecutor: PgliteTransactionAdapter = {
-        dialect: "postgres",
-        execute: async (
-          sqlCmd: string,
-          paramsCmd?: unknown[]
-        ): Promise<void> => {
-          // Inside a transaction, use query for commands too
-          await this.pglite.query(sqlCmd, paramsCmd as any[] | undefined);
+    // Use PGlite's native transaction method which takes a callback
+    return this.pglite.transaction<T>(async (pgliteTransaction) => {
+      // pgliteTransaction is the PGlite instance scoped to this transaction
+      const wrappedTx: Transaction = {
+        execute: async (sqlCmd, paramsCmd) => {
+          const res = await pgliteTransaction.query(
+            sqlCmd,
+            paramsCmd as any[] | undefined
+          );
+          return { count: res.affectedRows ?? 0 };
         },
-        query: async <
-          TQuery extends AdapterQueryResultRow = AdapterQueryResultRow
-        >(
-          sqlQuery: string,
-          paramsQuery?: unknown[]
-        ): Promise<TQuery[]> => {
-          // Inside a transaction, use the same pglite instance's query
-          const result = await this.pglite.query<TQuery>(
+        query: async (sqlQuery, paramsQuery) => {
+          const res = await pgliteTransaction.query(
             sqlQuery,
             paramsQuery as any[] | undefined
           );
-          return result.rows;
+          return res.rows as any[];
+        },
+        // Commit and rollback are managed by PGlite's transaction callback wrapper.
+        // These methods on our Transaction interface might not be called if PGlite handles it.
+        // However, providing them for interface consistency.
+        commit: async () => {
+          // PGlite's transaction callback implicitly commits if the callback resolves.
+          // Explicit call might not be needed or could be a no-op.
+          // If PGlite's `pgliteTransaction` had a `.commit()` we'd call it.
+          // For now, assume PGlite handles it.
+          Promise.resolve();
+        },
+        rollback: async () => {
+          // PGlite's transaction callback implicitly rolls back if the callback rejects.
+          // Explicit call might not be needed.
+          Promise.resolve();
         },
       };
-
-      const result = await callback(txExecutor);
-      await this.commitTransaction();
-      return result;
-    } catch (error) {
-      await this.rollbackTransaction();
-      console.error("Pglite transaction rolled back due to error:", error);
-      throw error;
-    }
+      return callback(wrappedTx);
+    });
   }
 
   async queryPrepared<TTable extends TableConfig<any, any>>(

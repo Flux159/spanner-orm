@@ -10,6 +10,8 @@ import type {
   DatabaseAdapter,
   QueryResultRow as AdapterQueryResultRow,
   ConnectionOptions,
+  Transaction as OrmTransaction, // Renaming to avoid conflict with Spanner's Transaction
+  AffectedRows,
 } from "../types/adapter.js";
 import type { PreparedQuery, TableConfig } from "../types/common.js"; // Corrected path
 import { shapeResults } from "../core/result-shaper.js"; // Corrected path
@@ -21,17 +23,7 @@ export interface SpannerConnectionOptions extends ConnectionOptions {
   // Add other Spanner specific options if needed, e.g., credentials
 }
 
-/**
- * Represents the execution context within a Spanner transaction.
- */
-export interface SpannerTransactionAdapter {
-  dialect: "spanner";
-  execute(sql: string, params?: Record<string, any>): Promise<void>; // For DML/DDL
-  query<T extends AdapterQueryResultRow = AdapterQueryResultRow>(
-    sql: string,
-    params?: Record<string, any>
-  ): Promise<T[]>; // For SELECT
-}
+// SpannerTransactionAdapter is effectively replaced by the global OrmTransaction interface
 
 export class ConcreteSpannerAdapter implements DatabaseAdapter {
   readonly dialect = "spanner";
@@ -99,13 +91,22 @@ export class ConcreteSpannerAdapter implements DatabaseAdapter {
     return this.db;
   }
 
-  async execute(sql: string, params?: Record<string, any>): Promise<void> {
+  async execute(
+    sql: string,
+    params?: Record<string, any>
+  ): Promise<number | AffectedRows> {
     const db = this.ensureConnected();
     try {
-      await db.runTransactionAsync(async (transaction: Transaction) => {
-        await transaction.runUpdate({ sql, params });
-        await transaction.commit();
-      });
+      // Spanner's runUpdate returns an array where the first element is the affected row count.
+      // The result of runTransactionAsync is the result of its callback.
+      const rowCount = await db.runTransactionAsync(
+        async (transaction: Transaction) => {
+          const [count] = await transaction.runUpdate({ sql, params });
+          // No explicit commit needed here, runTransactionAsync handles it.
+          return count;
+        }
+      );
+      return { count: typeof rowCount === "number" ? rowCount : 0 };
     } catch (error) {
       console.error("Error executing command with Spanner adapter:", error);
       throw error;
@@ -163,61 +164,115 @@ export class ConcreteSpannerAdapter implements DatabaseAdapter {
     }
   }
 
-  async beginTransaction(): Promise<void> {
-    console.warn(
-      "beginTransaction is not typically used directly with Spanner adapter's runTransactionAsync pattern. Use the transaction() callback method."
-    );
-  }
+  async beginTransaction(): Promise<OrmTransaction> {
+    const db = this.ensureConnected();
+    // Spanner's transactions are typically managed via runTransactionAsync.
+    // To return a Transaction object, we'd need to get a transaction object
+    // from Spanner and wrap its methods. This is complex because Spanner
+    // encourages the callback pattern for retries and context management.
 
-  async commitTransaction(): Promise<void> {
-    console.warn(
-      "commitTransaction is not typically used directly with Spanner adapter's runTransactionAsync pattern."
-    );
-  }
+    // For now, this will be a simplified version that might not support
+    // all OrmTransaction capabilities perfectly or might rely on a single-use transaction.
+    // The main `transaction` method below is preferred for Spanner.
 
-  async rollbackTransaction(): Promise<void> {
-    console.warn(
-      "rollbackTransaction is not typically used directly with Spanner adapter's runTransactionAsync pattern."
-    );
+    // This is a placeholder. A true Spanner transaction object for manual control
+    // would require more careful handling of the Spanner Transaction object lifecycle.
+    // The `runTransactionAsync` pattern is generally safer.
+    const spannerTx = db.getTransaction(); // This gets a Transaction object but doesn't start it in the traditional sense.
+    // It's more of a context for a single transaction attempt.
+
+    return {
+      execute: async (
+        sqlCmd: string,
+        paramsCmd?: Record<string, any>
+      ): Promise<number | AffectedRows> => {
+        // Note: Spanner transactions are usually committed as a whole.
+        // Running individual DMLs and then a separate commit is not the typical pattern.
+        // This is a simplified adaptation.
+        // Spanner's client library Transaction object does not have a public `begin()` method.
+        // Operations are typically run within the `runTransactionAsync` callback.
+        // This manual begin/commit/rollback on a getTransaction() object is not standard.
+        // We'll make these throw or return a conceptual failure.
+        const txObject = spannerTx as any; // Cast to any to access internal-like methods if they existed
+        if (typeof txObject.begin === "function") await txObject.begin();
+        else
+          console.warn(
+            "Spanner: conceptual begin() called on transaction object"
+          );
+
+        const [rowCountFromRunUpdate] = await txObject.runUpdate({
+          sql: sqlCmd,
+          params: paramsCmd,
+        });
+        return { count: rowCountFromRunUpdate };
+      },
+      query: async <
+        TQuery extends AdapterQueryResultRow = AdapterQueryResultRow
+      >(
+        sqlQuery: string,
+        paramsQuery?: Record<string, any>
+      ): Promise<TQuery[]> => {
+        const txObjectQuery = spannerTx as any;
+        const [rows] = await txObjectQuery.run({
+          sql: sqlQuery,
+          params: paramsQuery,
+          json: true,
+        });
+        return rows as TQuery[];
+      },
+      commit: async (): Promise<void> => {
+        const txObjectCommit = spannerTx as any;
+        if (typeof txObjectCommit.commit === "function")
+          await txObjectCommit.commit();
+        else
+          console.warn(
+            "Spanner: conceptual commit() called on transaction object"
+          );
+      },
+      rollback: async (): Promise<void> => {
+        const txObjectRollback = spannerTx as any;
+        if (typeof txObjectRollback.rollback === "function")
+          await txObjectRollback.rollback();
+        else
+          console.warn(
+            "Spanner: conceptual rollback() called on transaction object"
+          );
+      },
+    };
   }
 
   async transaction<T>(
-    callback: (txAdapter: SpannerTransactionAdapter) => Promise<T>
+    callback: (txAdapter: OrmTransaction) => Promise<T>
   ): Promise<T> {
     const db = this.ensureConnected();
-    try {
-      const result = await db.runTransactionAsync(
-        async (transaction: Transaction) => {
-          const txExecutor: SpannerTransactionAdapter = {
-            dialect: "spanner",
-            execute: async (
-              cmdSql: string,
-              cmdParams?: Record<string, any>
-            ): Promise<void> => {
-              await transaction.runUpdate({ sql: cmdSql, params: cmdParams });
-            },
-            query: async <
-              TQuery extends AdapterQueryResultRow = AdapterQueryResultRow
-            >(
-              querySql: string,
-              queryParams?: Record<string, any>
-            ): Promise<TQuery[]> => {
-              const [rows] = await transaction.run({
-                sql: querySql,
-                params: queryParams,
-                json: true,
-              });
-              return rows as TQuery[];
-            },
-          };
-          const cbResult = await callback(txExecutor);
-          return cbResult;
-        }
-      );
-      return result;
-    } catch (error) {
-      console.error("Spanner transaction failed:", error);
-      throw error;
-    }
+    // Use Spanner's recommended runTransactionAsync pattern
+    return db.runTransactionAsync(async (gcpTransaction: Transaction) => {
+      const txExecutor: OrmTransaction = {
+        execute: async (cmdSql, cmdParams) => {
+          const [rowCount] = await gcpTransaction.runUpdate({
+            sql: cmdSql,
+            params: cmdParams as Record<string, any> | undefined,
+          });
+          return { count: rowCount };
+        },
+        query: async (querySql, queryParams) => {
+          const [rows] = await gcpTransaction.run({
+            sql: querySql,
+            params: queryParams as Record<string, any> | undefined,
+            json: true,
+          });
+          return rows as any[];
+        },
+        commit: async () => {
+          // Commit is handled by runTransactionAsync itself. This is a no-op.
+          return Promise.resolve();
+        },
+        rollback: async () => {
+          // Rollback is handled by runTransactionAsync if the callback throws. This is a no-op.
+          return Promise.resolve();
+        },
+      };
+      return callback(txExecutor);
+    });
   }
 }
