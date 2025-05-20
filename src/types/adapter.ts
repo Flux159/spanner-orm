@@ -1,8 +1,45 @@
 // src/types/adapter.ts
-import type { Dialect } from "./common.js";
+import type { Dialect } from "./common.js"; // Dialect is imported here
+
+// Re-export Dialect if it's meant to be available via this module,
+// or ensure client.ts imports it directly from common.ts
+export type { Dialect }; // Re-exporting Dialect
 
 export interface QueryResultRow {
   [column: string]: any;
+}
+
+/**
+ * Represents an active database transaction.
+ */
+export interface Transaction {
+  /**
+   * Executes a SQL command within the transaction.
+   */
+  execute(sql: string, params?: unknown[]): Promise<number | AffectedRows>; // Changed to return affected rows/count
+
+  /**
+   * Executes a SQL query within the transaction.
+   */
+  query<T extends QueryResultRow = QueryResultRow>(
+    sql: string,
+    params?: unknown[]
+  ): Promise<T[]>;
+
+  /**
+   * Commits the transaction.
+   */
+  commit(): Promise<void>;
+
+  /**
+   * Rolls back the transaction.
+   */
+  rollback(): Promise<void>;
+}
+
+export interface AffectedRows {
+  // Ensure AffectedRows is defined or imported if it's from elsewhere
+  count: number;
 }
 
 export interface DatabaseAdapter {
@@ -19,11 +56,14 @@ export interface DatabaseAdapter {
   disconnect(): Promise<void>;
 
   /**
-   * Executes a SQL command (e.g., INSERT, UPDATE, DELETE, DDL) that does not return rows.
+   * Executes a SQL command (e.g., INSERT, UPDATE, DELETE, DDL).
+   * For INSERT, UPDATE, DELETE, it should ideally return the number of affected rows.
+   * For DDL or other commands, it might return void or a specific status.
    * @param sql The SQL string to execute.
    * @param params Optional array of parameters for prepared statements.
+   * @returns A promise that resolves to the number of affected rows or void.
    */
-  execute(sql: string, params?: unknown[]): Promise<void>;
+  execute(sql: string, params?: unknown[]): Promise<number | AffectedRows>; // Modified to return count/AffectedRows
 
   /**
    * Executes a SQL query that returns rows.
@@ -49,17 +89,17 @@ export interface DatabaseAdapter {
    * Begins a transaction.
    * Optional: Not all adapters or scenarios might support/require this directly from the ORM.
    */
-  beginTransaction?(): Promise<void>;
+  beginTransaction?(): Promise<Transaction>; // Changed to return Transaction
 
   /**
-   * Commits the current transaction.
+   * Commits the current transaction. (Usually part of the Transaction object)
    */
-  commitTransaction?(): Promise<void>;
+  // commitTransaction?(): Promise<void>; // This logic is now on the Transaction object
 
   /**
-   * Rolls back the current transaction.
+   * Rolls back the current transaction. (Usually part of the Transaction object)
    */
-  rollbackTransaction?(): Promise<void>;
+  // rollbackTransaction?(): Promise<void>; // This logic is now on the Transaction object
 }
 
 // Placeholder for connection options, to be defined per adapter

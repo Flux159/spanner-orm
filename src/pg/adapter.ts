@@ -11,6 +11,8 @@ import type {
   DatabaseAdapter,
   QueryResultRow as AdapterQueryResultRow,
   ConnectionOptions,
+  Transaction,
+  AffectedRows,
 } from "../types/adapter.js"; // Adjusted path
 import type { PreparedQuery, TableConfig } from "../types/common.js"; // Corrected path
 import { shapeResults } from "../core/result-shaper.js"; // Corrected path
@@ -22,14 +24,15 @@ export type PgConnectionOptions = PoolConfig | string | ConnectionOptions;
  * Represents the execution context within a PostgreSQL transaction,
  * conforming to a subset of DatabaseAdapter for transactional operations.
  */
-export interface PgTransactionAdapter {
-  dialect: "postgres";
-  execute(sql: string, params?: unknown[]): Promise<void>;
-  query<T extends AdapterQueryResultRow = AdapterQueryResultRow>(
-    sql: string,
-    params?: unknown[]
-  ): Promise<T[]>;
-}
+// PgTransactionAdapter is effectively replaced by the global Transaction interface
+// export interface PgTransactionAdapter {
+//   dialect: "postgres";
+//   execute(sql: string, params?: unknown[]): Promise<number | AffectedRows>;
+//   query<T extends AdapterQueryResultRow = AdapterQueryResultRow>(
+//     sql: string,
+//     params?: unknown[]
+//   ): Promise<T[]>;
+// }
 
 export class ConcretePgAdapter implements DatabaseAdapter {
   readonly dialect = "postgres";
@@ -75,9 +78,13 @@ export class ConcretePgAdapter implements DatabaseAdapter {
     }
   }
 
-  async execute(sql: string, params?: unknown[]): Promise<void> {
+  async execute(
+    sql: string,
+    params?: unknown[]
+  ): Promise<number | AffectedRows> {
     try {
-      await this.pool.query(sql, params);
+      const result = await this.pool.query(sql, params);
+      return { count: result.rowCount ?? 0 };
     } catch (error) {
       console.error("Error executing command with pg adapter:", error);
       throw error;
@@ -121,63 +128,61 @@ export class ConcretePgAdapter implements DatabaseAdapter {
     }
   }
 
-  async beginTransaction(): Promise<void> {
-    console.warn(
-      "beginTransaction not fully implemented for standalone use in this basic adapter. Use the transaction callback method."
-    );
-  }
-
-  async commitTransaction(): Promise<void> {
-    console.warn(
-      "commitTransaction not fully implemented for standalone use in this basic adapter."
-    );
-  }
-
-  async rollbackTransaction(): Promise<void> {
-    console.warn(
-      "rollbackTransaction not fully implemented for standalone use in this basic adapter."
-    );
-  }
-
-  async transaction<T>(
-    callback: (txAdapter: PgTransactionAdapter) => Promise<T>
-  ): Promise<T> {
+  async beginTransaction(): Promise<Transaction> {
     const client: PoolClient = await this.pool.connect();
+    await client.query("BEGIN");
+
+    return {
+      execute: async (
+        sqlCmd: string,
+        paramsCmd?: unknown[]
+      ): Promise<number | AffectedRows> => {
+        const res = await client.query(sqlCmd, paramsCmd);
+        return { count: res.rowCount ?? 0 };
+      },
+      query: async <
+        TQuery extends AdapterQueryResultRow = AdapterQueryResultRow
+      >(
+        sqlQuery: string,
+        paramsQuery?: unknown[]
+      ): Promise<TQuery[]> => {
+        const result: QueryResult<TQuery & PgQueryResultRow> =
+          await client.query<TQuery & PgQueryResultRow>(sqlQuery, paramsQuery);
+        return result.rows;
+      },
+      commit: async (): Promise<void> => {
+        try {
+          await client.query("COMMIT");
+        } finally {
+          client.release();
+        }
+      },
+      rollback: async (): Promise<void> => {
+        try {
+          await client.query("ROLLBACK");
+        } finally {
+          client.release();
+        }
+      },
+    };
+  }
+
+  // The main transaction method on the adapter can be simplified or removed
+  // if OrmClient directly uses beginTransaction and the returned Transaction object.
+  // For now, let's keep a similar structure if it's used by other parts of the ORM (e.g. migrations).
+  async transaction<T>(
+    callback: (tx: Transaction) => Promise<T> // Callback now receives a Transaction object
+  ): Promise<T> {
+    const tx = await this.beginTransaction(); // This already connects and starts
     try {
-      await client.query("BEGIN");
-
-      const txExecutor: PgTransactionAdapter = {
-        dialect: "postgres",
-        execute: async (
-          sqlCmd: string,
-          paramsCmd?: unknown[]
-        ): Promise<void> => {
-          await client.query(sqlCmd, paramsCmd);
-        },
-        query: async <
-          TQuery extends AdapterQueryResultRow = AdapterQueryResultRow
-        >(
-          sqlQuery: string,
-          paramsQuery?: unknown[]
-        ): Promise<TQuery[]> => {
-          const result: QueryResult<TQuery & PgQueryResultRow> =
-            await client.query<TQuery & PgQueryResultRow>(
-              sqlQuery,
-              paramsQuery
-            );
-          return result.rows;
-        },
-      };
-
-      const result = await callback(txExecutor);
-      await client.query("COMMIT");
+      const result = await callback(tx);
+      await tx.commit(); // This now releases the client
       return result;
     } catch (error) {
-      await client.query("ROLLBACK");
+      await tx.rollback(); // This now releases the client
       console.error("Transaction rolled back due to error:", error);
       throw error;
-    } finally {
-      client.release();
     }
+    // No finally client.release() here as it's handled by commit/rollback
   }
 }

@@ -4,26 +4,25 @@ A TypeScript ORM for Google Spanner & PostgreSQL, designed for Node.js and Bun. 
 
 ## Key Design Goals
 
-`spanner-orm` is engineered to deliver a seamless and powerful experience for managing data across PostgreSQL and Google Spanner, focusing on these core requirements:
+`spanner-orm` is engineered to deliver a seamless and powerful experience for managing data across PostgreSQL and Google Spanner. It focuses on these core requirements:
 
-- **Unified Object Model for Diverse Deployments:** Define your database schema _once_ using a Drizzle-inspired syntax. This single object model seamlessly supports both PostgreSQL (including Pglite for local/embedded use) and Google Spanner. This allows for consistent data modeling whether you're targeting a local SQLite database, a traditional PostgreSQL server, or a globally distributed Spanner instance.
-- **Cross-Dialect Migration Generation & Execution:** Automatically produce migration files containing the precise DDL for both PostgreSQL and Google Spanner. These migrations can be executed via the `spanner-orm-cli migrate` command or programmatically, ensuring smooth and reliable schema evolution across all supported database systems.
-- **Flexible Query Construction with Raw SQL Fallback:** Construct type-safe queries using an intuitive query builder. For complex scenarios, dialect-specific optimizations, or when you simply prefer writing SQL, seamlessly fall back to raw SQL using the `sql` template literal tag. This offers maximum flexibility without sacrificing the benefits of the ORM.
+- **Unified Object Model:** Define your database schema _once_ using a Drizzle-inspired syntax. This single object model seamlessly supports both PostgreSQL (including Pglite for local/embedded use) and Google Spanner, enabling consistent data modeling across diverse deployment targets (local, enterprise, global scale).
+- **Cross-Dialect Migration Generation & Execution:** Automatically produce and execute migration files containing the precise DDL for both PostgreSQL and Google Spanner. Migrations can be run via the `spanner-orm-cli migrate` command or programmatically, ensuring reliable schema evolution.
+- **Flexible Querying with Fluent API & Raw SQL:** Construct type-safe queries using an intuitive fluent API (the `db` object) or the underlying `QueryBuilder`. For complex scenarios or when direct SQL is preferred, seamlessly fall back to raw SQL using the `sql` template literal tag.
 - **Optimized SQL for Each Dialect:**
-  - **Google Spanner:** Generates Google SQL, leveraging Spanner's unique features and syntax for optimal performance and compatibility.
-  - **PostgreSQL/Pglite:** Produces standard, highly compatible SQL, ensuring broad compatibility with PostgreSQL versions and Pglite.
-  - This dual-dialect approach empowers developers to use the right database for the right job—Pglite for ultra-lightweight local development or client-side applications, PostgreSQL for traditional server-based deployments, and Google Spanner for applications requiring web-scale, global distribution—all managed from a single, consistent codebase.
-- **Composable Schemas (Drizzle-Inspired):** Easily create and reuse schema components (e.g., for common fields like `id`, `createdAt`, `updatedAt`, or base entity structures like `ownableResource`), promoting DRY principles and highly maintainable data models.
+  - **Google Spanner:** Generates Google SQL, leveraging Spanner's unique features.
+  - **PostgreSQL/Pglite:** Produces standard, highly compatible SQL.
+    This allows developers to use Pglite for local/embedded needs, PostgreSQL for traditional deployments, and Spanner for web-scale applications, all from one codebase.
+- **Composable Schemas (Drizzle-Inspired):** Easily create and reuse schema components (e.g., `id`, `timestamps`, `ownableResource`), promoting DRY principles and maintainable data models.
 
 ## Core Features
 
-`spanner-orm` is designed to provide a seamless and powerful experience for managing data across PostgreSQL and Google Spanner. Its core capabilities include:
+`spanner-orm` provides a comprehensive suite of features for modern data management:
 
-- **Unified Object Model for Diverse Deployments:** Define your database schema _once_ using a Drizzle-inspired syntax. This single object model seamlessly supports both PostgreSQL (including Pglite for local/embedded use) and Google Spanner. This allows for consistent data modeling whether you're targeting a local SQLite database, a traditional PostgreSQL server, or a globally distributed Spanner instance.
-
-- **Dialect-Specific Migration Generation & Execution:** Automatically produce migration files containing the precise DDL for both PostgreSQL and Google Spanner. These migrations can be executed via the `spanner-orm-cli migrate` command (e.g., `migrate latest`, `migrate down`) or programmatically, ensuring smooth and reliable schema evolution across all supported database systems.
-
-- **Flexible Query Building with Raw SQL Fallback:** Construct type-safe queries using an intuitive query builder. For complex scenarios, dialect-specific optimizations, or when you simply prefer writing SQL, seamlessly fall back to raw SQL using the `sql` template literal tag. This offers maximum flexibility without sacrificing the benefits of the ORM.
+- **Unified Object Model:** Define schemas once for PostgreSQL (including Pglite) and Google Spanner using a Drizzle-inspired, composable syntax.
+- **Dialect-Specific Migrations:** Generate and execute precise DDL migrations for both PostgreSQL and Spanner via CLI or programmatically.
+- **Fluent Query API & Query Builder:** Enjoy a high-level fluent API (`db` object) for common database interactions, or use the powerful `QueryBuilder` for more granular control. Both support type-safe queries.
+- **Raw SQL Fallback:** Seamlessly integrate raw SQL queries using the `sql` template tag when needed.
 
 - **Optimized SQL for Each Dialect:**
 
@@ -199,14 +198,15 @@ Make sure to read notes/Phase5.md and notes/GoogleSQLSpanner.md when working on 
 
 ### Phase 7: Developer Experience & Fluent API (Future)
 
-- [ ] **T7.1: Implement Fluent Database Interaction API (`db` object)**
-  - **Description:** Develop a high-level fluent API, typically exposed as a `db` object, that simplifies database interactions. This API will wrap the `QueryBuilder` and the `DatabaseAdapter`, allowing users to write chainable queries that are directly `await`-able (thenable) for execution against the database.
+- [x] **T7.1: Implement Fluent Database Interaction API (`db` object)**
+  - **Description:** Developed a high-level fluent API, exposed as an `OrmClient` (typically used as `db`), that simplifies database interactions. This API wraps the `QueryBuilder` and the `DatabaseAdapter`, allowing users to write chainable queries that are directly `await`-able (thenable) for execution against the database.
   - **Key Features:**
-    - Instantiate with a configured `DatabaseAdapter` (e.g., `new OrmClient(adapter)`).
-    - Support for `db.select()`, `db.insert()`, `db.update()`, `db.deleteFrom()`, and `db.raw()`.
-    - Methods return a chainable and thenable `ExecutableQuery` object.
-    - Seamlessly integrates query building, preparation, execution, and (for SELECTs) result shaping.
+    - Instantiated with a configured `DatabaseAdapter` and `dialect` (e.g., `new OrmClient(adapter, 'postgres')`).
+    - Supports `db.select()`, `db.insert()`, `db.update()`, `db.deleteFrom()`, and `db.raw()`.
+    - Methods return a chainable and thenable `ExecutableQuery` or `ExecutableRawQuery` object.
+    - Seamlessly integrates query building, SQL generation, execution, and (for SELECTs with includes) result shaping.
     - Provides strong TypeScript inference for query results.
+    - Includes `db.transaction()` for managing atomic operations.
     - Ensures a consistent API experience across PostgreSQL, Pglite, and Spanner.
   - **Impact:** Greatly improves the developer experience by providing a more intuitive and common ORM interaction pattern.
 
@@ -390,210 +390,147 @@ npx spanner-orm-cli migrate down --schema ./dist/schema.js
 
 _(Note: The migration CLI commands `migrate latest` and `migrate down` now use environment variables such as `DB_DIALECT`, `DATABASE_URL` (for PG/Pglite), and Spanner-specific variables like `SPANNER_PROJECT_ID`, `SPANNER_INSTANCE_ID`, `SPANNER_DATABASE_ID` to connect to your database and apply/revert migrations.)_
 
-### Querying Examples
+### Querying Examples with Fluent API (`db` object)
 
-Here's how you can use the `QueryBuilder` to construct and execute queries. Assume you have your schema defined (e.g., `usersTable`, `postsTable` from the "Getting Started" example) and an initialized database adapter.
+The `OrmClient` (typically instantiated as `db`) provides a fluent, chainable API for database interactions.
 
 ```typescript
-import { QueryBuilder, sql } from "spanner-orm";
-import { usersTable, postsTable } from "./schema"; // Your schema definitions
-import {
-  count,
-  sum,
-  avg,
-  like,
-  ilike,
-  regexpContains,
-  concat,
-  lower,
-  upper,
-} from "spanner-orm/functions"; // Aggregate and string functions
-// import { getDbAdapter } from './your-adapter-setup'; // Your adapter setup
+import { OrmClient, sql, users, posts, count } from "spanner-orm";
+// Assuming 'users' and 'posts' tables are defined in your schema (e.g., from './schema.ts')
+// And 'count' is an aggregate function from 'spanner-orm/functions'
 
-// const db = getDbAdapter(); // Your initialized adapter instance
+// Example: Initialize with a Pglite adapter
+// import { PGlite } from "@electric-sql/pglite";
+// import { ConcretePgliteAdapter } from "spanner-orm"; // Or your specific adapter
+// const pglite = new PGlite(); // In-memory
+// const adapter = new ConcretePgliteAdapter(pglite);
+// const db = new OrmClient(adapter, "postgres"); // 'postgres' is the dialect for PGlite
 
-async function runExamples() {
-  const qb = new QueryBuilder(); // Generic QueryBuilder, table specified in methods
-
-  // 1. Basic SELECT with WHERE
-  const recentUsersQuery = qb
-    .select({ id: usersTable.columns.id, name: usersTable.columns.name })
-    .from(usersTable)
+async function runFluentExamples(db: OrmClient) {
+  // 1. Basic SELECT with WHERE, ORDER BY, LIMIT
+  const recentUsers = await db
+    .select({ id: users.columns.id, name: users.columns.name })
+    .from(users)
     .where(
-      sql`${usersTable.columns.createdAt} > ${new Date(
+      sql`${users.columns.createdAt} > ${new Date(
         Date.now() - 24 * 60 * 60 * 1000
       )}`
-    ) // Users created in the last 24 hours
-    .orderBy(usersTable.columns.createdAt, "DESC")
+    )
+    .orderBy(users.columns.createdAt, "DESC")
     .limit(10);
+  console.log("Recent Users:", recentUsers);
+  // recentUsers is typed as: Array<{ id: string; name: string; }> (assuming id is uuid/string)
 
-  // const recentUsersSql = recentUsersQuery.toSQL("postgres");
-  // console.log("Recent Users SQL:", recentUsersSql);
-  // const recentUsers = await db.execute(recentUsersSql, recentUsersQuery.getBoundParameters());
+  // 2. INSERT a new user
+  const insertResult = await db
+    .insert(users)
+    .values({ name: "Alice Wonderland", email: "alice@example.com" });
+  console.log("Insert Result:", insertResult); // e.g., { count: 1 }
 
-  // 2. SELECT with INNER JOIN
-  const usersWithPostsQuery = qb
-    .select({
-      userName: usersTable.columns.name,
-      postTitle: postsTable.columns.title,
-    })
-    .from(usersTable)
-    .innerJoin(
-      postsTable,
-      sql`${usersTable.columns.id} = ${postsTable.columns.userId}`
-    )
-    .where(sql`${usersTable.columns.email} = ${"example@user.com"}`);
+  // 3. UPDATE an existing user
+  const updateResult = await db
+    .update(users)
+    .set({ name: "Alice in Chains" })
+    .where(sql`${users.columns.email} = ${"alice@example.com"}`);
+  console.log("Update Result:", updateResult); // e.g., { count: 1 }
 
-  // const usersWithPostsSql = usersWithPostsQuery.toSQL("postgres");
-  // console.log("Users with Posts SQL:", usersWithPostsSql);
-  // const usersWithPosts = await db.execute(usersWithPostsSql, usersWithPostsQuery.getBoundParameters());
+  // 4. SELECT with Eager Loading (include)
+  // Assuming 'posts' table has a 'userId' column referencing 'users.id'
+  // And your schema definitions correctly set up this relation for the ORM to understand.
+  const usersWithPosts = await db
+    .select({ id: users.columns.id, userName: users.columns.name })
+    .from(users)
+    .where(sql`${users.columns.email} = ${"alice@example.com"}`)
+    .include({
+      posts: {
+        // 'posts' is the relation name defined in your schema or inferred
+        // relationTable: posts, // This might be needed if relation name isn't enough
+        options: { select: { title: true, content: true } },
+      },
+    });
+  console.log("User with Posts:", JSON.stringify(usersWithPosts, null, 2));
+  // usersWithPosts would be typed, e.g.:
+  // Array<{ id: string; userName: string; posts: Array<{ title: string; content: string; }> }>
 
-  // 3. SELECT with GROUP BY and Aggregates
-  const userPostCountsQuery = qb
-    .select({
-      userId: usersTable.columns.id,
-      userName: usersTable.columns.name,
-      postCount: count(postsTable.columns.id),
-    })
-    .from(usersTable)
-    .leftJoin(
-      postsTable,
-      sql`${usersTable.columns.id} = ${postsTable.columns.userId}`
-    )
-    .groupBy(usersTable.columns.id, usersTable.columns.name)
-    .orderBy(sql`COUNT(${postsTable.columns.id})`, "DESC");
+  // 5. DELETE a user
+  const deleteResult = await db
+    .deleteFrom(users)
+    .where(sql`${users.columns.email} = ${"alice@example.com"}`);
+  console.log("Delete Result:", deleteResult); // e.g., { count: 1 }
 
-  // const userPostCountsSql = userPostCountsQuery.toSQL("postgres");
-  // console.log("User Post Counts SQL:", userPostCountsSql);
-  // const userPostCounts = await db.execute(userPostCountsSql, userPostCountsQuery.getBoundParameters());
+  // 6. Raw SQL Query
+  const rawUsersCount = await db.raw<{ total_users: number }[]>(
+    sql`SELECT COUNT(*) as total_users FROM ${users}`
+  );
+  console.log("Raw Users Count:", rawUsersCount[0].total_users);
 
-  // 4. INSERT a new user
-  const newUserQuery = qb
-    .insert(usersTable)
-    .values({ name: "New User", email: "new@user.com", age: 28 });
-  // const newUserSql = newUserQuery.toSQL("postgres");
-  // await db.execute(newUserSql, newUserQuery.getBoundParameters());
+  // 7. Transaction Example
+  await db.transaction(async (txDb) => {
+    const user = await txDb
+      .select({ id: users.columns.id })
+      .from(users)
+      .where(sql`${users.columns.name} = ${"Bob The Builder"}`)
+      .limit(1);
 
-  // 5. UPDATE an existing user's age
-  const updateUserQuery = qb
-    .update(usersTable)
-    .set({ age: 29 })
-    .where(sql`${usersTable.columns.email} = ${"new@user.com"}`);
-  // const updateUserSql = updateUserQuery.toSQL("postgres");
-  // await db.execute(updateUserSql, updateUserQuery.getBoundParameters());
-
-  // 6. DELETE a user
-  const deleteUserQuery = qb
-    .deleteFrom(usersTable)
-    .where(sql`${usersTable.columns.email} = ${"new@user.com"}`);
-  // const deleteUserSql = deleteUserQuery.toSQL("postgres");
-  // await db.execute(deleteUserSql, deleteUserQuery.getBoundParameters("postgres"));
-
-  // 7. SELECT with LIKE (PostgreSQL specific, translates to REGEXP_CONTAINS for Spanner)
-  const usersLikeQuery = qb
-    .select({ name: usersTable.columns.name })
-    .from(usersTable)
-    .where(like(usersTable.columns.name, "J%")); // Users whose name starts with J
-
-  // const usersLikeSqlPg = usersLikeQuery.toSQL("postgres");
-  // console.log("Users LIKE SQL (PG):", usersLikeSqlPg); // SELECT "name" AS "name" FROM "users" WHERE "users"."name" LIKE $1
-  // const usersLikeParamsPg = usersLikeQuery.getBoundParameters("postgres");
-  // console.log("Users LIKE Params (PG):", usersLikeParamsPg); // ["J%"]
-
-  // const usersLikeSqlSpanner = usersLikeQuery.toSQL("spanner");
-  // console.log("Users LIKE SQL (Spanner):", usersLikeSqlSpanner); // SELECT `name` AS `name` FROM `users` WHERE REGEXP_CONTAINS(`users`.`name`, @p1)
-  // const usersLikeParamsSpanner = usersLikeQuery.getBoundParameters("spanner");
-  // console.log("Users LIKE Params (Spanner):", usersLikeParamsSpanner); // ["^J.*"]
-
-  // 8. SELECT with ILIKE (PostgreSQL specific, translates to REGEXP_CONTAINS with (?i) for Spanner)
-  const usersILikeQuery = qb
-    .select({ email: usersTable.columns.email })
-    .from(usersTable)
-    .where(ilike(usersTable.columns.email, "%@example.com"));
-
-  // const usersILikeSqlPg = usersILikeQuery.toSQL("postgres");
-  // console.log("Users ILIKE SQL (PG):", usersILikeSqlPg); // SELECT "email" AS "email" FROM "users" WHERE "users"."email" ILIKE $1
-  // const usersILikeParamsPg = usersILikeQuery.getBoundParameters("postgres");
-  // console.log("Users ILIKE Params (PG):", usersILikeParamsPg); // ["%@example.com"]
-
-  // const usersILikeSqlSpanner = usersILikeQuery.toSQL("spanner");
-  // console.log("Users ILIKE SQL (Spanner):", usersILikeSqlSpanner); // SELECT `email` AS `email` FROM `users` WHERE REGEXP_CONTAINS(`users`.`email`, @p1)
-  // const usersILikeParamsSpanner = usersILikeQuery.getBoundParameters("spanner");
-  // console.log("Users ILIKE Params (Spanner):", usersILikeParamsSpanner); // ["(?i).*@example\\.com$"]
-
-  // 9. SELECT with REGEXP_CONTAINS (Spanner specific, translates to ~ for PostgreSQL)
-  const usersRegexpQuery = qb
-    .select({ name: usersTable.columns.name })
-    .from(usersTable)
-    .where(regexpContains(usersTable.columns.name, "^[A-C]")); // Names starting with A, B, or C
-
-  // const usersRegexpSqlSpanner = usersRegexpQuery.toSQL("spanner");
-  // console.log("Users REGEXP SQL (Spanner):", usersRegexpSqlSpanner); // SELECT `name` AS `name` FROM `users` WHERE REGEXP_CONTAINS(`users`.`name`, @p1)
-  // const usersRegexpParamsSpanner = usersRegexpQuery.getBoundParameters("spanner");
-  // console.log("Users REGEXP Params (Spanner):", usersRegexpParamsSpanner); // ["^[A-C]"]
-
-  // const usersRegexpSqlPg = usersRegexpQuery.toSQL("postgres");
-  // console.log("Users REGEXP SQL (PG):", usersRegexpSqlPg); // SELECT "name" AS "name" FROM "users" WHERE "users"."name" ~ $1
-  // const usersRegexpParamsPg = usersRegexpQuery.getBoundParameters("postgres");
-  // console.log("Users REGEXP Params (PG):", usersRegexpParamsPg); // ["^[A-C]"]
-
-  // 10. SELECT with CONCAT
-  const userFullNameQuery = qb
-    .select({
-      fullName: concat(
-        usersTable.columns.name,
-        " (",
-        usersTable.columns.email,
-        ")"
-      ),
-    })
-    .from(usersTable)
-    .where(sql`${usersTable.columns.id} = ${1}`);
-
-  // const userFullNameSql = userFullNameQuery.toSQL("postgres");
-  // console.log("User Full Name SQL (PG):", userFullNameSql); // SELECT CONCAT("users"."name", $1, "users"."email", $2) AS "fullName" FROM "users" WHERE "users"."id" = $3
-  // const userFullNameParams = userFullNameQuery.getBoundParameters("postgres");
-  // console.log("User Full Name Params (PG):", userFullNameParams); // [" (", ")", 1]
-
-  // 11. SELECT with LOWER and UPPER
-  const userCaseTransformedQuery = qb
-    .select({
-      lowerName: lower(usersTable.columns.name),
-      upperEmail: upper(usersTable.columns.email),
-      processedName: upper(concat("prefix-", lower(usersTable.columns.name))),
-    })
-    .from(usersTable)
-    .where(sql`${usersTable.columns.id} = ${2}`);
-
-  // const userCaseSql = userCaseTransformedQuery.toSQL("postgres");
-  // console.log("User Case SQL (PG):", userCaseSql); // SELECT LOWER("users"."name") AS "lowerName", UPPER("users"."email") AS "upperEmail", UPPER(CONCAT($1, LOWER("users"."name"))) AS "processedName" FROM "users" WHERE "users"."id" = $2
-  // const userCaseParams = userCaseTransformedQuery.getBoundParameters("postgres");
-  // console.log("User Case Params (PG):", userCaseParams); // ["prefix-", 2]
-
-  // 12. SELECT with Eager Loading (Include)
-  // Assuming usersTable and postsTable are defined, and postsTable has a userId referencing usersTable.id
-  const usersWithTheirPostsQuery = qb
-    .select({
-      userId: usersTable.columns.id,
-      userName: usersTable.columns.name,
-    })
-    .from(usersTable)
-    .include({ posts: { select: { title: true, content: true } } }) // Include posts, selecting specific columns
-    .where(sql`${usersTable.columns.id} = ${1}`);
-
-  // const usersWithPostsSql = usersWithTheirPostsQuery.toSQL("postgres");
-  // console.log("Users with Posts (Include) SQL:", usersWithPostsSql);
-  // Example PG SQL:
-  // SELECT "t1"."id" AS "userId", "t1"."name" AS "userName", "t2"."title" AS "posts__title", "t2"."content" AS "posts__content"
-  // FROM "users" AS "t1"
-  // LEFT JOIN "posts" AS "t2" ON "t2"."user_id" = "t1"."id"
-  // WHERE "t1"."id" = $1
-  // const usersWithPostsData = await db.execute(usersWithPostsSql, usersWithTheirPostsQuery.getBoundParameters("postgres"));
-  // Result shaping would be needed here to transform flat rows into nested objects, e.g.:
-  // { userId: 1, userName: 'Alice', posts: [{ title: 'Post 1', content: '...' }, ...] }
+    if (user.length > 0) {
+      await txDb
+        .insert(posts)
+        .values({
+          userId: user[0].id,
+          title: "My New Post",
+          content: "Content here...",
+        });
+    } else {
+      console.log("User Bob not found, post not created.");
+    }
+  });
+  console.log("Transaction example completed.");
 }
 
-// runExamples().catch(console.error);
+// To run these examples:
+// 1. Set up your adapter and db instance as shown above.
+// 2. Ensure your schema (users, posts tables) is defined and migrations are run.
+// runFluentExamples(db).catch(console.error);
+```
+
+### Querying Examples with `QueryBuilder` (Lower-Level)
+
+Here's how you can use the `QueryBuilder` to construct and execute queries. This is a lower-level API compared to the `db` object and requires manual execution via a database adapter.
+
+```typescript
+import { QueryBuilder, sql, users, posts, count } from "spanner-orm";
+// import { ConcretePgliteAdapter } from "spanner-orm"; // Or your specific adapter
+// import { PGlite } from "@electric-sql/pglite";
+
+// const pglite = new PGlite();
+// const adapter = new ConcretePgliteAdapter(pglite);
+// await adapter.connect(); // Ensure adapter is connected
+
+async function runQueryBuilderExamples(adapter) {
+  // Pass a connected adapter
+  const qb = new QueryBuilder(); // Generic QueryBuilder
+
+  // 1. Basic SELECT with WHERE
+  const recentUsersQuery = new QueryBuilder() // Create a new QB for each query
+    .select({ id: users.columns.id, name: users.columns.name })
+    .from(users)
+    .where(
+      sql`${users.columns.createdAt} > ${new Date(
+        Date.now() - 24 * 60 * 60 * 1000
+      )}`
+    )
+    .orderBy(users.columns.createdAt, "DESC")
+    .limit(10);
+
+  const recentUsersPrepared = recentUsersQuery.prepare(adapter.dialect);
+  // const recentUsers = await adapter.query(recentUsersPrepared.sql, recentUsersPrepared.parameters);
+  // console.log("Recent Users (QB):", recentUsers);
+
+  // ... (other QueryBuilder examples can be similarly adapted) ...
+  // For INSERT, UPDATE, DELETE, use adapter.execute()
+}
+
+// runQueryBuilderExamples(adapter).catch(console.error);
 ```
 
 These examples illustrate how to perform common database operations. The actual execution would depend on your specific database adapter setup.

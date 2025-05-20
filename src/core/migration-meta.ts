@@ -3,8 +3,9 @@ import type { Dialect } from "../types/common.js";
 
 export const MIGRATION_TABLE_NAME = "_spanner_orm_migrations_log";
 
-// Type for the executeSql function (commands), matching MigrationExecutor's callback
-type ExecuteSqlFn = (sql: string, params?: unknown[]) => Promise<void>;
+// Use the centrally defined MigrationExecuteSql type
+import type { MigrationExecuteSql } from "../types/common.js";
+// type ExecuteSqlFn = (sql: string, params?: unknown[]) => Promise<void>; // Remove local definition
 
 // Type for a function that can query rows, based on DatabaseAdapter's query method
 interface QueryResultRow {
@@ -108,7 +109,7 @@ export async function getAppliedMigrationNames(
  * @param dialect The SQL dialect.
  */
 export async function recordMigrationApplied(
-  executeSql: ExecuteSqlFn,
+  executeSql: MigrationExecuteSql, // Use imported type
   migrationName: string,
   dialect: Dialect
 ): Promise<void> {
@@ -130,7 +131,7 @@ export async function recordMigrationApplied(
  * @param dialect The SQL dialect.
  */
 export async function recordMigrationReverted(
-  executeSql: ExecuteSqlFn,
+  executeSql: MigrationExecuteSql, // Use imported type
   migrationName: string,
   dialect: Dialect
 ): Promise<void> {
