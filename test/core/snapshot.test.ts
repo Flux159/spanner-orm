@@ -146,17 +146,19 @@ describe("generateSchemaSnapshot", () => {
       notNull: true,
     });
     // createdAt column
-    expect(usersTable.columns.createdAt).toEqual({
-      // Changed created_at to createdAt
-      name: "created_at",
-      type: "timestamp",
-      dialectTypes: {
-        postgres: "TIMESTAMP WITH TIME ZONE",
-        spanner: "TIMESTAMP",
-      },
-      default: { sql: "CURRENT_TIMESTAMP" },
-      notNull: true,
-    });
+    expect(usersTable.columns.createdAt.name).toBe("created_at");
+    expect(usersTable.columns.createdAt.type).toBe("timestamp");
+    expect(usersTable.columns.createdAt.dialectTypes.postgres).toBe(
+      "TIMESTAMP WITH TIME ZONE"
+    );
+    expect(usersTable.columns.createdAt.dialectTypes.spanner).toBe("TIMESTAMP");
+    expect(usersTable.columns.createdAt.notNull).toBe(true);
+    // Check the default value for createdAt
+    const createdAtDefault = usersTable.columns.createdAt.default as any;
+    expect(createdAtDefault).toBeDefined();
+    expect(createdAtDefault._isSQL).toBe(true); // It should be an SQL object now
+    expect(createdAtDefault.toSqlString("postgres")).toBe("CURRENT_TIMESTAMP");
+
     // jsonData column
     expect(usersTable.columns.jsonData).toEqual({
       // Changed json_data to jsonData

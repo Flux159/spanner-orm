@@ -343,21 +343,68 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     if (!this._targetTable) throw new Error("Target table not set for INSERT.");
     if (!this._insertValues) throw new Error("Values not set for INSERT.");
 
-    const valuesArray = Array.isArray(this._insertValues)
-      ? this._insertValues
-      : [this._insertValues];
-    if (valuesArray.length === 0)
-      throw new Error("No values provided for INSERT.");
+    let processedInsertData: Partial<InferModelType<TTable>>[];
+    if (Array.isArray(this._insertValues)) {
+      processedInsertData = this._insertValues.map((record) => ({ ...record }));
+    } else {
+      processedInsertData = [{ ...this._insertValues }];
+    }
 
-    const firstRecord = valuesArray[0] as Record<string, any>;
-    const columns = Object.keys(firstRecord)
-      .map((col) => `"${col}"`)
-      .join(", ");
-    const valuePlaceholders = valuesArray
+    if (processedInsertData.length === 0) {
+      throw new Error("No values provided for INSERT.");
+    }
+
+    for (const record of processedInsertData) {
+      for (const [columnName, columnConfigUnk] of Object.entries(
+        this._targetTable.columns
+      )) {
+        const columnConfig = columnConfigUnk as ColumnConfig<any, any>;
+        if (record[columnName as keyof typeof record] === undefined) {
+          if (typeof columnConfig.default === "function") {
+            const defaultValue = (columnConfig.default as () => any)();
+            (record as Record<string, any>)[columnName] = defaultValue;
+          } else if (
+            columnConfig.default !== undefined &&
+            typeof columnConfig.default === "object" &&
+            (columnConfig.default as SQL)._isSQL
+          ) {
+            // If default is an SQL object, add it to the record to be processed
+            (record as Record<string, any>)[columnName] = columnConfig.default;
+          } else if (columnConfig.default !== undefined) {
+            // For non-function, non-SQL direct default values
+            (record as Record<string, any>)[columnName] = columnConfig.default;
+          }
+        }
+      }
+    }
+
+    // Determine columns from ALL keys present in ANY processed record,
+    // ensuring columns with only SQL defaults are included.
+    const allKeys = new Set<string>();
+    processedInsertData.forEach((record) => {
+      Object.keys(record as Record<string, any>).forEach((key) =>
+        allKeys.add(key)
+      );
+    });
+    const orderedKeys = Array.from(allKeys).sort();
+    const columns = orderedKeys.map((col) => `"${col}"`).join(", ");
+
+    const valuePlaceholders = processedInsertData
       .map((record) => {
-        const recordValues = Object.values(record as Record<string, any>);
-        return `(${recordValues
-          .map(() => `$${paramIndexState.value++}`)
+        const orderedValues = orderedKeys.map(
+          (key) => (record as Record<string, any>)[key]
+        );
+        return `(${orderedValues
+          .map((val) => {
+            if (
+              typeof val === "object" &&
+              val !== null &&
+              (val as SQL)._isSQL === true
+            ) {
+              return (val as SQL).toSqlString("postgres", paramIndexState);
+            }
+            return `$${paramIndexState.value++}`;
+          })
           .join(", ")})`;
       })
       .join(", ");
@@ -369,21 +416,64 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     if (!this._targetTable) throw new Error("Target table not set for INSERT.");
     if (!this._insertValues) throw new Error("Values not set for INSERT.");
 
-    const valuesArray = Array.isArray(this._insertValues)
-      ? this._insertValues
-      : [this._insertValues];
-    if (valuesArray.length === 0)
-      throw new Error("No values provided for INSERT.");
+    let processedInsertData: Partial<InferModelType<TTable>>[];
+    if (Array.isArray(this._insertValues)) {
+      processedInsertData = this._insertValues.map((record) => ({ ...record }));
+    } else {
+      processedInsertData = [{ ...this._insertValues }];
+    }
 
-    const firstRecord = valuesArray[0] as Record<string, any>;
-    const columns = Object.keys(firstRecord)
-      .map((col) => `\`${col}\``)
-      .join(", ");
-    const valuePlaceholders = valuesArray
+    if (processedInsertData.length === 0) {
+      throw new Error("No values provided for INSERT.");
+    }
+
+    for (const record of processedInsertData) {
+      for (const [columnName, columnConfigUnk] of Object.entries(
+        this._targetTable.columns
+      )) {
+        const columnConfig = columnConfigUnk as ColumnConfig<any, any>;
+        if (record[columnName as keyof typeof record] === undefined) {
+          if (typeof columnConfig.default === "function") {
+            const defaultValue = (columnConfig.default as () => any)();
+            (record as Record<string, any>)[columnName] = defaultValue;
+          } else if (
+            columnConfig.default !== undefined &&
+            typeof columnConfig.default === "object" &&
+            (columnConfig.default as SQL)._isSQL
+          ) {
+            (record as Record<string, any>)[columnName] = columnConfig.default;
+          } else if (columnConfig.default !== undefined) {
+            (record as Record<string, any>)[columnName] = columnConfig.default;
+          }
+        }
+      }
+    }
+
+    const allKeys = new Set<string>();
+    processedInsertData.forEach((record) => {
+      Object.keys(record as Record<string, any>).forEach((key) =>
+        allKeys.add(key)
+      );
+    });
+    const orderedKeys = Array.from(allKeys).sort();
+    const columns = orderedKeys.map((col) => `\`${col}\``).join(", ");
+
+    const valuePlaceholders = processedInsertData
       .map((record) => {
-        const recordValues = Object.values(record as Record<string, any>);
-        return `(${recordValues
-          .map(() => `@p${paramIndexState.value++}`)
+        const orderedValues = orderedKeys.map(
+          (key) => (record as Record<string, any>)[key]
+        );
+        return `(${orderedValues
+          .map((val) => {
+            if (
+              typeof val === "object" &&
+              val !== null &&
+              (val as SQL)._isSQL === true
+            ) {
+              return (val as SQL).toSqlString("spanner", paramIndexState);
+            }
+            return `@p${paramIndexState.value++}`;
+          })
           .join(", ")})`;
       })
       .join(", ");
@@ -469,22 +559,81 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       }
     }
 
-    if (this._operationType === "insert" && this._insertValues) {
-      const valuesArray = Array.isArray(this._insertValues)
-        ? this._insertValues
-        : [this._insertValues];
-      for (const record of valuesArray) {
-        allParams.push(
-          ...Object.values(record as Record<string, any>).filter(
-            (val) =>
-              !(typeof val === "object" && val !== null && "_isSQL" in val)
-          )
-        );
-        Object.values(record as Record<string, any>).forEach((val) => {
-          if (typeof val === "object" && val !== null && "_isSQL" in val) {
-            allParams.push(...(val as SQL).getValues());
+    if (
+      this._operationType === "insert" &&
+      this._insertValues &&
+      this._targetTable
+    ) {
+      let processedInsertDataForParams: Partial<InferModelType<TTable>>[];
+      if (Array.isArray(this._insertValues)) {
+        processedInsertDataForParams = this._insertValues.map((record) => ({
+          ...record,
+        }));
+      } else {
+        processedInsertDataForParams = [{ ...this._insertValues }];
+      }
+
+      for (const record of processedInsertDataForParams) {
+        for (const [columnName, columnConfigUnk] of Object.entries(
+          this._targetTable.columns
+        )) {
+          const columnConfig = columnConfigUnk as ColumnConfig<any, any>;
+          if (record[columnName as keyof typeof record] === undefined) {
+            if (typeof columnConfig.default === "function") {
+              const defaultValue = (columnConfig.default as () => any)();
+              (record as Record<string, any>)[columnName] = defaultValue;
+            } else if (
+              columnConfig.default !== undefined &&
+              typeof columnConfig.default === "object" &&
+              (columnConfig.default as SQL)._isSQL
+            ) {
+              // SQL defaults don't produce bound parameters themselves,
+              // but ensure the column is present if it was added.
+              // The actual SQL string is inlined.
+              // However, if the SQL object itself contains parameters, they need to be extracted.
+              // This part is tricky: if the default is sql`FUNC(${param})`, that param needs to be collected.
+              // For now, we assume SQL defaults are parameter-less or their params are handled by their .getValues()
+              // when they are eventually stringified.
+              // The key is that the `record` now has the SQL object.
+              (record as Record<string, any>)[columnName] =
+                columnConfig.default;
+            } else if (columnConfig.default !== undefined) {
+              (record as Record<string, any>)[columnName] =
+                columnConfig.default;
+            }
           }
-        });
+        }
+      }
+
+      // Extract parameters based on the final state of processedInsertDataForParams
+      const allKeysForParams = new Set<string>();
+      processedInsertDataForParams.forEach((record) => {
+        Object.keys(record as Record<string, any>).forEach((key) =>
+          allKeysForParams.add(key)
+        );
+      });
+      // Ensure consistent order for parameter collection, matching column order in SQL
+      const orderedColumnNames = Array.from(allKeysForParams).sort();
+
+      for (const record of processedInsertDataForParams) {
+        for (const columnName of orderedColumnNames) {
+          const value = (record as Record<string, any>)[columnName];
+          if (value === undefined) {
+            // This case should ideally not be hit if defaults are processed correctly
+            // and all columns in allKeysForParams have a value in each record.
+            continue;
+          }
+
+          if (
+            typeof value === "object" &&
+            value !== null &&
+            (value as SQL)._isSQL === true
+          ) {
+            allParams.push(...(value as SQL).getValues());
+          } else {
+            allParams.push(value);
+          }
+        }
       }
     }
 
