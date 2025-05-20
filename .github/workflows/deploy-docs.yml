@@ -1,0 +1,44 @@
+name: Deploy Docusaurus Docs
+
+on:
+  push:
+    branches:
+      - main # Or your default branch
+
+jobs:
+  deploy:
+    name:
+      Deploy docs
+      # Grant GITHUB_TOKEN the permissions required to make a Pages deployment
+    permissions:
+      pages: write # to deploy to Pages
+      id-token: write # to verify the deployment originates from an appropriate source
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18" # Docusaurus v1 should be compatible, adjust if needed
+          cache: "yarn"
+          cache-dependency-path: "website/yarn.lock" # Or website/package-lock.json if npm
+
+      - name: Install Docusaurus website dependencies
+        run: yarn install --frozen-lockfile
+        working-directory: ./website
+
+      # Docusaurus v1 publish script needs GIT_USER and CURRENT_BRANCH
+      # It also uses organizationName and projectName from siteConfig.js
+      # The GITHUB_TOKEN is automatically available to the runner
+      - name: Publish to GitHub Pages
+        env:
+          GIT_USER: github-actions[bot] # Use the GitHub Actions bot user
+          CURRENT_BRANCH: main # Or your default branch
+          USE_SSH: false # Use HTTPS with token
+        run: |
+          git config --global user.email "action@github.com"
+          git config --global user.name "github-actions[bot]"
+          cd website
+          yarn run publish-gh-pages
