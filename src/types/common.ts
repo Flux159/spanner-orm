@@ -76,6 +76,12 @@ export type InferModelType<T extends TableConfig<string, TableColumns>> = {
   [K in keyof T["columns"]]: InferColumnType<T["columns"][K]>;
 };
 
+// Type for selecting specific fields, used by QueryBuilder and OrmClient
+export type SelectFields<TTable extends TableConfig<any, any>> =
+  | Partial<Record<keyof InferModelType<TTable>, boolean>>
+  | { [columnAlias: string]: SQL | ColumnConfig<any, any> | true } // Allow SQL expressions or column configs for aliasing
+  | undefined;
+
 // --- Eager Loading / Include Types ---
 export type IncludeRelationOptions =
   | boolean
@@ -477,8 +483,14 @@ export interface SchemaDiff {
 }
 
 // --- Migration Executor Type ---
+// The executeSql function should align with DatabaseAdapter['execute']
+export type MigrationExecuteSql = (
+  sql: string,
+  params?: unknown[]
+) => Promise<number | import("./adapter.js").AffectedRows>;
+
 export type MigrationExecutor = (
-  executeSql: (sql: string, params?: unknown[]) => Promise<void>,
+  executeSql: MigrationExecuteSql,
   dialect: Dialect
 ) => Promise<void>;
 
@@ -490,7 +502,9 @@ export interface PreparedQuery<
   sql: string;
   parameters: unknown[];
   dialect: Dialect;
+  action: "select" | "insert" | "update" | "delete"; // Added action
   includeClause?: TInclude; // Updated to use EnhancedIncludeClause
   primaryTable?: TPrimaryTable; // For result shaping
   // Potentially add selectedFields map here if needed for more advanced shaping or type inference
+  fields?: SelectFields<TPrimaryTable>; // Added to carry selected fields info
 }
