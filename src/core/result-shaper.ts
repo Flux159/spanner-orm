@@ -1,23 +1,27 @@
 // src/core/result-shaper.ts
 import type {
-  IncludeClause,
   TableConfig,
   ColumnConfig,
+  EnhancedIncludeClause,
+  ShapedResultItem,
 } from "../types/common.js";
 
 interface RawRow extends Record<string, any> {}
 
-export function shapeResults(
+export function shapeResults<
+  TPrimaryTable extends TableConfig<any, any>,
+  TInclude extends EnhancedIncludeClause | undefined
+>(
   rawData: RawRow[],
-  primaryTable: TableConfig<any, any>,
-  includeClause?: IncludeClause
-): any[] {
+  primaryTable: TPrimaryTable,
+  includeClause?: TInclude
+): ShapedResultItem<TPrimaryTable, TInclude>[] {
   if (
     !includeClause ||
     Object.keys(includeClause).length === 0 ||
     rawData.length === 0
   ) {
-    return rawData; // No shaping needed or possible
+    return rawData as ShapedResultItem<TPrimaryTable, TInclude>[]; // No shaping needed or possible
   }
 
   const primaryKeyColumns = Object.values(primaryTable.columns)
@@ -29,7 +33,7 @@ export function shapeResults(
     console.warn(
       `Warning: Cannot shape results for table ${primaryTable.name} as it has no defined primary key. Returning raw data.`
     );
-    return rawData;
+    return rawData as ShapedResultItem<TPrimaryTable, TInclude>[];
   }
   // For simplicity, this initial version assumes a single primary key.
   // Composite PKs would require grouping by a composite key string.
@@ -101,5 +105,8 @@ export function shapeResults(
       }
     }
   }
-  return Array.from(groupedResults.values());
+  return Array.from(groupedResults.values()) as ShapedResultItem<
+    TPrimaryTable,
+    TInclude
+  >[];
 }

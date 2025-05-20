@@ -87,6 +87,73 @@ export type IncludeRelationOptions =
 
 export type IncludeClause = Record<string, IncludeRelationOptions>;
 
+// --- Types for Advanced Eager Loading Result Shaping ---
+
+// Infers the type of a model based on a TableConfig, optionally picking specific columns.
+export type InferSelectedModelType<
+  TTable extends TableConfig<any, any>,
+  TSelect extends
+    | Partial<Record<keyof InferModelType<TTable>, boolean>>
+    | undefined
+> = TSelect extends undefined
+  ? InferModelType<TTable>
+  : Pick<InferModelType<TTable>, keyof TSelect & keyof InferModelType<TTable>>;
+
+// Options for including a related table, generic on the related table's config.
+export type TypedIncludeRelationOptions<
+  TRelatedTable extends TableConfig<any, any>
+> =
+  | boolean
+  | {
+      select?: Partial<Record<keyof InferModelType<TRelatedTable>, boolean>>;
+      // where?: any; // Future: conditions for the related data
+      // include?: EnhancedIncludeClause; // Future: nested includes, using EnhancedIncludeClause
+    };
+
+// An entry in the enhanced include clause, specifying the related table and options.
+export interface EnhancedIncludeClauseEntry<
+  TRelatedTable extends TableConfig<any, any>
+> {
+  relationTable: TRelatedTable;
+  options: TypedIncludeRelationOptions<TRelatedTable>;
+  // relationName: string; // The key in EnhancedIncludeClause will be the relationName
+}
+
+// The enhanced include clause, mapping relation names to their typed entries.
+export type EnhancedIncludeClause = Record<
+  string,
+  EnhancedIncludeClauseEntry<TableConfig<any, any>>
+>;
+
+// Infers the model type for a single included relation based on EnhancedIncludeClauseEntry
+export type InferIncludedRelationModel<
+  TEntry extends EnhancedIncludeClauseEntry<TableConfig<any, any>>
+> = TEntry["options"] extends { select: infer TSelect }
+  ? TSelect extends Partial<
+      Record<keyof InferModelType<TEntry["relationTable"]>, boolean>
+    >
+    ? InferSelectedModelType<TEntry["relationTable"], TSelect>
+    : InferModelType<TEntry["relationTable"]> // Fallback for malformed TSelect
+  : InferModelType<TEntry["relationTable"]>;
+
+// Represents a single item in the shaped result array.
+// TPrimaryTable: The main table being queried.
+// TInclude: The EnhancedIncludeClause describing what relations to include.
+export type ShapedResultItem<
+  TPrimaryTable extends TableConfig<any, any>,
+  TInclude extends EnhancedIncludeClause | undefined
+> = InferModelType<TPrimaryTable> &
+  (TInclude extends EnhancedIncludeClause
+    ? {
+        [K in keyof TInclude]: TInclude[K] extends EnhancedIncludeClauseEntry<
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          infer TRelatedTable
+        >
+          ? Array<InferIncludedRelationModel<TInclude[K]>>
+          : never;
+      }
+    : {});
+
 // --- Function Descriptors ---
 export type FunctionArg =
   | ColumnConfig<any, any>
@@ -382,11 +449,14 @@ export type MigrationExecutor = (
 ) => Promise<void>;
 
 // --- Prepared Query Type ---
-export interface PreparedQuery<TTable extends TableConfig<any, any>> {
+export interface PreparedQuery<
+  TPrimaryTable extends TableConfig<any, any>,
+  TInclude extends EnhancedIncludeClause | undefined = undefined
+> {
   sql: string;
   parameters: unknown[];
   dialect: Dialect;
-  includeClause?: IncludeClause;
-  primaryTable?: TTable; // For result shaping
+  includeClause?: TInclude; // Updated to use EnhancedIncludeClause
+  primaryTable?: TPrimaryTable; // For result shaping
   // Potentially add selectedFields map here if needed for more advanced shaping or type inference
 }
