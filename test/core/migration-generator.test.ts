@@ -752,13 +752,22 @@ describe("generateMigrationDDL", () => {
         schemaDiff,
         "spanner"
       ) as string[][];
-      expect(ddlBatches.length).toBe(1); // Should be in one batch if <= SPANNER_DDL_BATCH_SIZE
-      const ddl = ddlBatches.flat();
-      expect(ddl.length).toBe(2); // CREATE TABLE, CREATE UNIQUE INDEX
-      expect(ddl[0]).toContain("CREATE TABLE Products");
-      expect(ddl[1]).toBe(
+      // With selective batching, CREATE TABLE (non-validating) and CREATE UNIQUE INDEX (validating)
+      // will be in separate batches.
+      expect(ddlBatches.length).toBe(2);
+      expect(ddlBatches[0].length).toBe(1);
+      expect(ddlBatches[0][0]).toContain("CREATE TABLE Products");
+      expect(ddlBatches[1].length).toBe(1);
+      expect(ddlBatches[1][0]).toBe(
         "CREATE UNIQUE INDEX UQ_ProductCode ON Products (ProductCode);"
       );
+      const ddl = ddlBatches.flat(); // Keep this for checking total statements if needed, though covered by batch checks.
+      expect(ddl.length).toBe(2); // CREATE TABLE, CREATE UNIQUE INDEX
+      // Original check for ddl[1] is now ddlBatches[1][0]
+      // This specific check is now part of the batch check above.
+      // expect(ddl[1]).toBe(
+      //   "CREATE UNIQUE INDEX UQ_ProductCode ON Products (ProductCode);"
+      // );
     });
 
     it("should generate CREATE TABLE with INTERLEAVE and non-unique index", () => {
@@ -1221,6 +1230,240 @@ describe("generateMigrationDDL", () => {
       expect(ddl[1]).toBe(
         "ALTER TABLE Playlists ADD CONSTRAINT FK_Playlists_UserId FOREIGN KEY (UserId) REFERENCES Users (UserId);"
       );
+    });
+  });
+
+  describe("Spanner DDL Batching Logic", () => {
+    it("should batch multiple validating DDL statements correctly", () => {
+      const schemaDiff: SchemaDiff = {
+        fromVersion: V1_SNAPSHOT_VERSION,
+        toVersion: V1_SNAPSHOT_VERSION,
+        tableChanges: [
+          {
+            action: "add", // Results in CREATE TABLE (non-validating by current helper) + CREATE INDEX (validating)
+            table: createSampleTable(
+              "TestTable1",
+              {
+                id: createSampleColumn(
+                  "id",
+                  "INT64",
+                  { pg: "INT", spanner: "INT64" },
+                  { primaryKey: true }
+                ),
+                field1: createSampleColumn("field1", "STRING(100)", {
+                  pg: "VARCHAR(100)",
+                  spanner: "STRING(100)",
+                }),
+              },
+              [{ name: "idx_field1", columns: ["field1"], unique: false }] // CREATE INDEX - validating
+            ),
+          },
+          {
+            action: "change", // Results in ALTER TABLE ADD COLUMN (validating)
+            tableName: "TestTable1",
+            columnChanges: [
+              {
+                action: "add",
+                column: createSampleColumn("field2", "BOOL", {
+                  pg: "BOOL",
+                  spanner: "BOOL",
+                }),
+              }, // validating
+              {
+                action: "add",
+                column: createSampleColumn("field3", "DATE", {
+                  pg: "DATE",
+                  spanner: "DATE",
+                }),
+              }, // validating
+              {
+                action: "add",
+                column: createSampleColumn("field4", "FLOAT64", {
+                  pg: "FLOAT8",
+                  spanner: "FLOAT64",
+                }),
+              }, // validating
+              {
+                action: "add",
+                column: createSampleColumn("field5", "TIMESTAMP", {
+                  pg: "TIMESTAMP",
+                  spanner: "TIMESTAMP",
+                }),
+              }, // validating
+              {
+                action: "add",
+                column: createSampleColumn("field6", "BYTES(10)", {
+                  pg: "BYTEA",
+                  spanner: "BYTES(10)",
+                }),
+              }, // validating - 6th validating
+            ],
+          },
+          {
+            action: "add", // Another CREATE TABLE + CREATE INDEX
+            table: createSampleTable(
+              "TestTable2",
+              {
+                id2: createSampleColumn(
+                  "id2",
+                  "INT64",
+                  { pg: "INT", spanner: "INT64" },
+                  { primaryKey: true }
+                ),
+                data: createSampleColumn("data", "STRING(MAX)", {
+                  pg: "TEXT",
+                  spanner: "STRING(MAX)",
+                }),
+              },
+              [{ name: "idx_data", columns: ["data"], unique: true }] // CREATE UNIQUE INDEX - validating
+            ),
+          },
+        ],
+      };
+
+      // Expected DDLs (order might vary slightly based on generation logic, but types are important):
+      // 1. CREATE TABLE TestTable1 ...; (non-validating)
+      // 2. CREATE INDEX idx_field1 ON TestTable1 (field1); (validating)
+      // 3. ALTER TABLE TestTable1 ADD COLUMN field2 BOOL; (validating)
+      // 4. ALTER TABLE TestTable1 ADD COLUMN field3 DATE; (validating)
+      // 5. ALTER TABLE TestTable1 ADD COLUMN field4 FLOAT64; (validating)
+      // 6. ALTER TABLE TestTable1 ADD COLUMN field5 TIMESTAMP; (validating)
+      // 7. ALTER TABLE TestTable1 ADD COLUMN field6 BYTES(10); (validating)
+      // 8. CREATE TABLE TestTable2 ...; (non-validating)
+      // 9. CREATE UNIQUE INDEX idx_data ON TestTable2 (data); (validating)
+      // Total: 2 non-validating, 7 validating. SPANNER_DDL_BATCH_SIZE = 5.
+
+      // Expected batching:
+      // Batch 1: [CREATE TABLE TestTable1] (non-validating batch ends because next is validating)
+      // Batch 2: [CREATE INDEX idx_field1, ALTER...field2, ALTER...field3, ALTER...field4, ALTER...field5] (validating, size 5)
+      // Batch 3: [ALTER...field6] (validating, size 1, new batch because previous validating batch was full)
+      // Batch 4: [CREATE TABLE TestTable2] (non-validating batch ends because next is validating)
+      // Batch 5: [CREATE UNIQUE INDEX idx_data] (validating, size 1)
+
+      const ddlBatches = generateMigrationDDL(
+        schemaDiff,
+        "spanner"
+      ) as string[][];
+
+      expect(ddlBatches.length).toBe(5);
+      // Batch 1 (Non-validating)
+      expect(ddlBatches[0].length).toBe(1);
+      expect(ddlBatches[0][0]).toContain("CREATE TABLE TestTable1");
+
+      // Batch 2 (Validating)
+      expect(ddlBatches[1].length).toBe(5);
+      expect(ddlBatches[1][0]).toContain("CREATE INDEX idx_field1");
+      expect(ddlBatches[1][1]).toContain(
+        "ALTER TABLE TestTable1 ADD COLUMN field2"
+      );
+      expect(ddlBatches[1][2]).toContain(
+        "ALTER TABLE TestTable1 ADD COLUMN field3"
+      );
+      expect(ddlBatches[1][3]).toContain(
+        "ALTER TABLE TestTable1 ADD COLUMN field4"
+      );
+      expect(ddlBatches[1][4]).toContain(
+        "ALTER TABLE TestTable1 ADD COLUMN field5"
+      );
+
+      // Batch 3 (Validating)
+      expect(ddlBatches[2].length).toBe(1);
+      expect(ddlBatches[2][0]).toContain(
+        "ALTER TABLE TestTable1 ADD COLUMN field6"
+      );
+
+      // Batch 4 (Non-validating)
+      expect(ddlBatches[3].length).toBe(1);
+      expect(ddlBatches[3][0]).toContain("CREATE TABLE TestTable2");
+
+      // Batch 5 (Validating)
+      expect(ddlBatches[4].length).toBe(1);
+      expect(ddlBatches[4][0]).toContain("CREATE UNIQUE INDEX idx_data");
+    });
+
+    it("should handle a sequence of non-validating DDLs correctly", () => {
+      const schemaDiff: SchemaDiff = {
+        fromVersion: V1_SNAPSHOT_VERSION,
+        toVersion: V1_SNAPSHOT_VERSION,
+        tableChanges: [
+          { action: "remove", tableName: "OldTable1" },
+          { action: "remove", tableName: "OldTable2" },
+          { action: "remove", tableName: "OldTable3" },
+          { action: "remove", tableName: "OldTable4" },
+          { action: "remove", tableName: "OldTable5" },
+          { action: "remove", tableName: "OldTable6" }, // 6th non-validating
+        ],
+      };
+      const ddlBatches = generateMigrationDDL(
+        schemaDiff,
+        "spanner"
+      ) as string[][];
+      // All are non-validating, so they should be batched by SPANNER_DDL_BATCH_SIZE
+      expect(ddlBatches.length).toBe(2);
+      expect(ddlBatches[0].length).toBe(5);
+      expect(ddlBatches[1].length).toBe(1);
+      expect(ddlBatches[0][0]).toBe("DROP TABLE OldTable1;");
+      expect(ddlBatches[1][0]).toBe("DROP TABLE OldTable6;");
+    });
+
+    it("should correctly batch when a non-validating DDL follows a full validating batch", () => {
+      const schemaDiff: SchemaDiff = {
+        fromVersion: V1_SNAPSHOT_VERSION,
+        toVersion: V1_SNAPSHOT_VERSION,
+        tableChanges: [
+          {
+            action: "change",
+            tableName: "T1",
+            columnChanges: [
+              {
+                action: "add",
+                column: createSampleColumn("c1", "BOOL", {
+                  pg: "BOOL",
+                  spanner: "BOOL",
+                }),
+              }, // V1
+              {
+                action: "add",
+                column: createSampleColumn("c2", "BOOL", {
+                  pg: "BOOL",
+                  spanner: "BOOL",
+                }),
+              }, // V2
+              {
+                action: "add",
+                column: createSampleColumn("c3", "BOOL", {
+                  pg: "BOOL",
+                  spanner: "BOOL",
+                }),
+              }, // V3
+              {
+                action: "add",
+                column: createSampleColumn("c4", "BOOL", {
+                  pg: "BOOL",
+                  spanner: "BOOL",
+                }),
+              }, // V4
+              {
+                action: "add",
+                column: createSampleColumn("c5", "BOOL", {
+                  pg: "BOOL",
+                  spanner: "BOOL",
+                }),
+              }, // V5 - batch full
+            ],
+          },
+          { action: "remove", tableName: "OldTableDrop" }, // Non-validating
+        ],
+      };
+      const ddlBatches = generateMigrationDDL(
+        schemaDiff,
+        "spanner"
+      ) as string[][];
+      expect(ddlBatches.length).toBe(2);
+      expect(ddlBatches[0].length).toBe(5); // Validating batch
+      expect(ddlBatches[0][0]).toContain("ALTER TABLE T1 ADD COLUMN c1 BOOL;");
+      expect(ddlBatches[1].length).toBe(1); // Non-validating batch
+      expect(ddlBatches[1][0]).toBe("DROP TABLE OldTableDrop;");
     });
   });
 });

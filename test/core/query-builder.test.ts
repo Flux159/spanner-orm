@@ -2,8 +2,19 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { QueryBuilder } from "../../src/core/query-builder.js";
 import { table, text, integer, timestamp } from "../../src/core/schema.js";
 import { sql } from "../../src/types/common.js";
-import { count, sum, avg, min, max } from "../../src/core/functions.js"; // Import aggregates
-// import type { TableConfig } from "../../src/types/common.js"; // Unused import
+import {
+  count,
+  sum,
+  avg,
+  min,
+  max,
+  like,
+  ilike,
+  regexpContains,
+  concat,
+  lower, // Import lower
+  upper, // Import upper
+} from "../../src/core/functions.js"; // Import aggregates and string functions
 
 // Define a sample table for testing
 const usersTable = table("users", {
@@ -169,7 +180,7 @@ describe("QueryBuilder SQL Generation", () => {
       qb.select("*")
         .from(usersTable)
         .where(sql`${usersTable.columns.age} > ${30}`);
-      const params = qb.getBoundParameters();
+      const params = qb.getBoundParameters("postgres");
       expect(params).toEqual([30]);
     });
 
@@ -178,7 +189,7 @@ describe("QueryBuilder SQL Generation", () => {
         .from(usersTable)
         .where(sql`${usersTable.columns.name} = ${"Bob"}`)
         .where(sql`${usersTable.columns.age} < ${25}`);
-      const params = qb.getBoundParameters();
+      const params = qb.getBoundParameters("postgres");
       expect(params).toEqual(["Bob", 25]);
     });
 
@@ -187,7 +198,7 @@ describe("QueryBuilder SQL Generation", () => {
         nameWithPrefix: sql`CONCAT(${"Mr. "}, ${usersTable.columns.name})`,
         agePlusTen: sql`${usersTable.columns.age} + ${10}`,
       }).from(usersTable);
-      const params = qb.getBoundParameters();
+      const params = qb.getBoundParameters("postgres");
       // Expecting "Mr. " and 10 as parameters. usersTable.columns.name and .age are interpolated as identifiers.
       expect(params).toEqual(["Mr. ", 10]);
     });
@@ -202,7 +213,7 @@ describe("QueryBuilder SQL Generation", () => {
           } = ${"Admin"}`
         );
 
-      const params = qb.getBoundParameters();
+      const params = qb.getBoundParameters("postgres");
       // Params: "test@example.com", 20, 30, "Admin"
       expect(params).toEqual(["test@example.com", 20, 30, "Admin"]);
     });
@@ -214,7 +225,7 @@ describe("QueryBuilder SQL Generation", () => {
         .from(usersTable)
         .where(sql`${usersTable.columns.email} = ${nestedSql}`);
 
-      const params = qb.getBoundParameters();
+      const params = qb.getBoundParameters("postgres");
       expect(params).toEqual([subQueryValue]);
       // Test generated SQL to ensure placeholder is correct for nested SQL
       const pgSql = qb.toSQL("postgres");
@@ -236,7 +247,7 @@ describe("QueryBuilder SQL Generation", () => {
       expect(query).toBe(
         'INSERT INTO "users" ("age", "createdAt", "name") VALUES ($1, CURRENT_TIMESTAMP, $2)'
       );
-      expect(qb.getBoundParameters()).toEqual([30, "John Doe"]);
+      expect(qb.getBoundParameters("postgres")).toEqual([30, "John Doe"]);
     });
 
     it("Spanner: should generate INSERT statement for a single row", () => {
@@ -248,7 +259,10 @@ describe("QueryBuilder SQL Generation", () => {
       expect(query).toBe(
         "INSERT INTO `users` (`createdAt`, `email`, `name`) VALUES (CURRENT_TIMESTAMP, @p1, @p2)"
       );
-      expect(qb.getBoundParameters()).toEqual(["jane@example.com", "Jane Doe"]);
+      expect(qb.getBoundParameters("spanner")).toEqual([
+        "jane@example.com",
+        "Jane Doe",
+      ]);
     });
 
     it("PostgreSQL: should generate INSERT statement for multiple rows", () => {
@@ -276,7 +290,12 @@ describe("QueryBuilder SQL Generation", () => {
       );
       expect(valueGroups).toHaveLength(2);
       // Sorted columns: age, createdAt, name. Params: age, name for each.
-      expect(qb.getBoundParameters()).toEqual([25, "Alice", 35, "Bob"]);
+      expect(qb.getBoundParameters("postgres")).toEqual([
+        25,
+        "Alice",
+        35,
+        "Bob",
+      ]);
     });
   });
 
@@ -291,7 +310,11 @@ describe("QueryBuilder SQL Generation", () => {
       expect(query).toBe(
         'UPDATE "users" SET "age" = $1, "email" = $2 WHERE "users"."id" = $3'
       );
-      expect(qb.getBoundParameters()).toEqual([31, "john.new@example.com", 1]);
+      expect(qb.getBoundParameters("postgres")).toEqual([
+        31,
+        "john.new@example.com",
+        1,
+      ]);
     });
 
     it("Spanner: should generate UPDATE statement with SET and WHERE", () => {
@@ -303,7 +326,7 @@ describe("QueryBuilder SQL Generation", () => {
       expect(query).toBe(
         "UPDATE `users` SET `name` = @p1 WHERE `users`.`email` = @p2"
       );
-      expect(qb.getBoundParameters()).toEqual([
+      expect(qb.getBoundParameters("spanner")).toEqual([
         "Updated Name",
         "old@example.com",
       ]);
@@ -318,7 +341,7 @@ describe("QueryBuilder SQL Generation", () => {
       expect(query).toBe(
         'UPDATE "users" SET "age" = "users"."age" + $1 WHERE "users"."id" = $2'
       );
-      expect(qb.getBoundParameters()).toEqual([1, 10]);
+      expect(qb.getBoundParameters("postgres")).toEqual([1, 10]);
     });
   });
 
@@ -330,7 +353,7 @@ describe("QueryBuilder SQL Generation", () => {
         .where(sql`${usersTable.columns.age} < ${18}`)
         .toSQL("postgres");
       expect(query).toBe('DELETE FROM "users" WHERE "users"."age" < $1');
-      expect(qb.getBoundParameters()).toEqual([18]);
+      expect(qb.getBoundParameters("postgres")).toEqual([18]);
     });
 
     it("Spanner: should generate DELETE statement with WHERE", () => {
@@ -339,13 +362,13 @@ describe("QueryBuilder SQL Generation", () => {
         .where(sql`${usersTable.columns.email} = ${"spam@example.com"}`)
         .toSQL("spanner");
       expect(query).toBe("DELETE FROM `users` WHERE `users`.`email` = @p1");
-      expect(qb.getBoundParameters()).toEqual(["spam@example.com"]);
+      expect(qb.getBoundParameters("spanner")).toEqual(["spam@example.com"]);
     });
 
     it("PostgreSQL: should generate DELETE statement without WHERE (deletes all rows)", () => {
       const query = qb.deleteFrom(usersTable).toSQL("postgres");
       expect(query).toBe('DELETE FROM "users"');
-      expect(qb.getBoundParameters()).toEqual([]);
+      expect(qb.getBoundParameters("postgres")).toEqual([]);
     });
   });
   // Note: Tests for transaction execution would typically involve mocking the adapter
@@ -378,7 +401,7 @@ describe("QueryBuilder JOIN Operations", () => {
     expect(query).toBe(
       'SELECT "name" AS "userName", "title" AS "postTitle" FROM "users" INNER JOIN "posts" ON "users"."id" = "posts"."user_id" WHERE "users"."age" > $1'
     );
-    expect(qb.getBoundParameters()).toEqual([30]);
+    expect(qb.getBoundParameters("postgres")).toEqual([30]);
   });
 
   it("Spanner: should generate INNER JOIN", () => {
@@ -398,7 +421,7 @@ describe("QueryBuilder JOIN Operations", () => {
     expect(query).toBe(
       "SELECT `name` AS `userName`, `title` AS `postTitle` FROM `users` INNER JOIN `posts` ON `users`.`id` = `posts`.`user_id` WHERE `users`.`age` > @p1"
     );
-    expect(qb.getBoundParameters()).toEqual([30]);
+    expect(qb.getBoundParameters("spanner")).toEqual([30]);
   });
 
   it("PostgreSQL: should generate LEFT JOIN", () => {
@@ -445,8 +468,230 @@ describe("QueryBuilder JOIN Operations", () => {
         } = ${"My Post"}`
       );
 
-    const params = qb.getBoundParameters();
+    const params = qb.getBoundParameters("postgres");
     expect(params).toEqual(["My Post"]);
+  });
+});
+
+// --- CONCAT Function Tests ---
+describe("QueryBuilder CONCAT Function", () => {
+  let qb: QueryBuilder<typeof usersTable>;
+
+  beforeEach(() => {
+    qb = new QueryBuilder<typeof usersTable>();
+  });
+
+  it("PostgreSQL: should generate CONCAT with multiple string literals", () => {
+    const query = qb
+      .select({ combined: concat("Hello", " ", "World", "!") })
+      .from(usersTable)
+      .toSQL("postgres");
+    expect(query).toBe(
+      'SELECT CONCAT($1, $2, $3, $4) AS "combined" FROM "users"'
+    );
+    expect(qb.getBoundParameters("postgres")).toEqual([
+      "Hello",
+      " ",
+      "World",
+      "!",
+    ]);
+  });
+
+  it("Spanner: should generate CONCAT with multiple string literals", () => {
+    const query = qb
+      .select({ combined: concat("Hello", " ", "Spanner", "!") })
+      .from(usersTable)
+      .toSQL("spanner");
+    expect(query).toBe(
+      "SELECT CONCAT(@p1, @p2, @p3, @p4) AS `combined` FROM `users`"
+    );
+    expect(qb.getBoundParameters("spanner")).toEqual([
+      "Hello",
+      " ",
+      "Spanner",
+      "!",
+    ]);
+  });
+
+  it("PostgreSQL: should generate CONCAT with columns and literals", () => {
+    const query = qb
+      .select({
+        greeting: concat(
+          "Name: ",
+          usersTable.columns.name,
+          ", Age: ",
+          usersTable.columns.age
+        ),
+      })
+      .from(usersTable)
+      .toSQL("postgres");
+    expect(query).toBe(
+      'SELECT CONCAT($1, "users"."name", $2, "users"."age") AS "greeting" FROM "users"'
+    );
+    expect(qb.getBoundParameters("postgres")).toEqual(["Name: ", ", Age: "]);
+  });
+
+  it("Spanner: should generate CONCAT with columns and literals", () => {
+    const query = qb
+      .select({
+        greeting: concat(
+          "User: ",
+          usersTable.columns.name,
+          " (",
+          usersTable.columns.email,
+          ")"
+        ),
+      })
+      .from(usersTable)
+      .toSQL("spanner");
+    expect(query).toBe(
+      "SELECT CONCAT(@p1, `users`.`name`, @p2, `users`.`email`, @p3) AS `greeting` FROM `users`"
+    );
+    expect(qb.getBoundParameters("spanner")).toEqual(["User: ", " (", ")"]);
+  });
+
+  it("PostgreSQL: should generate CONCAT with SQL objects", () => {
+    const query = qb
+      .select({
+        complex: concat(
+          usersTable.columns.name,
+          sql`' ' || ${"Mr."} || ' '`,
+          usersTable.columns.email
+        ),
+      })
+      .from(usersTable)
+      .toSQL("postgres");
+    expect(query).toBe(
+      'SELECT CONCAT("users"."name", \' \' || $1 || \' \', "users"."email") AS "complex" FROM "users"'
+    );
+    expect(qb.getBoundParameters("postgres")).toEqual(["Mr."]);
+  });
+  it("Spanner: should generate CONCAT with SQL objects", () => {
+    const query = qb
+      .select({
+        complex: concat(
+          usersTable.columns.name,
+          sql`" - Title: " || ${"Dr."}`,
+          usersTable.columns.email
+        ),
+      })
+      .from(usersTable)
+      .toSQL("spanner");
+    // Spanner's CONCAT will take the SQL string as is.
+    // The sql tag function handles parameters within its segment.
+    expect(query).toBe(
+      'SELECT CONCAT(`users`.`name`, " - Title: " || @p1, `users`.`email`) AS `complex` FROM `users`'
+    );
+    expect(qb.getBoundParameters("spanner")).toEqual(["Dr."]);
+  });
+
+  it("PostgreSQL: should handle empty concat call (returns empty string literal)", () => {
+    const query = qb
+      .select({ empty: concat() })
+      .from(usersTable)
+      .toSQL("postgres");
+    expect(query).toBe('SELECT \'\' AS "empty" FROM "users"');
+    expect(qb.getBoundParameters("postgres")).toEqual([]);
+  });
+});
+
+// --- LOWER/UPPER Function Tests ---
+describe("QueryBuilder LOWER/UPPER Functions", () => {
+  let qb: QueryBuilder<typeof usersTable>;
+
+  beforeEach(() => {
+    qb = new QueryBuilder<typeof usersTable>();
+  });
+
+  // --- lower() ---
+  it("PostgreSQL: should generate LOWER(column)", () => {
+    const query = qb
+      .select({ lowerName: lower(usersTable.columns.name) })
+      .from(usersTable)
+      .toSQL("postgres");
+    expect(query).toBe(
+      'SELECT LOWER("users"."name") AS "lowerName" FROM "users"'
+    );
+  });
+
+  it("Spanner: should generate LOWER(column)", () => {
+    const query = qb
+      .select({ lowerName: lower(usersTable.columns.name) })
+      .from(usersTable)
+      .toSQL("spanner");
+    expect(query).toBe(
+      "SELECT LOWER(`users`.`name`) AS `lowerName` FROM `users`"
+    );
+  });
+
+  it("PostgreSQL: should generate LOWER(literal)", () => {
+    const query = qb
+      .select({ lowerLiteral: lower("TEST STRING") })
+      .from(usersTable)
+      .toSQL("postgres");
+    expect(query).toBe('SELECT LOWER($1) AS "lowerLiteral" FROM "users"');
+    expect(qb.getBoundParameters("postgres")).toEqual(["TEST STRING"]);
+  });
+
+  it("Spanner: should generate LOWER(literal)", () => {
+    const query = qb
+      .select({ lowerLiteral: lower("TEST STRING") })
+      .from(usersTable)
+      .toSQL("spanner");
+    expect(query).toBe("SELECT LOWER(@p1) AS `lowerLiteral` FROM `users`");
+    expect(qb.getBoundParameters("spanner")).toEqual(["TEST STRING"]);
+  });
+
+  it("PostgreSQL: should generate LOWER(SQL)", () => {
+    const query = qb
+      .select({
+        lowerSql: lower(sql`CONCAT(${usersTable.columns.name}, ${"SUFFIX"})`),
+      })
+      .from(usersTable)
+      .toSQL("postgres");
+    expect(query).toBe(
+      'SELECT LOWER(CONCAT("users"."name", $1)) AS "lowerSql" FROM "users"'
+    );
+    expect(qb.getBoundParameters("postgres")).toEqual(["SUFFIX"]);
+  });
+
+  // --- upper() ---
+  it("PostgreSQL: should generate UPPER(column)", () => {
+    const query = qb
+      .select({ upperName: upper(usersTable.columns.name) })
+      .from(usersTable)
+      .toSQL("postgres");
+    expect(query).toBe(
+      'SELECT UPPER("users"."name") AS "upperName" FROM "users"'
+    );
+  });
+
+  it("Spanner: should generate UPPER(column)", () => {
+    const query = qb
+      .select({ upperName: upper(usersTable.columns.name) })
+      .from(usersTable)
+      .toSQL("spanner");
+    expect(query).toBe(
+      "SELECT UPPER(`users`.`name`) AS `upperName` FROM `users`"
+    );
+  });
+
+  it("PostgreSQL: should generate UPPER(literal)", () => {
+    const query = qb
+      .select({ upperLiteral: upper("test string") })
+      .from(usersTable)
+      .toSQL("postgres");
+    expect(query).toBe('SELECT UPPER($1) AS "upperLiteral" FROM "users"');
+    expect(qb.getBoundParameters("postgres")).toEqual(["test string"]);
+  });
+
+  it("Spanner: should generate UPPER(literal)", () => {
+    const query = qb
+      .select({ upperLiteral: upper("test string") })
+      .from(usersTable)
+      .toSQL("spanner");
+    expect(query).toBe("SELECT UPPER(@p1) AS `upperLiteral` FROM `users`");
+    expect(qb.getBoundParameters("spanner")).toEqual(["test string"]);
   });
 });
 
@@ -512,7 +757,7 @@ describe("QueryBuilder ORDER BY Operations", () => {
         } = ${"test@example.com"} THEN 0 ELSE 1 END`,
         "ASC"
       );
-    const params = qb.getBoundParameters();
+    const params = qb.getBoundParameters("postgres");
     expect(params).toEqual(["test@example.com"]);
   });
 });
@@ -573,7 +818,7 @@ describe("QueryBuilder GROUP BY Operations", () => {
     qb.select({ email: usersTable.columns.email })
       .from(usersTable)
       .groupBy(sql`SUBSTRING(${usersTable.columns.email} FROM ${1} FOR ${5})`);
-    const params = qb.getBoundParameters();
+    const params = qb.getBoundParameters("postgres");
     expect(params).toEqual([1, 5]);
   });
 });
@@ -726,7 +971,7 @@ describe("QueryBuilder with $defaultFn", () => {
       .insert(defaultFnTable)
       .values({ id: 1 })
       .toSQL("postgres");
-    const params = qbDefault.getBoundParameters();
+    const params = qbDefault.getBoundParameters("postgres");
 
     // The SQL string itself is checked implicitly by checking the parameters and their order.
     const generatedSql = _query; // Use the generated SQL for checks if needed
@@ -752,7 +997,7 @@ describe("QueryBuilder with $defaultFn", () => {
       .insert(defaultFnTable)
       .values({ id: 1 })
       .toSQL("spanner");
-    const params = qbDefault.getBoundParameters();
+    const params = qbDefault.getBoundParameters("spanner");
 
     // The SQL string itself is checked implicitly by checking the parameters and their order.
     const generatedSpannerSql = _query;
@@ -784,7 +1029,7 @@ describe("QueryBuilder with $defaultFn", () => {
         created_at_val: specificDate, // fixed_default will use its default "default_text"
       })
       .toSQL("postgres");
-    const params = qbDefault.getBoundParameters();
+    const params = qbDefault.getBoundParameters("postgres");
 
     // Sorted columns with bound params: created_at_val, fixed_default, id, uuid_val
     // Values: specificDate, "default_text", 2, specificUuid
@@ -804,7 +1049,7 @@ describe("QueryBuilder with $defaultFn", () => {
       ])
       .toSQL("postgres");
 
-    const params = qbDefault.getBoundParameters();
+    const params = qbDefault.getBoundParameters("postgres");
     // Each record has 4 bound parameters. Sorted: created_at_val, fixed_default, id, uuid_val
     expect(params.length).toBe(4 * 4);
 
@@ -845,7 +1090,7 @@ describe("QueryBuilder with $defaultFn", () => {
       .insert(tableWithSqlDefault)
       .values({ id: 1 }) // complex_default should use its SQL default
       .toSQL("postgres");
-    const params = qbSqlFn.getBoundParameters();
+    const params = qbSqlFn.getBoundParameters("postgres");
 
     // Sorted columns: complex_default, id
     // SQL for complex_default is inlined, not a parameter
@@ -853,5 +1098,160 @@ describe("QueryBuilder with $defaultFn", () => {
       'INSERT INTO "sql_fn_table" ("complex_default", "id") VALUES (LOWER(\'DEFAULT_VALUE\'), $1)'
     );
     expect(params).toEqual([1]); // Only 'id' is a bound parameter.
+  });
+});
+
+// --- String Matching Function Tests (LIKE, ILIKE, REGEXP_CONTAINS) ---
+describe("QueryBuilder String Matching Functions", () => {
+  let qb: QueryBuilder<typeof usersTable>;
+
+  beforeEach(() => {
+    qb = new QueryBuilder<typeof usersTable>();
+  });
+
+  // --- LIKE ---
+  describe("like()", () => {
+    it("PostgreSQL: should generate LIKE statement", () => {
+      const query = qb
+        .select({ name: usersTable.columns.name })
+        .from(usersTable)
+        .where(like(usersTable.columns.name, "A%"))
+        .toSQL("postgres");
+      expect(query).toBe(
+        'SELECT "name" AS "name" FROM "users" WHERE "users"."name" LIKE $1'
+      );
+      expect(qb.getBoundParameters("postgres")).toEqual(["A%"]);
+    });
+
+    it("PostgreSQL: should generate LIKE statement with ESCAPE", () => {
+      const query = qb
+        .select({ name: usersTable.columns.name })
+        .from(usersTable)
+        .where(like(usersTable.columns.name, "A\\%%", "\\\\"))
+        .toSQL("postgres");
+      expect(query).toBe(
+        'SELECT "name" AS "name" FROM "users" WHERE "users"."name" LIKE $1 ESCAPE $2'
+      );
+      expect(qb.getBoundParameters("postgres")).toEqual(["A\\%%", "\\\\"]);
+    });
+
+    it("Spanner: should translate LIKE to REGEXP_CONTAINS", () => {
+      // Pattern: 'Test%' -> RE2: '^Test.*$'
+      const query = qb
+        .select({ name: usersTable.columns.name })
+        .from(usersTable)
+        .where(like(usersTable.columns.name, "Test%"))
+        .toSQL("spanner");
+      expect(query).toBe(
+        "SELECT `name` AS `name` FROM `users` WHERE REGEXP_CONTAINS(`users`.`name`, @p1)"
+      );
+      expect(qb.getBoundParameters("spanner")).toEqual(["^Test.*"]);
+    });
+
+    it("Spanner: should translate LIKE '%.com' to REGEXP_CONTAINS", () => {
+      // Pattern: '%.com' -> RE2: '.*\\.com$' (dot needs escaping)
+      const query = qb
+        .select({ email: usersTable.columns.email })
+        .from(usersTable)
+        .where(like(usersTable.columns.email, "%.com"))
+        .toSQL("spanner");
+      expect(query).toBe(
+        "SELECT `email` AS `email` FROM `users` WHERE REGEXP_CONTAINS(`users`.`email`, @p1)"
+      );
+      expect(qb.getBoundParameters("spanner")).toEqual([".*\\.com$"]);
+    });
+
+    it("Spanner: should translate LIKE '%test%' to REGEXP_CONTAINS", () => {
+      // Pattern: '%test%' -> RE2: 'test'
+      const query = qb
+        .select({ name: usersTable.columns.name })
+        .from(usersTable)
+        .where(like(usersTable.columns.name, "%test%"))
+        .toSQL("spanner");
+      expect(query).toBe(
+        "SELECT `name` AS `name` FROM `users` WHERE REGEXP_CONTAINS(`users`.`name`, @p1)"
+      );
+      expect(qb.getBoundParameters("spanner")).toEqual(["test"]);
+    });
+
+    it("Spanner: should translate LIKE 'a_b%c' to REGEXP_CONTAINS", () => {
+      // Pattern: 'a_b%c' -> RE2: '^a\\.b.*c$'
+      const query = qb
+        .select({ name: usersTable.columns.name })
+        .from(usersTable)
+        .where(like(usersTable.columns.name, "a_b%c"))
+        .toSQL("spanner");
+      expect(query).toBe(
+        "SELECT `name` AS `name` FROM `users` WHERE REGEXP_CONTAINS(`users`.`name`, @p1)"
+      );
+      expect(qb.getBoundParameters("spanner")).toEqual(["^a.b.*c$"]);
+    });
+  });
+
+  // --- ILIKE ---
+  describe("ilike()", () => {
+    it("PostgreSQL: should generate ILIKE statement", () => {
+      const query = qb
+        .select({ name: usersTable.columns.name })
+        .from(usersTable)
+        .where(ilike(usersTable.columns.name, "a%"))
+        .toSQL("postgres");
+      expect(query).toBe(
+        'SELECT "name" AS "name" FROM "users" WHERE "users"."name" ILIKE $1'
+      );
+      expect(qb.getBoundParameters("postgres")).toEqual(["a%"]);
+    });
+
+    it("PostgreSQL: should generate ILIKE statement with ESCAPE", () => {
+      const query = qb
+        .select({ name: usersTable.columns.name })
+        .from(usersTable)
+        .where(ilike(usersTable.columns.name, "a\\%%", "\\\\"))
+        .toSQL("postgres");
+      expect(query).toBe(
+        'SELECT "name" AS "name" FROM "users" WHERE "users"."name" ILIKE $1 ESCAPE $2'
+      );
+      expect(qb.getBoundParameters("postgres")).toEqual(["a\\%%", "\\\\"]);
+    });
+
+    it("Spanner: should translate ILIKE to REGEXP_CONTAINS with (?i)", () => {
+      // Pattern: 'Test%' -> RE2: '(?i)^Test.*$'
+      const query = qb
+        .select({ name: usersTable.columns.name })
+        .from(usersTable)
+        .where(ilike(usersTable.columns.name, "Test%"))
+        .toSQL("spanner");
+      expect(query).toBe(
+        "SELECT `name` AS `name` FROM `users` WHERE REGEXP_CONTAINS(`users`.`name`, @p1)"
+      );
+      expect(qb.getBoundParameters("spanner")).toEqual(["(?i)^Test.*"]);
+    });
+  });
+
+  // --- REGEXP_CONTAINS ---
+  describe("regexpContains()", () => {
+    it("PostgreSQL: should generate ~ operator for regexpContains", () => {
+      const query = qb
+        .select({ name: usersTable.columns.name })
+        .from(usersTable)
+        .where(regexpContains(usersTable.columns.name, "^A.*"))
+        .toSQL("postgres");
+      expect(query).toBe(
+        'SELECT "name" AS "name" FROM "users" WHERE "users"."name" ~ $1'
+      );
+      expect(qb.getBoundParameters("postgres")).toEqual(["^A.*"]);
+    });
+
+    it("Spanner: should generate REGEXP_CONTAINS statement", () => {
+      const query = qb
+        .select({ name: usersTable.columns.name })
+        .from(usersTable)
+        .where(regexpContains(usersTable.columns.name, "^A.*"))
+        .toSQL("spanner");
+      expect(query).toBe(
+        "SELECT `name` AS `name` FROM `users` WHERE REGEXP_CONTAINS(`users`.`name`, @p1)"
+      );
+      expect(qb.getBoundParameters("spanner")).toEqual(["^A.*"]);
+    });
   });
 });

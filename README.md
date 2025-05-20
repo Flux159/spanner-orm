@@ -2,6 +2,15 @@
 
 A TypeScript ORM for Google Spanner & PostgreSQL, designed for Node.js and Bun. Inspired by Drizzle ORM, `spanner-orm` aims to provide a single, elegant object model for defining your schema and querying your data across both database systems.
 
+## Key Design Goals
+
+`spanner-orm` is built to meet the following key requirements for modern, flexible database development:
+
+- **Unified Schema:** Supports both PostgreSQL & Google Spanner with a single, Drizzle-inspired object model.
+- **Automated Migrations:** Produces and manages migrations for both PostgreSQL & Spanner, executable via CLI or programmatically.
+- **Versatile Querying:** Offers a powerful query builder with the ability to fall back to raw SQL when needed.
+- **Dialect-Optimized SQL:** Generates Google SQL for Spanner and near-equivalent, standard SQL for PostgreSQL/Pglite, enabling seamless transitions between local development (Pglite), traditional deployments (PostgreSQL), and global-scale applications (Spanner).
+
 ## Core Features
 
 `spanner-orm` is designed to provide a seamless and powerful experience for managing data across PostgreSQL and Google Spanner. Its core capabilities include:
@@ -148,18 +157,24 @@ Make sure to read notes/Phase5.md and notes/GoogleSQLSpanner.md when working on 
   - Created `getDatabaseAdapter()` factory function in `src/cli.ts` for instantiating and connecting appropriate adapters.
   - Updated `handleMigrateLatest` and `handleMigrateDown` in `src/cli.ts` to use the live adapter.
   - Removed the `--dialect` CLI option from `migrate latest` and `migrate down`, relying on `DB_DIALECT`.
-- [ ] **T5.1: Advanced Querying:** Joins, aggregations, grouping, ordering, pagination / limit & order by, sql functions like concat, like, ilike (like & ilike not available in Google SQL - see notes/GoogleSQLSpanner.md).
-  - Need to add querying examples to the README.md as well - since we have DDL example, migration example, we should also have common querying examples in the readme so that users know how to use for querying as well as migration generation.
-- [ ] **T5.2: Relational Mappings in Schema & Query Builder.**
-  - [x] Implemented `$defaultFn()` for dynamic default values during INSERT operations (see `src/core/query-builder.ts`).
+- [x] **T5.1: Advanced Querying:**
+  - [x] Implemented Joins (INNER, LEFT), Aggregations (COUNT, SUM, AVG, MIN, MAX), Grouping (GROUP BY), Ordering (ORDER BY).
+  - [x] Implemented Pagination (LIMIT, OFFSET).
+  - [x] Implemented SQL functions: `like`, `ilike`, `regexpContains`, `concat`, `lower`, `upper`.
+  - [x] Added querying examples to README.md for these features.
+- [ ] **T5.2: Relational Mappings in Schema & Query Builder (To Be Broken Down):**
+  - [x] Implemented `$defaultFn()` for dynamic default values during INSERT operations.
   - [x] Confirmed support for `boolean` and `jsonb` column types.
-  - [x] Implemented `uuid()` helper function in `src/core/schema.ts` (PostgreSQL: `UUID` type, Spanner: `STRING(36)`), with default generation using `crypto.randomUUID()` via `$defaultFn`.
-  - [x] Implemented Foreign Key DDL generation (`REFERENCES` clauses) in `src/pg/ddl.ts` and `src/spanner/ddl.ts`.
-  - [ ] Further enhance Query Builder to leverage relational mappings for joins and related data fetching.
-- [ ] **T5.3: Performance Optimizations (e.g., batching for Spanner).**
-  - Limit DDL statements that require validation to 10 per migration / batch (see notes/GoogleSQLSpanner.md).
-- [ ] **T5.4: Comprehensive Documentation & Examples.** (Ongoing - this update is part of it!)
-- [ ] **T5.5: Robust Testing Suite (unit & integration tests).** (Ongoing)
+  - [x] Implemented `uuid()` helper function.
+  - [x] Implemented Foreign Key DDL generation.
+  - [ ] **T5.2.1: Basic Relational Awareness in Query Builder:** Allow query methods to understand and correctly alias columns from tables with defined relationships.
+  - [ ] **T5.2.2: Simple Eager Loading (One Level Deep):** Implement fetching of directly related data (e.g., user's posts). Start with one-to-many.
+  - [ ] **T5.2.3: Fluent Join API based on Schema Relations:** Enable joins based on pre-defined schema relations for a more ORM-like experience.
+- [x] **T5.3: Performance Optimizations (e.g., batching for Spanner).**
+  - [x] Implemented selective DDL batching for Spanner, grouping validating DDLs (e.g., CREATE INDEX, ALTER TABLE ADD/ALTER COLUMN, ADD FOREIGN KEY) into batches of up to 5.
+- [ ] **T5.4: Comprehensive Documentation & Examples.** (Ongoing - README updates are part of this).
+- [~] **T5.5: Robust Testing Suite (unit & integration tests).** (Ongoing - Unit tests have been added for current features features, but new features will need more unit tests).
+- [ ] **T5.6: Setup Docusaurus Documentation:** Implement Docusaurus for comprehensive, versioned documentation, deployable to GitHub Pages.
 
 ### Beyond Phase 5: Future Considerations
 
@@ -355,7 +370,17 @@ Here's how you can use the `QueryBuilder` to construct and execute queries. Assu
 ```typescript
 import { QueryBuilder, sql } from "spanner-orm";
 import { usersTable, postsTable } from "./schema"; // Your schema definitions
-import { count, sum, avg } from "spanner-orm/functions"; // Aggregate functions
+import {
+  count,
+  sum,
+  avg,
+  like,
+  ilike,
+  regexpContains,
+  concat,
+  lower,
+  upper,
+} from "spanner-orm/functions"; // Aggregate and string functions
 // import { getDbAdapter } from './your-adapter-setup'; // Your adapter setup
 
 // const db = getDbAdapter(); // Your initialized adapter instance
@@ -435,7 +460,88 @@ async function runExamples() {
     .deleteFrom(usersTable)
     .where(sql`${usersTable.columns.email} = ${"new@user.com"}`);
   // const deleteUserSql = deleteUserQuery.toSQL("postgres");
-  // await db.execute(deleteUserSql, deleteUserQuery.getBoundParameters());
+  // await db.execute(deleteUserSql, deleteUserQuery.getBoundParameters("postgres"));
+
+  // 7. SELECT with LIKE (PostgreSQL specific, translates to REGEXP_CONTAINS for Spanner)
+  const usersLikeQuery = qb
+    .select({ name: usersTable.columns.name })
+    .from(usersTable)
+    .where(like(usersTable.columns.name, "J%")); // Users whose name starts with J
+
+  // const usersLikeSqlPg = usersLikeQuery.toSQL("postgres");
+  // console.log("Users LIKE SQL (PG):", usersLikeSqlPg); // SELECT "name" AS "name" FROM "users" WHERE "users"."name" LIKE $1
+  // const usersLikeParamsPg = usersLikeQuery.getBoundParameters("postgres");
+  // console.log("Users LIKE Params (PG):", usersLikeParamsPg); // ["J%"]
+
+  // const usersLikeSqlSpanner = usersLikeQuery.toSQL("spanner");
+  // console.log("Users LIKE SQL (Spanner):", usersLikeSqlSpanner); // SELECT `name` AS `name` FROM `users` WHERE REGEXP_CONTAINS(`users`.`name`, @p1)
+  // const usersLikeParamsSpanner = usersLikeQuery.getBoundParameters("spanner");
+  // console.log("Users LIKE Params (Spanner):", usersLikeParamsSpanner); // ["^J.*"]
+
+  // 8. SELECT with ILIKE (PostgreSQL specific, translates to REGEXP_CONTAINS with (?i) for Spanner)
+  const usersILikeQuery = qb
+    .select({ email: usersTable.columns.email })
+    .from(usersTable)
+    .where(ilike(usersTable.columns.email, "%@example.com"));
+
+  // const usersILikeSqlPg = usersILikeQuery.toSQL("postgres");
+  // console.log("Users ILIKE SQL (PG):", usersILikeSqlPg); // SELECT "email" AS "email" FROM "users" WHERE "users"."email" ILIKE $1
+  // const usersILikeParamsPg = usersILikeQuery.getBoundParameters("postgres");
+  // console.log("Users ILIKE Params (PG):", usersILikeParamsPg); // ["%@example.com"]
+
+  // const usersILikeSqlSpanner = usersILikeQuery.toSQL("spanner");
+  // console.log("Users ILIKE SQL (Spanner):", usersILikeSqlSpanner); // SELECT `email` AS `email` FROM `users` WHERE REGEXP_CONTAINS(`users`.`email`, @p1)
+  // const usersILikeParamsSpanner = usersILikeQuery.getBoundParameters("spanner");
+  // console.log("Users ILIKE Params (Spanner):", usersILikeParamsSpanner); // ["(?i).*@example\\.com$"]
+
+  // 9. SELECT with REGEXP_CONTAINS (Spanner specific, translates to ~ for PostgreSQL)
+  const usersRegexpQuery = qb
+    .select({ name: usersTable.columns.name })
+    .from(usersTable)
+    .where(regexpContains(usersTable.columns.name, "^[A-C]")); // Names starting with A, B, or C
+
+  // const usersRegexpSqlSpanner = usersRegexpQuery.toSQL("spanner");
+  // console.log("Users REGEXP SQL (Spanner):", usersRegexpSqlSpanner); // SELECT `name` AS `name` FROM `users` WHERE REGEXP_CONTAINS(`users`.`name`, @p1)
+  // const usersRegexpParamsSpanner = usersRegexpQuery.getBoundParameters("spanner");
+  // console.log("Users REGEXP Params (Spanner):", usersRegexpParamsSpanner); // ["^[A-C]"]
+
+  // const usersRegexpSqlPg = usersRegexpQuery.toSQL("postgres");
+  // console.log("Users REGEXP SQL (PG):", usersRegexpSqlPg); // SELECT "name" AS "name" FROM "users" WHERE "users"."name" ~ $1
+  // const usersRegexpParamsPg = usersRegexpQuery.getBoundParameters("postgres");
+  // console.log("Users REGEXP Params (PG):", usersRegexpParamsPg); // ["^[A-C]"]
+
+  // 10. SELECT with CONCAT
+  const userFullNameQuery = qb
+    .select({
+      fullName: concat(
+        usersTable.columns.name,
+        " (",
+        usersTable.columns.email,
+        ")"
+      ),
+    })
+    .from(usersTable)
+    .where(sql`${usersTable.columns.id} = ${1}`);
+
+  // const userFullNameSql = userFullNameQuery.toSQL("postgres");
+  // console.log("User Full Name SQL (PG):", userFullNameSql); // SELECT CONCAT("users"."name", $1, "users"."email", $2) AS "fullName" FROM "users" WHERE "users"."id" = $3
+  // const userFullNameParams = userFullNameQuery.getBoundParameters("postgres");
+  // console.log("User Full Name Params (PG):", userFullNameParams); // [" (", ")", 1]
+
+  // 11. SELECT with LOWER and UPPER
+  const userCaseTransformedQuery = qb
+    .select({
+      lowerName: lower(usersTable.columns.name),
+      upperEmail: upper(usersTable.columns.email),
+      processedName: upper(concat("prefix-", lower(usersTable.columns.name))),
+    })
+    .from(usersTable)
+    .where(sql`${usersTable.columns.id} = ${2}`);
+
+  // const userCaseSql = userCaseTransformedQuery.toSQL("postgres");
+  // console.log("User Case SQL (PG):", userCaseSql); // SELECT LOWER("users"."name") AS "lowerName", UPPER("users"."email") AS "upperEmail", UPPER(CONCAT($1, LOWER("users"."name"))) AS "processedName" FROM "users" WHERE "users"."id" = $2
+  // const userCaseParams = userCaseTransformedQuery.getBoundParameters("postgres");
+  // console.log("User Case Params (PG):", userCaseParams); // ["prefix-", 2]
 }
 
 // runExamples().catch(console.error);

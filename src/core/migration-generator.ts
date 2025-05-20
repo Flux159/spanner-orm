@@ -607,6 +607,27 @@ function generateSpannerCreateTableDDLWithForeignKeys(
   return ddlStatements;
 }
 
+// Helper to identify DDL statements that are likely "validating" or "long-running" in Spanner
+function isSpannerDdlValidating(ddl: string): boolean {
+  const upperDdl = ddl.toUpperCase().trim();
+  if (upperDdl.startsWith("CREATE INDEX")) return true;
+  if (upperDdl.startsWith("CREATE UNIQUE INDEX")) return true;
+  if (upperDdl.startsWith("ALTER TABLE") && upperDdl.includes("ADD COLUMN"))
+    return true;
+  if (upperDdl.startsWith("ALTER TABLE") && upperDdl.includes("ALTER COLUMN"))
+    return true;
+  if (
+    upperDdl.startsWith("ALTER TABLE") &&
+    upperDdl.includes("ADD CONSTRAINT") &&
+    upperDdl.includes("FOREIGN KEY")
+  )
+    return true;
+  // CREATE TABLE is generally not long-running unless it has very complex definitions or inline indexes,
+  // but our generator creates indexes separately.
+  // DROP statements are generally not considered long-running/validating in the same way.
+  return false;
+}
+
 function generateSpannerDdl(diffActions: TableDiffAction[]): string[][] {
   const allDdlStatements: string[] = [];
   for (const action of diffActions) {
@@ -797,11 +818,70 @@ function generateSpannerDdl(diffActions: TableDiffAction[]): string[][] {
     }
   }
 
-  const batches: string[][] = [];
-  for (let i = 0; i < allDdlStatements.length; i += SPANNER_DDL_BATCH_SIZE) {
-    batches.push(allDdlStatements.slice(i, i + SPANNER_DDL_BATCH_SIZE));
+  const finalBatches: string[][] = [];
+  let currentBatch: string[] = [];
+  // Tracks if the current batch is designated for validating DDLs.
+  // A batch becomes "validating" if it contains at least one validating DDL.
+  let currentBatchContainsValidatingDdl = false;
+
+  for (const ddl of allDdlStatements) {
+    const isCurrentDdlValidating = isSpannerDdlValidating(ddl);
+
+    if (currentBatch.length === 0) {
+      // First statement in a new batch
+      currentBatch.push(ddl);
+      currentBatchContainsValidatingDdl = isCurrentDdlValidating;
+    } else {
+      // Current batch is not empty
+      if (isCurrentDdlValidating) {
+        if (!currentBatchContainsValidatingDdl) {
+          // Current batch was for non-validating DDLs, but this one is validating.
+          // Flush the non-validating batch and start a new one for validating DDLs.
+          finalBatches.push(currentBatch);
+          currentBatch = [ddl];
+          currentBatchContainsValidatingDdl = true;
+        } else {
+          // Current batch is already for validating DDLs. Add if not full.
+          if (currentBatch.length < SPANNER_DDL_BATCH_SIZE) {
+            currentBatch.push(ddl);
+          } else {
+            // Validating batch is full. Flush it and start a new one.
+            finalBatches.push(currentBatch);
+            currentBatch = [ddl];
+            currentBatchContainsValidatingDdl = true; // New batch starts with a validating DDL
+          }
+        }
+      } else {
+        // Current DDL is non-validating
+        if (currentBatchContainsValidatingDdl) {
+          // Current batch was for validating DDLs, but this one is non-validating.
+          // Flush the validating batch and start a new one for non-validating DDLs.
+          finalBatches.push(currentBatch);
+          currentBatch = [ddl];
+          currentBatchContainsValidatingDdl = false;
+        } else {
+          // Current batch is for non-validating DDLs. Add to it.
+          // Non-validating DDLs can be in larger batches, but for simplicity and to align with
+          // the previous behavior of batching everything, we'll still use SPANNER_DDL_BATCH_SIZE here.
+          // This could be relaxed if a different batching strategy for non-validating DDLs is desired.
+          if (currentBatch.length < SPANNER_DDL_BATCH_SIZE) {
+            currentBatch.push(ddl);
+          } else {
+            finalBatches.push(currentBatch);
+            currentBatch = [ddl];
+            currentBatchContainsValidatingDdl = false; // New batch starts with non-validating
+          }
+        }
+      }
+    }
   }
-  return batches;
+
+  // Push any remaining statements in currentBatch
+  if (currentBatch.length > 0) {
+    finalBatches.push(currentBatch);
+  }
+
+  return finalBatches;
 }
 
 export function generateMigrationDDL(
