@@ -380,3 +380,13 @@ export type MigrationExecutor = (
   executeSql: (sql: string, params?: unknown[]) => Promise<void>,
   dialect: Dialect
 ) => Promise<void>;
+
+// --- Prepared Query Type ---
+export interface PreparedQuery<TTable extends TableConfig<any, any>> {
+  sql: string;
+  parameters: unknown[];
+  dialect: Dialect;
+  includeClause?: IncludeClause;
+  primaryTable?: TTable; // For result shaping
+  // Potentially add selectedFields map here if needed for more advanced shaping or type inference
+}
