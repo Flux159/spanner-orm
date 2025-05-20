@@ -4,9 +4,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 const tempSchemaDir = path.join(__dirname, "temp_cli_schema");
-// const tempSchemaFile = path.join(tempSchemaDir, "schema.ts");
 const tempSchemaJsFile = path.join(tempSchemaDir, "schema.js"); // Output of tsc
 const migrationsDir = path.join(process.cwd(), "spanner-orm-migrations"); // Default migrations dir
+const snapshotFile = path.join(migrationsDir, "latest.snapshot.json"); // Snapshot file
 
 const cliEntryPoint = path.resolve(__dirname, "../dist/cli.js");
 
@@ -25,18 +25,55 @@ export const products = table('products', {
 });
 `;
 
+const schemaContentV2 = `
+import { table, text, integer } from '../../dist/core/schema.js';
+
+export const users = table('users', {
+  id: integer('id').primaryKey(),
+  name: text('name').notNull(),
+  email: text('email').unique(),
+  age: integer('age'), // New field
+});
+
+export const products = table('products', {
+  sku: text('sku').primaryKey(),
+  description: text('description'),
+});
+`;
+
+const schemaContentV3 = `
+import { table, text, integer } from '../../dist/core/schema.js';
+
+export const users = table('users', {
+  id: integer('id').primaryKey(),
+  name: text('name').notNull(),
+  email: text('email').unique(),
+  age: integer('age'),
+});
+
+export const products = table('products', {
+  sku: text('sku').primaryKey(),
+  description: text('description'),
+});
+
+export const orders = table('orders', { // New table
+  orderId: integer('orderId').primaryKey(),
+  userId: integer('userId').references(() => users.columns.id),
+});
+`;
+
 // Helper to create a JS version of the schema for CLI to import
-async function createJsSchema() {
+async function writeSchemaToFile(content: string) {
   // In a real scenario, this would be a build step (tsc, esbuild, etc.)
   // For testing, we'll just write the content as if it were JS.
   // The import path in schemaContent is already adjusted for dist.
-  await fs.writeFile(tempSchemaJsFile, schemaContent);
+  await fs.writeFile(tempSchemaJsFile, content);
 }
 
 describe("spanner-orm-cli", () => {
   beforeAll(async () => {
     await fs.mkdir(tempSchemaDir, { recursive: true });
-    await createJsSchema();
+    await writeSchemaToFile(schemaContent); // Initial schema
   });
 
   afterAll(async () => {
@@ -150,17 +187,27 @@ describe("spanner-orm-cli", () => {
       if (migrationsDirStats) {
         await fs.rm(migrationsDir, { recursive: true, force: true });
       }
+      // Clean up snapshot file if it exists
+      const snapshotFileStats = await fs.stat(snapshotFile).catch(() => null);
+      if (snapshotFileStats) {
+        await fs.unlink(snapshotFile);
+      }
       // Ensure mock PGlite DB file is clean before each migration test
       const pgliteDbPath = path.resolve(process.cwd(), "mock-pg-url"); // Assuming DATABASE_URL for pglite is 'mock-pg-url'
       const pgliteDbStats = await fs.stat(pgliteDbPath).catch(() => null);
       if (pgliteDbStats) {
         await fs.rm(pgliteDbPath, { recursive: true, force: true }); // Added recursive
       }
+      // Reset schema to V1 before each test in this block
+      await writeSchemaToFile(schemaContent);
     });
 
     describe("create", () => {
-      it("should create pg and spanner migration files with DDL", async () => {
-        const migrationName = "test-ddl-migration";
+      it("should create pg and spanner migration files with DDL (full schema for first migration)", async () => {
+        const migrationName = "initial-schema";
+        // Ensure schema is V1
+        await writeSchemaToFile(schemaContent);
+
         const { stdout, stderr } = await execa("bun", [
           cliEntryPoint,
           "migrate",
@@ -233,6 +280,184 @@ describe("spanner-orm-cli", () => {
           expect(content).toContain("DROP TABLE products;");
           expect(content).toContain("DROP TABLE users;");
         }
+
+        // Verify snapshot was created
+        const snapshotExists = await fs.stat(snapshotFile).catch(() => null);
+        expect(snapshotExists).not.toBeNull();
+        if (snapshotExists) {
+          const snapshotContent = JSON.parse(
+            await fs.readFile(snapshotFile, "utf-8")
+          );
+          expect(snapshotContent.tables.users).toBeDefined();
+          expect(snapshotContent.tables.products).toBeDefined();
+          expect(snapshotContent.tables.users.columns.email).toBeDefined();
+        }
+      });
+
+      it("should generate incremental migration for schema change (add column)", async () => {
+        // 1. Create initial migration (V1 schema)
+        await writeSchemaToFile(schemaContent);
+        await execa("bun", [
+          cliEntryPoint,
+          "migrate",
+          "create",
+          "initial-setup",
+          "--schema",
+          tempSchemaJsFile,
+        ]);
+        expect(await fs.stat(snapshotFile).catch(() => null)).not.toBeNull();
+
+        // 2. Update schema to V2 (add 'age' to users)
+        await writeSchemaToFile(schemaContentV2);
+        const migrationName = "add-age-to-users";
+        const { stdout, stderr } = await execa("bun", [
+          cliEntryPoint,
+          "migrate",
+          "create",
+          migrationName,
+          "--schema",
+          tempSchemaJsFile,
+        ]);
+
+        if (stderr) console.error("CLI stderr (add-age-to-users):", stderr);
+        expect(stdout).toContain(`Created postgres migration file:`);
+        expect(stdout).toContain(`Created spanner migration file:`);
+
+        const files = await fs.readdir(migrationsDir);
+        const pgFile = files.find((f) => f.endsWith(`${migrationName}.pg.ts`));
+        const spannerFile = files.find((f) =>
+          f.endsWith(`${migrationName}.spanner.ts`)
+        );
+
+        expect(pgFile).toBeDefined();
+        expect(spannerFile).toBeDefined();
+
+        if (pgFile) {
+          const content = await fs.readFile(
+            path.join(migrationsDir, pgFile),
+            "utf-8"
+          );
+          // UP should only add the age column
+          expect(content).toContain(
+            'ALTER TABLE "users" ADD COLUMN "age" INTEGER;'
+          );
+          expect(content).not.toContain('CREATE TABLE "users"'); // Should not recreate table
+          expect(content).not.toContain('CREATE TABLE "products"');
+          // DOWN should only remove the age column
+          expect(content).toContain('ALTER TABLE "users" DROP COLUMN "age";');
+        }
+        if (spannerFile) {
+          const content = await fs.readFile(
+            path.join(migrationsDir, spannerFile),
+            "utf-8"
+          );
+          // UP should only add the age column
+          expect(content).toContain("ALTER TABLE users ADD COLUMN age INT64;");
+          expect(content).not.toContain("CREATE TABLE users"); // Should not recreate table
+          expect(content).not.toContain("CREATE TABLE products");
+          // DOWN should only remove the age column
+          expect(content).toContain("ALTER TABLE users DROP COLUMN age;");
+        }
+
+        // Verify snapshot was updated for V2
+        const snapshotContentV2 = JSON.parse(
+          await fs.readFile(snapshotFile, "utf-8")
+        );
+        expect(snapshotContentV2.tables.users.columns.age).toBeDefined();
+      });
+
+      it("should generate incremental migration for schema change (add table)", async () => {
+        // 1. Create initial migration (V1 schema)
+        await writeSchemaToFile(schemaContent);
+        await execa("bun", [
+          cliEntryPoint,
+          "migrate",
+          "create",
+          "initial-setup",
+          "--schema",
+          tempSchemaJsFile,
+        ]);
+
+        // 2. Update schema to V2 (add 'age' to users) and create migration
+        await writeSchemaToFile(schemaContentV2);
+        await execa("bun", [
+          cliEntryPoint,
+          "migrate",
+          "create",
+          "add-age-to-users",
+          "--schema",
+          tempSchemaJsFile,
+        ]);
+        expect(await fs.stat(snapshotFile).catch(() => null)).not.toBeNull();
+        const snapshotContentV2 = JSON.parse(
+          await fs.readFile(snapshotFile, "utf-8")
+        );
+        expect(snapshotContentV2.tables.users.columns.age).toBeDefined();
+
+        // 3. Update schema to V3 (add 'orders' table)
+        await writeSchemaToFile(schemaContentV3);
+        const migrationName = "add-orders-table";
+        const { stdout: _stdout, stderr } = await execa("bun", [
+          cliEntryPoint,
+          "migrate",
+          "create",
+          migrationName,
+          "--schema",
+          tempSchemaJsFile,
+        ]);
+
+        if (stderr) console.error("CLI stderr (add-orders-table):", stderr);
+
+        const files = await fs.readdir(migrationsDir);
+        const pgFile = files.find((f) => f.endsWith(`${migrationName}.pg.ts`));
+        const spannerFile = files.find((f) =>
+          f.endsWith(`${migrationName}.spanner.ts`)
+        );
+
+        expect(pgFile).toBeDefined();
+        expect(spannerFile).toBeDefined();
+
+        if (pgFile) {
+          const content = await fs.readFile(
+            path.join(migrationsDir, pgFile),
+            "utf-8"
+          );
+          // UP should only add the orders table
+          expect(content).toContain('CREATE TABLE "orders"');
+          expect(content).toContain('"orderId" INTEGER NOT NULL PRIMARY KEY');
+          expect(content).toContain('"userId" INTEGER'); // Column definition
+          expect(content).toContain(
+            'ALTER TABLE "orders" ADD CONSTRAINT "fk_orders_userId_users" FOREIGN KEY ("userId") REFERENCES "users" ("id")'
+          ); // Separate FK constraint
+          expect(content).not.toContain('CREATE TABLE "users"');
+          expect(content).not.toContain('ALTER TABLE "users" ADD COLUMN "age"'); // This was in previous migration
+          // DOWN should only drop the orders table
+          expect(content).toContain('DROP TABLE "orders";');
+        }
+        if (spannerFile) {
+          const content = await fs.readFile(
+            path.join(migrationsDir, spannerFile),
+            "utf-8"
+          );
+          // UP should only add the orders table
+          expect(content).toContain("CREATE TABLE orders");
+          expect(content).toContain("orderId INT64 NOT NULL");
+          expect(content).toContain("userId INT64");
+          expect(content).toContain(
+            "FOREIGN KEY (userId) REFERENCES users (id)"
+          );
+          expect(content).not.toContain("CREATE TABLE users");
+          expect(content).not.toContain("ALTER TABLE users ADD COLUMN age"); // This was in previous migration
+          // DOWN should only drop the orders table
+          expect(content).toContain("DROP TABLE orders;");
+        }
+
+        // Verify snapshot was updated for V3
+        const snapshotContentV3 = JSON.parse(
+          await fs.readFile(snapshotFile, "utf-8")
+        );
+        expect(snapshotContentV3.tables.orders).toBeDefined();
+        expect(snapshotContentV3.tables.users.columns.age).toBeDefined(); // from previous
       });
 
       it("should show error if migration name is missing for create", async () => {
@@ -272,12 +497,13 @@ describe("spanner-orm-cli", () => {
         "should simulate applying latest migrations",
         async () => {
           // First, create a dummy migration file to simulate 'latest'
+          await writeSchemaToFile(schemaContent); // Ensure schema V1 for this test
           await execa("bun", [
             cliEntryPoint,
             "migrate",
             "create",
             "dummy-for-latest",
-            "--schema", // Added schema option
+            "--schema",
             tempSchemaJsFile,
           ]);
 

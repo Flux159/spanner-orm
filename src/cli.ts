@@ -28,6 +28,7 @@ import type {
 } from "./types/common.js";
 
 const MIGRATIONS_DIR = "spanner-orm-migrations";
+const SNAPSHOT_FILENAME = "latest.snapshot.json"; // Added for snapshot management
 const ORM_SNAPSHOT_VERSION = "1.0.0"; // Consistent with snapshot.ts
 
 interface SchemaModule {
@@ -305,25 +306,51 @@ async function handleMigrateCreate(
   await ensureMigrationsDirExists();
   const timestamp = getTimestamp();
   const baseFilename = `${timestamp}-${name}`;
+  const snapshotFilePath = path.join(MIGRATIONS_DIR, SNAPSHOT_FILENAME);
 
   const tablesMap = await loadSchemaTablesMap(options.schema);
   const currentSnapshot = generateSchemaSnapshot(tablesMap);
-  const emptySnapshot: SchemaSnapshot = {
-    version: ORM_SNAPSHOT_VERSION,
-    dialect: "common",
-    tables: {},
-  };
 
-  // Diff for UP: from empty to current
-  const upSchemaDiff = generateSchemaDiff(emptySnapshot, currentSnapshot);
-  // Diff for DOWN: from current to empty
-  const downSchemaDiff = generateSchemaDiff(currentSnapshot, emptySnapshot);
+  let previousSnapshot: SchemaSnapshot;
+  try {
+    const snapshotContent = await fs.readFile(snapshotFilePath, "utf-8");
+    previousSnapshot = JSON.parse(snapshotContent) as SchemaSnapshot;
+    // Basic validation (optional, but good practice)
+    if (previousSnapshot.version !== ORM_SNAPSHOT_VERSION) {
+      console.warn(
+        `Warning: Snapshot version mismatch. Expected ${ORM_SNAPSHOT_VERSION}, found ${previousSnapshot.version}. Proceeding with caution.`
+      );
+      // Potentially force empty if versions are incompatible, or attempt migration
+    }
+    console.log(`Loaded previous schema snapshot from ${snapshotFilePath}`);
+  } catch (error: any) {
+    if (error.code === "ENOENT") {
+      console.log(
+        "No previous schema snapshot found. Assuming this is the first migration."
+      );
+    } else {
+      console.warn(
+        `Warning: Could not read or parse previous schema snapshot from ${snapshotFilePath}. Error: ${error.message}. Falling back to empty schema for diff.`
+      );
+    }
+    previousSnapshot = {
+      version: ORM_SNAPSHOT_VERSION,
+      dialect: "common", // 'common' as it's a generic schema representation
+      tables: {},
+    };
+  }
+
+  // Diff for UP: from previous (or empty) to current
+  const upSchemaDiff = generateSchemaDiff(previousSnapshot, currentSnapshot);
+  // Diff for DOWN: from current to previous (or empty)
+  const downSchemaDiff = generateSchemaDiff(currentSnapshot, previousSnapshot);
 
   const dialects: Dialect[] = ["postgres", "spanner"];
+  let allMigrationsGeneratedSuccessfully = true;
 
   for (const dialect of dialects) {
-    const upDdl = generateMigrationDDL(upSchemaDiff, dialect); // Returns string[] or string[][]
-    const downDdl = generateMigrationDDL(downSchemaDiff, dialect); // Returns string[] or string[][]
+    const upDdl = generateMigrationDDL(upSchemaDiff, dialect);
+    const downDdl = generateMigrationDDL(downSchemaDiff, dialect);
 
     const formattedUpDdl = formatDdlForTemplate(upDdl, dialect);
     const formattedDownDdl = formatDdlForTemplate(downDdl, dialect);
@@ -345,8 +372,31 @@ async function handleMigrateCreate(
       console.log(`Created ${dialect} migration file: ${migrationPath}`);
     } catch (error) {
       console.error(`Error creating ${dialect} migration file:`, error);
-      // Consider if we should exit(1) here or try to continue with other dialects
+      allMigrationsGeneratedSuccessfully = false;
+      // Do not exit immediately, allow other dialect generation to be attempted or reported.
     }
+  }
+
+  if (allMigrationsGeneratedSuccessfully) {
+    try {
+      await fs.writeFile(
+        snapshotFilePath,
+        JSON.stringify(currentSnapshot, null, 2)
+      );
+      console.log(
+        `Successfully saved current schema snapshot to ${snapshotFilePath}`
+      );
+    } catch (error) {
+      console.error(
+        `Error saving current schema snapshot to ${snapshotFilePath}:`,
+        error
+      );
+      // This is a non-fatal error for the migration creation itself, but should be logged.
+    }
+  } else {
+    console.error(
+      "One or more migration files could not be generated. Snapshot will not be updated."
+    );
   }
 }
 
