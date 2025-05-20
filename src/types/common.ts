@@ -82,9 +82,14 @@ export interface SQL {
    * Generates the SQL string for the specified dialect.
    * @param dialect The SQL dialect ('postgres' or 'spanner').
    * @param currentParamIndex An object holding the current parameter index, passed by reference to be incremented.
+   * @param aliasMap An optional map of original table names to their query-specific aliases.
    * @returns The SQL string with placeholders.
    */
-  toSqlString(dialect: Dialect, currentParamIndex?: { value: number }): string;
+  toSqlString(
+    dialect: Dialect,
+    currentParamIndex?: { value: number },
+    aliasMap?: Map<string, string>
+  ): string;
   /**
    * Gets the array of parameter values corresponding to the placeholders in the SQL string.
    * @param dialect The SQL dialect ('postgres' or 'spanner').
@@ -129,7 +134,8 @@ export function sql(strings: TemplateStringsArray, ...values: unknown[]): SQL {
     getValues: (dialect: Dialect) => getValuesRecursive(values, dialect),
     toSqlString: (
       dialect: Dialect,
-      currentParamIndex?: { value: number }
+      currentParamIndex?: { value: number },
+      aliasMap?: Map<string, string> // Ensure aliasMap is a parameter here
     ): string => {
       let result = strings[0];
       // Initialize paramIndex if it's the top-level call
@@ -141,7 +147,7 @@ export function sql(strings: TemplateStringsArray, ...values: unknown[]): SQL {
           if ("_isSQL" in value) {
             // Nested SQL object
             result +=
-              (value as SQL).toSqlString(dialect, paramIndexState) +
+              (value as SQL).toSqlString(dialect, paramIndexState, aliasMap) + // Pass aliasMap
               strings[i + 1];
           } else if (
             // Check if it IS a ColumnConfig object
@@ -155,13 +161,28 @@ export function sql(strings: TemplateStringsArray, ...values: unknown[]): SQL {
             // It's a ColumnConfig, interpolate its name as an identifier
             const colConfig = value as ColumnConfig<any, any>;
             const colName = colConfig.name;
+            const originalTableName = colConfig._tableName;
+            let nameToUseForTable: string | undefined = originalTableName; // Default to original
+
+            if (aliasMap && originalTableName) {
+              const alias = aliasMap.get(originalTableName);
+              if (alias) {
+                // If an alias is found in the map
+                nameToUseForTable = alias;
+              }
+              // If not found, nameToUseForTable remains originalTableName
+            }
+            // If originalTableName was undefined, nameToUseForTable is also undefined
+
             let identifier = "";
-            if (colConfig._tableName) {
+            if (nameToUseForTable) {
+              // Check if we have a table name/alias to use
               identifier =
                 dialect === "postgres"
-                  ? `"${colConfig._tableName}"."${colName}"`
-                  : `\`${colConfig._tableName}\`.\`${colName}\``;
+                  ? `"${nameToUseForTable}"."${colName}"`
+                  : `\`${nameToUseForTable}\`.\`${colName}\``;
             } else {
+              // Fallback: just use column name if no table context
               identifier =
                 dialect === "postgres" ? `"${colName}"` : `\`${colName}\``;
             }
