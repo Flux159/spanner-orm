@@ -685,13 +685,13 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     return `GROUP BY ${groupByParts.join(", ")}`;
   }
 
-  getBoundParameters(): unknown[] {
+  getBoundParameters(dialect: Dialect): unknown[] {
     const allParams: unknown[] = [];
 
     if (this._operationType === "select" && this._selectedFields) {
       for (const field of Object.values(this._selectedFields)) {
         if (typeof field === "object" && field !== null && "_isSQL" in field) {
-          allParams.push(...(field as SQL).getValues());
+          allParams.push(...(field as SQL).getValues(dialect));
         }
       }
     }
@@ -766,7 +766,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
             value !== null &&
             (value as SQL)._isSQL === true
           ) {
-            allParams.push(...(value as SQL).getValues());
+            allParams.push(...(value as SQL).getValues(dialect));
           } else {
             allParams.push(value);
           }
@@ -777,7 +777,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     if (this._operationType === "update" && this._updateSetValues) {
       for (const value of Object.values(this._updateSetValues)) {
         if (typeof value === "object" && value !== null && "_isSQL" in value) {
-          allParams.push(...(value as SQL).getValues());
+          allParams.push(...(value as SQL).getValues(dialect));
         } else {
           allParams.push(value);
         }
@@ -792,7 +792,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           condition !== null &&
           "_isSQL" in condition
         ) {
-          allParams.push(...(condition as SQL).getValues());
+          allParams.push(...(condition as SQL).getValues(dialect));
         }
       }
     }
@@ -800,7 +800,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     // Collect params from JOIN ON conditions
     if (this._joins) {
       for (const join of this._joins) {
-        allParams.push(...join.onCondition.getValues());
+        allParams.push(...join.onCondition.getValues(dialect));
       }
     }
 
@@ -812,7 +812,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           orderItem.field !== null &&
           "_isSQL" in orderItem.field
         ) {
-          allParams.push(...(orderItem.field as SQL).getValues());
+          allParams.push(...(orderItem.field as SQL).getValues(dialect));
         }
       }
     }
@@ -825,7 +825,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           groupItem !== null &&
           "_isSQL" in groupItem
         ) {
-          allParams.push(...(groupItem as SQL).getValues());
+          allParams.push(...(groupItem as SQL).getValues(dialect));
         }
       }
     }
