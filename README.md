@@ -348,6 +348,101 @@ npx spanner-orm-cli migrate down --schema ./dist/schema.js
 
 _(Note: The migration CLI commands `migrate latest` and `migrate down` now use environment variables such as `DB_DIALECT`, `DATABASE_URL` (for PG/Pglite), and Spanner-specific variables like `SPANNER_PROJECT_ID`, `SPANNER_INSTANCE_ID`, `SPANNER_DATABASE_ID` to connect to your database and apply/revert migrations.)_
 
+### Querying Examples
+
+Here's how you can use the `QueryBuilder` to construct and execute queries. Assume you have your schema defined (e.g., `usersTable`, `postsTable` from the "Getting Started" example) and an initialized database adapter.
+
+```typescript
+import { QueryBuilder, sql } from "spanner-orm";
+import { usersTable, postsTable } from "./schema"; // Your schema definitions
+import { count, sum, avg } from "spanner-orm/functions"; // Aggregate functions
+// import { getDbAdapter } from './your-adapter-setup'; // Your adapter setup
+
+// const db = getDbAdapter(); // Your initialized adapter instance
+
+async function runExamples() {
+  const qb = new QueryBuilder(); // Generic QueryBuilder, table specified in methods
+
+  // 1. Basic SELECT with WHERE
+  const recentUsersQuery = qb
+    .select({ id: usersTable.columns.id, name: usersTable.columns.name })
+    .from(usersTable)
+    .where(
+      sql`${usersTable.columns.createdAt} > ${new Date(
+        Date.now() - 24 * 60 * 60 * 1000
+      )}`
+    ) // Users created in the last 24 hours
+    .orderBy(usersTable.columns.createdAt, "DESC")
+    .limit(10);
+
+  // const recentUsersSql = recentUsersQuery.toSQL("postgres");
+  // console.log("Recent Users SQL:", recentUsersSql);
+  // const recentUsers = await db.execute(recentUsersSql, recentUsersQuery.getBoundParameters());
+
+  // 2. SELECT with INNER JOIN
+  const usersWithPostsQuery = qb
+    .select({
+      userName: usersTable.columns.name,
+      postTitle: postsTable.columns.title,
+    })
+    .from(usersTable)
+    .innerJoin(
+      postsTable,
+      sql`${usersTable.columns.id} = ${postsTable.columns.userId}`
+    )
+    .where(sql`${usersTable.columns.email} = ${"example@user.com"}`);
+
+  // const usersWithPostsSql = usersWithPostsQuery.toSQL("postgres");
+  // console.log("Users with Posts SQL:", usersWithPostsSql);
+  // const usersWithPosts = await db.execute(usersWithPostsSql, usersWithPostsQuery.getBoundParameters());
+
+  // 3. SELECT with GROUP BY and Aggregates
+  const userPostCountsQuery = qb
+    .select({
+      userId: usersTable.columns.id,
+      userName: usersTable.columns.name,
+      postCount: count(postsTable.columns.id),
+    })
+    .from(usersTable)
+    .leftJoin(
+      postsTable,
+      sql`${usersTable.columns.id} = ${postsTable.columns.userId}`
+    )
+    .groupBy(usersTable.columns.id, usersTable.columns.name)
+    .orderBy(sql`COUNT(${postsTable.columns.id})`, "DESC");
+
+  // const userPostCountsSql = userPostCountsQuery.toSQL("postgres");
+  // console.log("User Post Counts SQL:", userPostCountsSql);
+  // const userPostCounts = await db.execute(userPostCountsSql, userPostCountsQuery.getBoundParameters());
+
+  // 4. INSERT a new user
+  const newUserQuery = qb
+    .insert(usersTable)
+    .values({ name: "New User", email: "new@user.com", age: 28 });
+  // const newUserSql = newUserQuery.toSQL("postgres");
+  // await db.execute(newUserSql, newUserQuery.getBoundParameters());
+
+  // 5. UPDATE an existing user's age
+  const updateUserQuery = qb
+    .update(usersTable)
+    .set({ age: 29 })
+    .where(sql`${usersTable.columns.email} = ${"new@user.com"}`);
+  // const updateUserSql = updateUserQuery.toSQL("postgres");
+  // await db.execute(updateUserSql, updateUserQuery.getBoundParameters());
+
+  // 6. DELETE a user
+  const deleteUserQuery = qb
+    .deleteFrom(usersTable)
+    .where(sql`${usersTable.columns.email} = ${"new@user.com"}`);
+  // const deleteUserSql = deleteUserQuery.toSQL("postgres");
+  // await db.execute(deleteUserSql, deleteUserQuery.getBoundParameters());
+}
+
+// runExamples().catch(console.error);
+```
+
+These examples illustrate how to perform common database operations. The actual execution would depend on your specific database adapter setup.
+
 ---
 
 _This project is under active development._

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { QueryBuilder } from "../../src/core/query-builder.js";
 import { table, text, integer, timestamp } from "../../src/core/schema.js";
 import { sql } from "../../src/types/common.js";
+import { count, sum, avg, min, max } from "../../src/core/functions.js"; // Import aggregates
 // import type { TableConfig } from "../../src/types/common.js"; // Unused import
 
 // Define a sample table for testing
@@ -13,12 +14,12 @@ const usersTable = table("users", {
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
-// const postsTable = table("posts", { // Unused variable
-//   id: integer("id").primaryKey(),
-//   title: text("title").notNull(),
-//   userId: integer("user_id"),
-//   content: text("content"),
-// });
+const postsTable = table("posts", {
+  id: integer("id").primaryKey(),
+  title: text("title").notNull(),
+  userId: integer("user_id").references(() => usersTable.columns.id),
+  content: text("content"),
+});
 
 describe("QueryBuilder SQL Generation", () => {
   let qb: QueryBuilder<typeof usersTable>;
@@ -61,7 +62,9 @@ describe("QueryBuilder SQL Generation", () => {
         .from(usersTable)
         .where(sql`${usersTable.columns.age} > ${30}`)
         .toSQL("postgres");
-      expect(query).toBe('SELECT "id" AS "id" FROM "users" WHERE "age" > $1');
+      expect(query).toBe(
+        'SELECT "id" AS "id" FROM "users" WHERE "users"."age" > $1'
+      );
     });
 
     it("should generate SELECT with LIMIT", () => {
@@ -92,7 +95,7 @@ describe("QueryBuilder SQL Generation", () => {
         .where(sql`${usersTable.columns.age} < ${30}`)
         .toSQL("postgres");
       expect(query).toBe(
-        'SELECT * FROM "users" WHERE "name" = $1 AND "age" < $2'
+        'SELECT * FROM "users" WHERE "users"."name" = $1 AND "users"."age" < $2'
       );
     });
 
@@ -102,7 +105,7 @@ describe("QueryBuilder SQL Generation", () => {
         .from(usersTable)
         .toSQL("postgres");
       expect(query).toBe(
-        'SELECT COALESCE("name", \'N/A\') AS "custom" FROM "users"'
+        'SELECT COALESCE("users"."name", \'N/A\') AS "custom" FROM "users"'
       );
     });
   });
@@ -132,7 +135,9 @@ describe("QueryBuilder SQL Generation", () => {
         .from(usersTable)
         .where(sql`${usersTable.columns.age} > ${30}`)
         .toSQL("spanner");
-      expect(query).toBe("SELECT `id` AS `id` FROM `users` WHERE `age` > @p1");
+      expect(query).toBe(
+        "SELECT `id` AS `id` FROM `users` WHERE `users`.`age` > @p1"
+      );
     });
 
     it("should generate SELECT with LIMIT and OFFSET", () => {
@@ -154,7 +159,7 @@ describe("QueryBuilder SQL Generation", () => {
       // The sql tag function should ideally handle this, or user provides correct SQL.
       // For this test, we assume the user provides Spanner-compatible SQL in the sql tag.
       expect(query).toBe(
-        "SELECT IFNULL(`name`, 'N/A') AS `customName` FROM `users`"
+        "SELECT IFNULL(`users`.`name`, 'N/A') AS `customName` FROM `users`"
       );
     });
   });
@@ -213,7 +218,9 @@ describe("QueryBuilder SQL Generation", () => {
       expect(params).toEqual([subQueryValue]);
       // Test generated SQL to ensure placeholder is correct for nested SQL
       const pgSql = qb.toSQL("postgres");
-      expect(pgSql).toBe('SELECT * FROM "users" WHERE "email" = LOWER($1)');
+      expect(pgSql).toBe(
+        'SELECT * FROM "users" WHERE "users"."email" = LOWER($1)'
+      );
     });
   });
 
@@ -282,7 +289,7 @@ describe("QueryBuilder SQL Generation", () => {
         .where(sql`${usersTable.columns.id} = ${1}`)
         .toSQL("postgres");
       expect(query).toBe(
-        'UPDATE "users" SET "age" = $1, "email" = $2 WHERE "id" = $3'
+        'UPDATE "users" SET "age" = $1, "email" = $2 WHERE "users"."id" = $3'
       );
       expect(qb.getBoundParameters()).toEqual([31, "john.new@example.com", 1]);
     });
@@ -293,7 +300,9 @@ describe("QueryBuilder SQL Generation", () => {
         .set({ name: "Updated Name" })
         .where(sql`${usersTable.columns.email} = ${"old@example.com"}`)
         .toSQL("spanner");
-      expect(query).toBe("UPDATE `users` SET `name` = @p1 WHERE `email` = @p2");
+      expect(query).toBe(
+        "UPDATE `users` SET `name` = @p1 WHERE `users`.`email` = @p2"
+      );
       expect(qb.getBoundParameters()).toEqual([
         "Updated Name",
         "old@example.com",
@@ -307,7 +316,7 @@ describe("QueryBuilder SQL Generation", () => {
         .where(sql`${usersTable.columns.id} = ${10}`)
         .toSQL("postgres");
       expect(query).toBe(
-        'UPDATE "users" SET "age" = "age" + $1 WHERE "id" = $2'
+        'UPDATE "users" SET "age" = "users"."age" + $1 WHERE "users"."id" = $2'
       );
       expect(qb.getBoundParameters()).toEqual([1, 10]);
     });
@@ -320,7 +329,7 @@ describe("QueryBuilder SQL Generation", () => {
         .deleteFrom(usersTable)
         .where(sql`${usersTable.columns.age} < ${18}`)
         .toSQL("postgres");
-      expect(query).toBe('DELETE FROM "users" WHERE "age" < $1');
+      expect(query).toBe('DELETE FROM "users" WHERE "users"."age" < $1');
       expect(qb.getBoundParameters()).toEqual([18]);
     });
 
@@ -329,7 +338,7 @@ describe("QueryBuilder SQL Generation", () => {
         .deleteFrom(usersTable)
         .where(sql`${usersTable.columns.email} = ${"spam@example.com"}`)
         .toSQL("spanner");
-      expect(query).toBe("DELETE FROM `users` WHERE `email` = @p1");
+      expect(query).toBe("DELETE FROM `users` WHERE `users`.`email` = @p1");
       expect(qb.getBoundParameters()).toEqual(["spam@example.com"]);
     });
 
@@ -342,6 +351,356 @@ describe("QueryBuilder SQL Generation", () => {
   // Note: Tests for transaction execution would typically involve mocking the adapter
   // and are beyond the scope of QueryBuilder unit tests for SQL generation.
   // Transaction logic is tested at the adapter level.
+});
+
+// --- JOIN Tests ---
+describe("QueryBuilder JOIN Operations", () => {
+  let qb: QueryBuilder<typeof usersTable>;
+
+  beforeEach(() => {
+    qb = new QueryBuilder<typeof usersTable>();
+  });
+
+  it("PostgreSQL: should generate INNER JOIN", () => {
+    const query = qb
+      .select({
+        userName: usersTable.columns.name,
+        postTitle: postsTable.columns.title,
+      })
+      .from(usersTable)
+      .innerJoin(
+        postsTable,
+        sql`${usersTable.columns.id} = ${postsTable.columns.userId}`
+      )
+      .where(sql`${usersTable.columns.age} > ${30}`)
+      .toSQL("postgres");
+
+    expect(query).toBe(
+      'SELECT "name" AS "userName", "title" AS "postTitle" FROM "users" INNER JOIN "posts" ON "users"."id" = "posts"."user_id" WHERE "users"."age" > $1'
+    );
+    expect(qb.getBoundParameters()).toEqual([30]);
+  });
+
+  it("Spanner: should generate INNER JOIN", () => {
+    const query = qb
+      .select({
+        userName: usersTable.columns.name,
+        postTitle: postsTable.columns.title,
+      })
+      .from(usersTable)
+      .innerJoin(
+        postsTable,
+        sql`${usersTable.columns.id} = ${postsTable.columns.userId}`
+      )
+      .where(sql`${usersTable.columns.age} > ${30}`)
+      .toSQL("spanner");
+
+    expect(query).toBe(
+      "SELECT `name` AS `userName`, `title` AS `postTitle` FROM `users` INNER JOIN `posts` ON `users`.`id` = `posts`.`user_id` WHERE `users`.`age` > @p1"
+    );
+    expect(qb.getBoundParameters()).toEqual([30]);
+  });
+
+  it("PostgreSQL: should generate LEFT JOIN", () => {
+    const query = qb
+      .select({
+        userName: usersTable.columns.name,
+        postTitle: postsTable.columns.title,
+      })
+      .from(usersTable)
+      .leftJoin(
+        postsTable,
+        sql`${usersTable.columns.id} = ${postsTable.columns.userId}`
+      )
+      .toSQL("postgres");
+    expect(query).toBe(
+      'SELECT "name" AS "userName", "title" AS "postTitle" FROM "users" LEFT JOIN "posts" ON "users"."id" = "posts"."user_id"'
+    );
+  });
+
+  it("Spanner: should generate LEFT JOIN", () => {
+    const query = qb
+      .select({
+        userName: usersTable.columns.name,
+        postTitle: postsTable.columns.title,
+      })
+      .from(usersTable)
+      .leftJoin(
+        postsTable,
+        sql`${usersTable.columns.id} = ${postsTable.columns.userId}`
+      )
+      .toSQL("spanner");
+    expect(query).toBe(
+      "SELECT `name` AS `userName`, `title` AS `postTitle` FROM `users` LEFT JOIN `posts` ON `users`.`id` = `posts`.`user_id`"
+    );
+  });
+
+  it("PostgreSQL: should collect parameters from JOIN ON condition", () => {
+    qb.select({ userName: usersTable.columns.name })
+      .from(usersTable)
+      .innerJoin(
+        postsTable,
+        sql`${usersTable.columns.id} = ${postsTable.columns.userId} AND ${
+          postsTable.columns.title
+        } = ${"My Post"}`
+      );
+
+    const params = qb.getBoundParameters();
+    expect(params).toEqual(["My Post"]);
+  });
+});
+
+// --- ORDER BY Tests ---
+describe("QueryBuilder ORDER BY Operations", () => {
+  let qb: QueryBuilder<typeof usersTable>;
+
+  beforeEach(() => {
+    qb = new QueryBuilder<typeof usersTable>();
+  });
+
+  it("PostgreSQL: should generate ORDER BY a single column", () => {
+    const query = qb
+      .select({ name: usersTable.columns.name })
+      .from(usersTable)
+      .orderBy(usersTable.columns.age, "DESC")
+      .toSQL("postgres");
+    expect(query).toBe(
+      'SELECT "name" AS "name" FROM "users" ORDER BY "users"."age" DESC'
+    );
+  });
+
+  it("Spanner: should generate ORDER BY a single column", () => {
+    const query = qb
+      .select({ name: usersTable.columns.name })
+      .from(usersTable)
+      .orderBy(usersTable.columns.age, "ASC")
+      .toSQL("spanner");
+    expect(query).toBe(
+      "SELECT `name` AS `name` FROM `users` ORDER BY `users`.`age` ASC"
+    );
+  });
+
+  it("PostgreSQL: should generate ORDER BY multiple columns", () => {
+    const query = qb
+      .select({ id: usersTable.columns.id })
+      .from(usersTable)
+      .orderBy(usersTable.columns.name, "ASC")
+      .orderBy(usersTable.columns.createdAt, "DESC")
+      .toSQL("postgres");
+    expect(query).toBe(
+      'SELECT "id" AS "id" FROM "users" ORDER BY "users"."name" ASC, "users"."created_at" DESC'
+    );
+  });
+
+  it("PostgreSQL: should generate ORDER BY with SQL object", () => {
+    const query = qb
+      .select({ id: usersTable.columns.id })
+      .from(usersTable)
+      .orderBy(sql`LOWER(${usersTable.columns.name})`, "ASC")
+      .toSQL("postgres");
+    expect(query).toBe(
+      'SELECT "id" AS "id" FROM "users" ORDER BY LOWER("users"."name") ASC'
+    );
+  });
+
+  it("PostgreSQL: should collect parameters from ORDER BY SQL object", () => {
+    qb.select({ id: usersTable.columns.id })
+      .from(usersTable)
+      .orderBy(
+        sql`CASE WHEN ${
+          usersTable.columns.email
+        } = ${"test@example.com"} THEN 0 ELSE 1 END`,
+        "ASC"
+      );
+    const params = qb.getBoundParameters();
+    expect(params).toEqual(["test@example.com"]);
+  });
+});
+
+// --- GROUP BY Tests ---
+describe("QueryBuilder GROUP BY Operations", () => {
+  let qb: QueryBuilder<typeof usersTable>;
+
+  beforeEach(() => {
+    qb = new QueryBuilder<typeof usersTable>();
+  });
+
+  it("PostgreSQL: should generate GROUP BY a single column", () => {
+    const query = qb
+      .select({ age: usersTable.columns.age })
+      .from(usersTable)
+      .groupBy(usersTable.columns.age)
+      .toSQL("postgres");
+    expect(query).toBe(
+      'SELECT "age" AS "age" FROM "users" GROUP BY "users"."age"'
+    );
+  });
+
+  it("Spanner: should generate GROUP BY a single column", () => {
+    const query = qb
+      .select({ age: usersTable.columns.age })
+      .from(usersTable)
+      .groupBy(usersTable.columns.age)
+      .toSQL("spanner");
+    expect(query).toBe(
+      "SELECT `age` AS `age` FROM `users` GROUP BY `users`.`age`"
+    );
+  });
+
+  it("PostgreSQL: should generate GROUP BY multiple columns", () => {
+    const query = qb
+      .select({ name: usersTable.columns.name, age: usersTable.columns.age })
+      .from(usersTable)
+      .groupBy(usersTable.columns.name, usersTable.columns.age)
+      .toSQL("postgres");
+    expect(query).toBe(
+      'SELECT "name" AS "name", "age" AS "age" FROM "users" GROUP BY "users"."name", "users"."age"'
+    );
+  });
+
+  it("PostgreSQL: should generate GROUP BY with SQL object", () => {
+    const query = qb
+      .select({ name: usersTable.columns.name })
+      .from(usersTable)
+      .groupBy(sql`LOWER(${usersTable.columns.name})`)
+      .toSQL("postgres");
+    expect(query).toBe(
+      'SELECT "name" AS "name" FROM "users" GROUP BY LOWER("users"."name")'
+    );
+  });
+
+  it("PostgreSQL: should collect parameters from GROUP BY SQL object", () => {
+    qb.select({ email: usersTable.columns.email })
+      .from(usersTable)
+      .groupBy(sql`SUBSTRING(${usersTable.columns.email} FROM ${1} FOR ${5})`);
+    const params = qb.getBoundParameters();
+    expect(params).toEqual([1, 5]);
+  });
+});
+
+// --- Aggregate Function Tests ---
+describe("QueryBuilder Aggregate Functions", () => {
+  let qb: QueryBuilder<typeof usersTable>;
+
+  beforeEach(() => {
+    qb = new QueryBuilder<typeof usersTable>();
+  });
+
+  it("PostgreSQL: should generate COUNT(*)", () => {
+    const query = qb
+      .select({ totalUsers: count() })
+      .from(usersTable)
+      .toSQL("postgres");
+    expect(query).toBe('SELECT COUNT(*) AS "totalUsers" FROM "users"');
+  });
+
+  it("Spanner: should generate COUNT(*)", () => {
+    const query = qb
+      .select({ totalUsers: count("*") }) // Explicitly passing "*"
+      .from(usersTable)
+      .toSQL("spanner");
+    expect(query).toBe("SELECT COUNT(*) AS `totalUsers` FROM `users`");
+  });
+
+  it("PostgreSQL: should generate COUNT(column)", () => {
+    const query = qb
+      .select({ countOfEmails: count(usersTable.columns.email) })
+      .from(usersTable)
+      .toSQL("postgres");
+    expect(query).toBe(
+      'SELECT COUNT("users"."email") AS "countOfEmails" FROM "users"'
+    );
+  });
+
+  it("Spanner: should generate COUNT(column)", () => {
+    const query = qb
+      .select({ countOfEmails: count(usersTable.columns.email) })
+      .from(usersTable)
+      .toSQL("spanner");
+    expect(query).toBe(
+      "SELECT COUNT(`users`.`email`) AS `countOfEmails` FROM `users`"
+    );
+  });
+
+  it("PostgreSQL: should generate COUNT with GROUP BY", () => {
+    const query = qb
+      .select({ age: usersTable.columns.age, userCount: count() })
+      .from(usersTable)
+      .groupBy(usersTable.columns.age)
+      .orderBy(usersTable.columns.age)
+      .toSQL("postgres");
+    expect(query).toBe(
+      'SELECT "age" AS "age", COUNT(*) AS "userCount" FROM "users" GROUP BY "users"."age" ORDER BY "users"."age" ASC'
+    );
+  });
+
+  it("PostgreSQL: should generate SUM(column)", () => {
+    const query = qb
+      .select({ totalAge: sum(usersTable.columns.age) })
+      .from(usersTable)
+      .toSQL("postgres");
+    expect(query).toBe('SELECT SUM("users"."age") AS "totalAge" FROM "users"');
+  });
+
+  it("Spanner: should generate SUM(column)", () => {
+    const query = qb
+      .select({ totalAge: sum(usersTable.columns.age) })
+      .from(usersTable)
+      .toSQL("spanner");
+    expect(query).toBe("SELECT SUM(`users`.`age`) AS `totalAge` FROM `users`");
+  });
+
+  it("PostgreSQL: should generate AVG(column)", () => {
+    const query = qb
+      .select({ averageAge: avg(usersTable.columns.age) })
+      .from(usersTable)
+      .toSQL("postgres");
+    expect(query).toBe(
+      'SELECT AVG("users"."age") AS "averageAge" FROM "users"'
+    );
+  });
+
+  it("Spanner: should generate AVG(column)", () => {
+    const query = qb
+      .select({ averageAge: avg(usersTable.columns.age) })
+      .from(usersTable)
+      .toSQL("spanner");
+    expect(query).toBe(
+      "SELECT AVG(`users`.`age`) AS `averageAge` FROM `users`"
+    );
+  });
+
+  it("PostgreSQL: should generate MIN(column)", () => {
+    const query = qb
+      .select({ minAge: min(usersTable.columns.age) })
+      .from(usersTable)
+      .toSQL("postgres");
+    expect(query).toBe('SELECT MIN("users"."age") AS "minAge" FROM "users"');
+  });
+
+  it("Spanner: should generate MIN(column)", () => {
+    const query = qb
+      .select({ minAge: min(usersTable.columns.age) })
+      .from(usersTable)
+      .toSQL("spanner");
+    expect(query).toBe("SELECT MIN(`users`.`age`) AS `minAge` FROM `users`");
+  });
+
+  it("PostgreSQL: should generate MAX(column)", () => {
+    const query = qb
+      .select({ maxAge: max(usersTable.columns.age) })
+      .from(usersTable)
+      .toSQL("postgres");
+    expect(query).toBe('SELECT MAX("users"."age") AS "maxAge" FROM "users"');
+  });
+
+  it("Spanner: should generate MAX(column)", () => {
+    const query = qb
+      .select({ maxAge: max(usersTable.columns.age) })
+      .from(usersTable)
+      .toSQL("spanner");
+    expect(query).toBe("SELECT MAX(`users`.`age`) AS `maxAge` FROM `users`");
+  });
 });
 
 import crypto from "node:crypto"; // For randomUUID
