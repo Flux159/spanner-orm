@@ -559,7 +559,7 @@ export function sum(field: ColumnConfig<any, any>): SQL {
       } else {
         identifier = dialect === "postgres" ? `"${colName}"` : `\`${colName}\``;
       }
-      return `MIN(${identifier})`; // This one is correct
+      return `SUM(${identifier})`; // Fixed typo: was MIN
     },
   };
 }

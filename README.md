@@ -168,7 +168,7 @@ Make sure to read notes/Phase5.md and notes/GoogleSQLSpanner.md when working on 
   - [x] Implemented `uuid()` helper function.
   - [x] Implemented Foreign Key DDL generation.
   - [x] **T5.2.1: Basic Relational Awareness in Query Builder:** Allow query methods to understand and correctly alias columns from tables with defined relationships. (Includes aliasing within SQL helper functions).
-  - [ ] **T5.2.2: Simple Eager Loading (One Level Deep):** Implement fetching of directly related data (e.g., user's posts). Start with one-to-many.
+  - [~] **T5.2.2: Simple Eager Loading (One Level Deep):** Implement fetching of directly related data (e.g., user's posts). Start with one-to-many. (SQL generation complete; result shaping and full type safety pending).
   - [ ] **T5.2.3: Fluent Join API based on Schema Relations:** Enable joins based on pre-defined schema relations for a more ORM-like experience.
 - [x] **T5.3: Performance Optimizations (e.g., batching for Spanner).**
   - [x] Implemented selective DDL batching for Spanner, grouping validating DDLs (e.g., CREATE INDEX, ALTER TABLE ADD/ALTER COLUMN, ADD FOREIGN KEY) into batches of up to 5.
@@ -542,6 +542,28 @@ async function runExamples() {
   // console.log("User Case SQL (PG):", userCaseSql); // SELECT LOWER("users"."name") AS "lowerName", UPPER("users"."email") AS "upperEmail", UPPER(CONCAT($1, LOWER("users"."name"))) AS "processedName" FROM "users" WHERE "users"."id" = $2
   // const userCaseParams = userCaseTransformedQuery.getBoundParameters("postgres");
   // console.log("User Case Params (PG):", userCaseParams); // ["prefix-", 2]
+
+  // 12. SELECT with Eager Loading (Include)
+  // Assuming usersTable and postsTable are defined, and postsTable has a userId referencing usersTable.id
+  const usersWithTheirPostsQuery = qb
+    .select({
+      userId: usersTable.columns.id,
+      userName: usersTable.columns.name,
+    })
+    .from(usersTable)
+    .include({ posts: { select: { title: true, content: true } } }) // Include posts, selecting specific columns
+    .where(sql`${usersTable.columns.id} = ${1}`);
+
+  // const usersWithPostsSql = usersWithTheirPostsQuery.toSQL("postgres");
+  // console.log("Users with Posts (Include) SQL:", usersWithPostsSql);
+  // Example PG SQL:
+  // SELECT "t1"."id" AS "userId", "t1"."name" AS "userName", "t2"."title" AS "posts__title", "t2"."content" AS "posts__content"
+  // FROM "users" AS "t1"
+  // LEFT JOIN "posts" AS "t2" ON "t2"."user_id" = "t1"."id"
+  // WHERE "t1"."id" = $1
+  // const usersWithPostsData = await db.execute(usersWithPostsSql, usersWithTheirPostsQuery.getBoundParameters("postgres"));
+  // Result shaping would be needed here to transform flat rows into nested objects, e.g.:
+  // { userId: 1, userName: 'Alice', posts: [{ title: 'Post 1', content: '...' }, ...] }
 }
 
 // runExamples().catch(console.error);
