@@ -6,6 +6,8 @@ import type {
   QueryResultRow as AdapterQueryResultRow,
   ConnectionOptions,
 } from "../types/adapter.js";
+import type { PreparedQuery, TableConfig } from "../types/common.js"; // Added
+import { shapeResults } from "../core/result-shaper.js"; // Added
 
 // Define a more specific connection options type for PGlite
 export interface PgliteConnectionOptions extends ConnectionOptions {
@@ -167,6 +169,33 @@ export class ConcretePgliteAdapter implements DatabaseAdapter {
     } catch (error) {
       await this.rollbackTransaction();
       console.error("Pglite transaction rolled back due to error:", error);
+      throw error;
+    }
+  }
+
+  async queryPrepared<TTable extends TableConfig<any, any>>(
+    preparedQuery: PreparedQuery<TTable>
+  ): Promise<any[]> {
+    await this.ready;
+    try {
+      const rawResults = await this.query<AdapterQueryResultRow>(
+        preparedQuery.sql,
+        preparedQuery.parameters
+      );
+
+      if (preparedQuery.includeClause && preparedQuery.primaryTable) {
+        return shapeResults(
+          rawResults,
+          preparedQuery.primaryTable,
+          preparedQuery.includeClause
+        );
+      }
+      return rawResults;
+    } catch (error) {
+      console.error(
+        "Error executing prepared query with Pglite adapter:",
+        error
+      );
       throw error;
     }
   }

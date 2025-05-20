@@ -11,6 +11,8 @@ import type {
   QueryResultRow as AdapterQueryResultRow,
   ConnectionOptions,
 } from "../types/adapter.js";
+import type { PreparedQuery, TableConfig } from "../types/common.js"; // Corrected path
+import { shapeResults } from "../core/result-shaper.js"; // Corrected path
 
 export interface SpannerConnectionOptions extends ConnectionOptions {
   projectId: string;
@@ -100,8 +102,6 @@ export class ConcreteSpannerAdapter implements DatabaseAdapter {
   async execute(sql: string, params?: Record<string, any>): Promise<void> {
     const db = this.ensureConnected();
     try {
-      // DDL and DML statements are run within a transaction.
-      // For a single DML/DDL, we can use a simple transaction.
       await db.runTransactionAsync(async (transaction: Transaction) => {
         await transaction.runUpdate({ sql, params });
         await transaction.commit();
@@ -121,7 +121,7 @@ export class ConcreteSpannerAdapter implements DatabaseAdapter {
       const [rows] = await db.run({
         sql,
         params,
-        json: true, // Automatically convert Spanner data types to JSON
+        json: true,
       });
       return rows as TResult[];
     } catch (error) {
@@ -130,9 +130,40 @@ export class ConcreteSpannerAdapter implements DatabaseAdapter {
     }
   }
 
+  async queryPrepared<TTable extends TableConfig<any, any>>(
+    preparedQuery: PreparedQuery<TTable>
+  ): Promise<any[]> {
+    try {
+      const spannerParams: Record<string, any> = {};
+      if (preparedQuery.parameters) {
+        preparedQuery.parameters.forEach((val, i) => {
+          spannerParams[`p${i + 1}`] = val; // Spanner uses @p1, @p2 etc.
+        });
+      }
+
+      const rawResults = await this.query<AdapterQueryResultRow>(
+        preparedQuery.sql,
+        spannerParams
+      );
+
+      if (preparedQuery.includeClause && preparedQuery.primaryTable) {
+        return shapeResults(
+          rawResults,
+          preparedQuery.primaryTable,
+          preparedQuery.includeClause
+        );
+      }
+      return rawResults;
+    } catch (error) {
+      console.error(
+        "Error executing prepared query with Spanner adapter:",
+        error
+      );
+      throw error;
+    }
+  }
+
   async beginTransaction(): Promise<void> {
-    // Spanner transactions are typically managed by runTransactionAsync.
-    // Exposing raw begin/commit/rollback is less common for Spanner's client lib patterns.
     console.warn(
       "beginTransaction is not typically used directly with Spanner adapter's runTransactionAsync pattern. Use the transaction() callback method."
     );
@@ -180,14 +211,12 @@ export class ConcreteSpannerAdapter implements DatabaseAdapter {
             },
           };
           const cbResult = await callback(txExecutor);
-          // Commit is implicitly handled by runTransactionAsync if callback resolves without error
           return cbResult;
         }
       );
       return result;
     } catch (error) {
       console.error("Spanner transaction failed:", error);
-      // Rollback is implicitly handled by runTransactionAsync if callback throws
       throw error;
     }
   }
