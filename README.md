@@ -172,9 +172,9 @@ Make sure to read notes/Phase5.md and notes/GoogleSQLSpanner.md when working on 
   - [ ] **T5.2.3: Fluent Join API based on Schema Relations:** Enable joins based on pre-defined schema relations for a more ORM-like experience.
 - [x] **T5.3: Performance Optimizations (e.g., batching for Spanner).**
   - [x] Implemented selective DDL batching for Spanner, grouping validating DDLs (e.g., CREATE INDEX, ALTER TABLE ADD/ALTER COLUMN, ADD FOREIGN KEY) into batches of up to 5.
-- [ ] **T5.4: Comprehensive Documentation & Examples.** (Ongoing - README updates are part of this).
+- [~] **T5.4: Comprehensive Documentation & Examples.** (Ongoing - README updates are part of this, docusaurus is also part of this).
 - [~] **T5.5: Robust Testing Suite (unit & integration tests).** (Ongoing - Unit tests have been added for current features features, but new features will need more unit tests).
-- [ ] **T5.6: Setup Docusaurus Documentation:** Implement Docusaurus for comprehensive, versioned documentation, deployable to GitHub Pages.
+- [~] **T5.6: Setup Docusaurus Documentation:** Implement Docusaurus for comprehensive, versioned documentation, deployable to GitHub Pages. Started, but need to add comprehensive docs.
 
 ### Beyond Phase 5: Future Considerations
 
