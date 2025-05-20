@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { shapeResults } from "../../src/core/result-shaper";
 import { table, text, integer } from "../../src/core/schema";
-import type { IncludeClause, TableConfig } from "../../src/types/common";
+import type {
+  EnhancedIncludeClause,
+  TableConfig,
+} from "../../src/types/common";
 
 // Mock console.warn
 const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -40,7 +43,9 @@ describe("shapeResults", () => {
   });
 
   it("should return raw data if rawData is empty", () => {
-    const includeClause: IncludeClause = { posts: true };
+    const includeClause: EnhancedIncludeClause = {
+      posts: { relationTable: postsTable, options: true },
+    };
     expect(shapeResults([], usersTable, includeClause)).toEqual([]);
   });
 
@@ -50,7 +55,9 @@ describe("shapeResults", () => {
       any
     >;
     const rawData = [{ name: "Test" }];
-    const includeClause: IncludeClause = { posts: true };
+    const includeClause: EnhancedIncludeClause = {
+      posts: { relationTable: postsTable, options: true },
+    }; // postsTable is arbitrary here as it won't be used
     expect(shapeResults(rawData, noPkTable, includeClause)).toEqual(rawData);
     expect(consoleWarnSpy).toHaveBeenCalledWith(
       `Warning: Cannot shape results for table ${noPkTable.name} as it has no defined primary key. Returning raw data.`
@@ -78,7 +85,9 @@ describe("shapeResults", () => {
         posts__content: "Content 2",
       },
     ];
-    const includeClause: IncludeClause = { posts: true };
+    const includeClause: EnhancedIncludeClause = {
+      posts: { relationTable: postsTable, options: true },
+    };
     const shaped = shapeResults(rawData, usersTable, includeClause);
 
     expect(shaped).toHaveLength(1);
@@ -106,7 +115,9 @@ describe("shapeResults", () => {
         posts__content: null,
       },
     ];
-    const includeClause: IncludeClause = { posts: true };
+    const includeClause: EnhancedIncludeClause = {
+      posts: { relationTable: postsTable, options: true },
+    };
     const shaped = shapeResults(rawData, usersTable, includeClause);
 
     expect(shaped).toHaveLength(1);
@@ -157,7 +168,9 @@ describe("shapeResults", () => {
         posts__content: "Content 3",
       },
     ];
-    const includeClause: IncludeClause = { posts: true };
+    const includeClause: EnhancedIncludeClause = {
+      posts: { relationTable: postsTable, options: true },
+    };
     const shaped = shapeResults(rawData, usersTable, includeClause);
 
     expect(shaped).toHaveLength(3);
@@ -195,7 +208,12 @@ describe("shapeResults", () => {
         posts__title: "Post 1",
       },
     ];
-    const includeClause: IncludeClause = { posts: { select: { title: true } } }; // This clause is for QB, shaper just sees posts__title
+    const includeClause: EnhancedIncludeClause = {
+      posts: {
+        relationTable: postsTable,
+        options: { select: { title: true } },
+      },
+    }; // This clause is for QB, shaper just sees posts__title
     const shaped = shapeResults(rawData, usersTable, includeClause);
 
     expect(shaped).toHaveLength(1);
@@ -248,7 +266,9 @@ describe("shapeResults", () => {
         sub_tasks__name: null,
       },
     ];
-    const includeClause: IncludeClause = { sub_tasks: true };
+    const includeClause: EnhancedIncludeClause = {
+      sub_tasks: { relationTable: subTasksTable, options: true },
+    };
     const shaped = shapeResults(rawData, tasksTable, includeClause);
 
     expect(shaped).toHaveLength(2);

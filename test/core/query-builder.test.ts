@@ -814,3 +814,73 @@ describe("QueryBuilder Eager Loading (Include) with Aliasing", () => {
     );
   });
 });
+
+describe("QueryBuilder Fluent Join (joinRelation) Operations", () => {
+  let qbFluent: QueryBuilder<typeof usersTable>;
+
+  beforeEach(() => {
+    qbFluent = new QueryBuilder<typeof usersTable>();
+  });
+
+  // usersTable (parent) to postsTable (child)
+  it("PostgreSQL: should generate LEFT JOIN for one-to-many (users to posts)", () => {
+    const preparedQuery = qbFluent
+      .select({
+        userName: usersTable.columns.name,
+        postTitle: postsTable.columns.title,
+      })
+      .from(usersTable)
+      .leftJoinRelation("posts") // posts is the name of the related table
+      .prepare("postgres");
+
+    expect(preparedQuery.sql).toBe(
+      'SELECT "t1"."name" AS "userName", "t2"."title" AS "postTitle" FROM "users" AS "t1" LEFT JOIN "posts" AS "t2" ON "t2"."user_id" = "t1"."id"'
+    );
+  });
+
+  it("Spanner: should generate INNER JOIN for one-to-many (users to posts)", () => {
+    const preparedQuery = qbFluent
+      .select({
+        userName: usersTable.columns.name,
+        postTitle: postsTable.columns.title,
+      })
+      .from(usersTable)
+      .innerJoinRelation("posts")
+      .prepare("spanner");
+    expect(preparedQuery.sql).toBe(
+      "SELECT `t1`.`name` AS `userName`, `t2`.`title` AS `postTitle` FROM `users` AS `t1` INNER JOIN `posts` AS `t2` ON `t2`.`user_id` = `t1`.`id`"
+    );
+  });
+
+  // postsTable (child) to usersTable (parent)
+  it("PostgreSQL: should generate LEFT JOIN for many-to-one (posts to users)", () => {
+    const qbPosts = new QueryBuilder<typeof postsTable>();
+    const preparedQuery = qbPosts
+      .select({
+        postTitle: postsTable.columns.title,
+        userName: usersTable.columns.name,
+      })
+      .from(postsTable)
+      .leftJoinRelation("users") // users is the name of the related table
+      .prepare("postgres");
+
+    expect(preparedQuery.sql).toBe(
+      'SELECT "t1"."title" AS "postTitle", "t2"."name" AS "userName" FROM "posts" AS "t1" LEFT JOIN "users" AS "t2" ON "t1"."user_id" = "t2"."id"'
+    );
+  });
+
+  it("Spanner: should generate INNER JOIN for many-to-one (posts to users)", () => {
+    const qbPosts = new QueryBuilder<typeof postsTable>();
+    const preparedQuery = qbPosts
+      .select({
+        postTitle: postsTable.columns.title,
+        userName: usersTable.columns.name,
+      })
+      .from(postsTable)
+      .innerJoinRelation("users")
+      .prepare("spanner");
+    expect(preparedQuery.sql).toBe(
+      "SELECT `t1`.`title` AS `postTitle`, `t2`.`name` AS `userName` FROM `posts` AS `t1` INNER JOIN `users` AS `t2` ON `t1`.`user_id` = `t2`.`id`"
+    );
+  });
+});
