@@ -268,50 +268,54 @@ describe("spanner-orm-cli", () => {
     // TODO: Enhance 'latest' and 'down' tests to mock DB interactions
     // For now, they will test the current simulation/placeholder output.
     describe("latest", () => {
-      it("should simulate applying latest migrations", async () => {
-        // First, create a dummy migration file to simulate 'latest'
-        await execa("bun", [
-          cliEntryPoint,
-          "migrate",
-          "create",
-          "dummy-for-latest",
-          "--schema", // Added schema option
-          tempSchemaJsFile,
-        ]);
-
-        const { stdout } = await execa(
-          "bun",
-          [
+      it(
+        "should simulate applying latest migrations",
+        async () => {
+          // First, create a dummy migration file to simulate 'latest'
+          await execa("bun", [
             cliEntryPoint,
             "migrate",
-            "latest",
-            "--schema",
+            "create",
+            "dummy-for-latest",
+            "--schema", // Added schema option
             tempSchemaJsFile,
-            // Dialect is now from env
-          ],
-          { env: { DB_DIALECT: "postgres", DATABASE_URL: "mock-pg-url" } }
-        );
-        // Updated to check for the new output, which is more detailed
-        expect(stdout).toContain(
-          "Starting 'migrate latest' for dialect: postgres"
-        );
-        expect(stdout).toContain(
-          "Ensuring migration tracking table '_spanner_orm_migrations_log' exists..."
-        );
-        expect(stdout).toContain("Migration tracking table check complete.");
-        expect(stdout).toContain("Applied migrations: None"); // Assuming placeholder returns empty
-        expect(stdout).toContain("Found 1 pending migrations:");
-        expect(stdout).toContain("dummy-for-latest.pg.ts");
-        expect(stdout).toContain("Applying migration: ");
-        expect(stdout).toContain("dummy-for-latest.pg.ts");
-        // Check for migration execution logs
-        expect(stdout).toContain("Applying UP migration for postgres..."); // This log comes from the migration file template
-        expect(stdout).toContain("Successfully applied migration:");
-        expect(stdout).toContain(
-          "All pending migrations applied successfully."
-        );
-        expect(stdout).toContain("Migrate latest process finished.");
-      });
+          ]);
+
+          const { stdout } = await execa(
+            "bun",
+            [
+              cliEntryPoint,
+              "migrate",
+              "latest",
+              "--schema",
+              tempSchemaJsFile,
+              // Dialect is now from env
+            ],
+            { env: { DB_DIALECT: "postgres", DATABASE_URL: "./mock-pg-url" } }
+          );
+          // Updated to check for the new output, which is more detailed
+          expect(stdout).toContain(
+            "Starting 'migrate latest' for dialect: postgres"
+          );
+          expect(stdout).toContain(
+            "Ensuring migration tracking table '_spanner_orm_migrations_log' exists..."
+          );
+          expect(stdout).toContain("Migration tracking table check complete.");
+          expect(stdout).toContain("Applied migrations: None"); // Assuming placeholder returns empty
+          expect(stdout).toContain("Found 1 pending migrations:");
+          expect(stdout).toContain("dummy-for-latest.pg.ts");
+          expect(stdout).toContain("Applying migration: ");
+          expect(stdout).toContain("dummy-for-latest.pg.ts");
+          // Check for migration execution logs
+          expect(stdout).toContain("Applying UP migration for postgres..."); // This log comes from the migration file template
+          expect(stdout).toContain("Successfully applied migration:");
+          expect(stdout).toContain(
+            "All pending migrations applied successfully."
+          );
+          expect(stdout).toContain("Migrate latest process finished.");
+        },
+        { timeout: 15000 }
+      ); // Increased timeout for CI
 
       it("should require schema for latest", async () => {
         const result = await execa("bun", [

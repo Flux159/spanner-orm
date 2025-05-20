@@ -201,13 +201,38 @@ async function handleDdlGeneration(options: DdlOptions) {
   }
 }
 
-function formatDdlForTemplate(ddlStatements: string[]): string {
+function formatDdlForTemplate(
+  ddlStatements: string[] | string[][],
+  dialect: Dialect
+): string {
   if (!ddlStatements || ddlStatements.length === 0) {
     return "    // No DDL statements generated for this migration.";
   }
-  return ddlStatements
-    .map((stmt) => `    await executeSql(\`${stmt.replace(/`/g, "\\`")}\`);`)
-    .join("\n");
+
+  if (dialect === "spanner" && Array.isArray(ddlStatements[0])) {
+    // It's string[][] for Spanner
+    const batches = ddlStatements as string[][];
+    let result = "";
+    batches.forEach((batch, index) => {
+      if (batches.length > 1) {
+        result += `    // --- Batch ${index + 1} ---\n`;
+      }
+      result += batch
+        .map(
+          (stmt) => `    await executeSql(\`${stmt.replace(/`/g, "\\`")}\`);`
+        )
+        .join("\n");
+      if (index < batches.length - 1) {
+        result += "\n"; // Add a newline between batches if not the last one
+      }
+    });
+    return result;
+  } else {
+    // It's string[] for PostgreSQL or Spanner (if not batched, though it should be)
+    return (ddlStatements as string[])
+      .map((stmt) => `    await executeSql(\`${stmt.replace(/`/g, "\\`")}\`);`)
+      .join("\n");
+  }
 }
 
 async function getDatabaseAdapter(): Promise<DatabaseAdapter | null> {
@@ -297,11 +322,11 @@ async function handleMigrateCreate(
   const dialects: Dialect[] = ["postgres", "spanner"];
 
   for (const dialect of dialects) {
-    const upDdl = generateMigrationDDL(upSchemaDiff, dialect);
-    const downDdl = generateMigrationDDL(downSchemaDiff, dialect);
+    const upDdl = generateMigrationDDL(upSchemaDiff, dialect); // Returns string[] or string[][]
+    const downDdl = generateMigrationDDL(downSchemaDiff, dialect); // Returns string[] or string[][]
 
-    const formattedUpDdl = formatDdlForTemplate(upDdl);
-    const formattedDownDdl = formatDdlForTemplate(downDdl);
+    const formattedUpDdl = formatDdlForTemplate(upDdl, dialect);
+    const formattedDownDdl = formatDdlForTemplate(downDdl, dialect);
 
     let template = migrationFileTemplate(dialect);
     template = template.replace("// UP_STATEMENTS_PLACEHOLDER", formattedUpDdl);

@@ -152,10 +152,19 @@ export function sql(strings: TemplateStringsArray, ...values: unknown[]): SQL {
             typeof (value as any).dialectTypes === "object"
           ) {
             // It's a ColumnConfig, interpolate its name as an identifier
-            const colName = (value as ColumnConfig<any, any>).name;
-            result +=
-              (dialect === "postgres" ? `"${colName}"` : `\`${colName}\``) +
-              strings[i + 1];
+            const colConfig = value as ColumnConfig<any, any>;
+            const colName = colConfig.name;
+            let identifier = "";
+            if (colConfig._tableName) {
+              identifier =
+                dialect === "postgres"
+                  ? `"${colConfig._tableName}"."${colName}"`
+                  : `\`${colConfig._tableName}\`.\`${colName}\``;
+            } else {
+              identifier =
+                dialect === "postgres" ? `"${colName}"` : `\`${colName}\``;
+            }
+            result += identifier + strings[i + 1];
           } else {
             // It's some other object, treat as a parameter
             result +=
