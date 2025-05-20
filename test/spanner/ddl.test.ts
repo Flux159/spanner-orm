@@ -159,4 +159,83 @@ describe("Spanner DDL Generator", () => {
       .trim();
     expect(actualSql).toBe(expectedSql);
   });
+
+  it("should generate CREATE TABLE for an interleaved table with ON DELETE CASCADE (Spanner)", () => {
+    // Parent table (not generated in this specific test, but defined for context)
+    // const singers = table("Singers", {
+    //   SingerId: integer("SingerId").primaryKey(),
+    //   FirstName: varchar("FirstName", { length: 100 }),
+    //   LastName: varchar("LastName", { length: 100 }).notNull(),
+    // });
+
+    // Child table, interleaved in Singers
+    const albums = table(
+      "Albums",
+      {
+        SingerId: integer("SingerId").primaryKey(), // Must match parent PK column(s)
+        AlbumId: integer("AlbumId").primaryKey(), // Child's own PK column(s)
+        AlbumTitle: text("AlbumTitle"),
+      },
+      () => ({
+        // Corrected: interleave is in the function's return
+        interleave: {
+          parentTable: "Singers",
+          onDelete: "cascade",
+        },
+      })
+    );
+
+    // PK columns are implicitly NOT NULL.
+    const expectedSql = `CREATE TABLE Albums (
+  SingerId INT64 NOT NULL,
+  AlbumId INT64 NOT NULL,
+  AlbumTitle STRING(MAX)
+) PRIMARY KEY (SingerId, AlbumId),
+  INTERLEAVE IN PARENT Singers ON DELETE CASCADE;`
+      .replace(/\\s+/g, " ")
+      .trim();
+
+    const actualSql = generateCreateTableSpanner(albums)
+      .replace(/\\s+/g, " ")
+      .trim();
+    expect(actualSql).toBe(expectedSql);
+  });
+
+  it("should generate CREATE TABLE for an interleaved table with ON DELETE NO ACTION (Spanner)", () => {
+    // Parent table
+    // const customers = table("Customers", {
+    //   CustomerId: varchar("CustomerId", { length: 36 }).primaryKey(),
+    // });
+
+    // Child table
+    const shoppingCarts = table(
+      "ShoppingCarts",
+      {
+        CustomerId: varchar("CustomerId", { length: 36 }).primaryKey(),
+        CartId: varchar("CartId", { length: 36 }).primaryKey(),
+        LastUpdated: timestamp("LastUpdated"),
+      },
+      () => ({
+        // Corrected: interleave is in the function's return
+        interleave: {
+          parentTable: "Customers",
+          onDelete: "no action",
+        },
+      })
+    );
+
+    const expectedSql = `CREATE TABLE ShoppingCarts (
+  CustomerId STRING(36) NOT NULL,
+  CartId STRING(36) NOT NULL,
+  LastUpdated TIMESTAMP
+) PRIMARY KEY (CustomerId, CartId),
+  INTERLEAVE IN PARENT Customers ON DELETE NO ACTION;`
+      .replace(/\\s+/g, " ")
+      .trim();
+
+    const actualSql = generateCreateTableSpanner(shoppingCarts)
+      .replace(/\\s+/g, " ")
+      .trim();
+    expect(actualSql).toBe(expectedSql);
+  });
 });
