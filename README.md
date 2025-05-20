@@ -4,15 +4,16 @@ A TypeScript ORM for Google Spanner & PostgreSQL, designed for Node.js and Bun. 
 
 ## Key Design Goals
 
-`spanner-orm` is engineered to deliver a seamless experience across different database backends, focusing on these core requirements:
+`spanner-orm` is engineered to deliver a seamless and powerful experience for managing data across PostgreSQL and Google Spanner, focusing on these core requirements:
 
-- **Single Object Model for PostgreSQL & Spanner:** Define your data structures once. `spanner-orm` supports both PostgreSQL (including Pglite) and Google Spanner using a consistent, Drizzle-inspired object model.
-- **Cross-Dialect Migration Generation:** Automatically produce and manage migration files for both PostgreSQL and Google Spanner. Migrations can be executed via a dedicated CLI command or programmatically.
-- **Flexible Query Construction:** Build your database queries using an intuitive query builder, or seamlessly fall back to raw SQL for complex operations or specific dialect features.
-- **Optimized Multi-Dialect SQL Support:**
-  - **Google Spanner:** Leverages Google SQL for optimal performance and feature utilization.
-  - **PostgreSQL/Pglite:** Generates standard, highly compatible SQL.
-    This approach empowers developers to use PostgreSQL for traditional or non-Spanner deployments, Pglite for local development or embedded applications, and Google Spanner for globally scalable web applications, all from a unified codebase.
+- **Unified Object Model for Diverse Deployments:** Define your database schema _once_ using a Drizzle-inspired syntax. This single object model seamlessly supports both PostgreSQL (including Pglite for local/embedded use) and Google Spanner. This allows for consistent data modeling whether you're targeting a local SQLite database, a traditional PostgreSQL server, or a globally distributed Spanner instance.
+- **Cross-Dialect Migration Generation & Execution:** Automatically produce migration files containing the precise DDL for both PostgreSQL and Google Spanner. These migrations can be executed via the `spanner-orm-cli migrate` command or programmatically, ensuring smooth and reliable schema evolution across all supported database systems.
+- **Flexible Query Construction with Raw SQL Fallback:** Construct type-safe queries using an intuitive query builder. For complex scenarios, dialect-specific optimizations, or when you simply prefer writing SQL, seamlessly fall back to raw SQL using the `sql` template literal tag. This offers maximum flexibility without sacrificing the benefits of the ORM.
+- **Optimized SQL for Each Dialect:**
+  - **Google Spanner:** Generates Google SQL, leveraging Spanner's unique features and syntax for optimal performance and compatibility.
+  - **PostgreSQL/Pglite:** Produces standard, highly compatible SQL, ensuring broad compatibility with PostgreSQL versions and Pglite.
+  - This dual-dialect approach empowers developers to use the right database for the right job—Pglite for ultra-lightweight local development or client-side applications, PostgreSQL for traditional server-based deployments, and Google Spanner for applications requiring web-scale, global distribution—all managed from a single, consistent codebase.
+- **Composable Schemas (Drizzle-Inspired):** Easily create and reuse schema components (e.g., for common fields like `id`, `createdAt`, `updatedAt`, or base entity structures like `ownableResource`), promoting DRY principles and highly maintainable data models.
 
 ## Core Features
 
@@ -193,7 +194,7 @@ Make sure to read notes/Phase5.md and notes/GoogleSQLSpanner.md when working on 
 
 ### Phase 6: Support Basic GQL / Graph DDL Dialect for Interleaved tables
 
-- [ ] **T6.1 Implement Graph DDL Dialect for Interleaved Tables**
+- [x] **T6.1 Implement Graph DDL Dialect for Interleaved Tables**
   - **Description:** GQL (Graph Query Language in Spanner) should be doable with regular SQL, we don't need a fluent API for this right now, just the ability to generate the correct migrations for interleaved tables, then run example GQL via the sql / raw template tags.
 
 ### Phase 7: Developer Experience & Fluent API (Future)
