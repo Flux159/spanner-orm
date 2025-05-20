@@ -12,6 +12,8 @@ import type {
   QueryResultRow as AdapterQueryResultRow,
   ConnectionOptions,
 } from "../types/adapter.js"; // Adjusted path
+import type { PreparedQuery, TableConfig } from "../types/common.js"; // Corrected path
+import { shapeResults } from "../core/result-shaper.js"; // Corrected path
 
 // Define a more specific connection options type for PostgreSQL
 export type PgConnectionOptions = PoolConfig | string | ConnectionOptions;
@@ -30,7 +32,7 @@ export interface PgTransactionAdapter {
 }
 
 export class ConcretePgAdapter implements DatabaseAdapter {
-  readonly dialect = "postgres"; // Changed from "pg" to "postgres" to match common.ts Dialect type
+  readonly dialect = "postgres";
   private pool: Pool;
   private isConnected: boolean = false;
 
@@ -38,9 +40,6 @@ export class ConcretePgAdapter implements DatabaseAdapter {
     if (typeof config === "string") {
       this.pool = new Pool({ connectionString: config });
     } else {
-      // Assuming PoolConfig if not string.
-      // ConnectionOptions is generic, so this might need refinement
-      // if ConnectionOptions has a very different structure from PoolConfig.
       this.pool = new Pool(config as PoolConfig);
     }
   }
@@ -51,7 +50,6 @@ export class ConcretePgAdapter implements DatabaseAdapter {
       return;
     }
     try {
-      // Test the connection by trying to get a client
       const client = await this.pool.connect();
       client.release();
       this.isConnected = true;
@@ -100,29 +98,45 @@ export class ConcretePgAdapter implements DatabaseAdapter {
     }
   }
 
-  // Optional transaction methods from DatabaseAdapter
+  async queryPrepared<TTable extends TableConfig<any, any>>(
+    preparedQuery: PreparedQuery<TTable>
+  ): Promise<any[]> {
+    try {
+      const rawResults = await this.query<AdapterQueryResultRow>( // Use the existing query method
+        preparedQuery.sql,
+        preparedQuery.parameters
+      );
+
+      if (preparedQuery.includeClause && preparedQuery.primaryTable) {
+        return shapeResults(
+          rawResults,
+          preparedQuery.primaryTable,
+          preparedQuery.includeClause
+        );
+      }
+      return rawResults;
+    } catch (error) {
+      console.error("Error executing prepared query with pg adapter:", error);
+      throw error;
+    }
+  }
+
   async beginTransaction(): Promise<void> {
-    // This basic adapter doesn't manage client state for transactions outside the callback.
-    // For CLI usage, individual statements are often auto-committed.
-    // A full implementation would require acquiring a client and managing it.
     console.warn(
       "beginTransaction not fully implemented for standalone use in this basic adapter. Use the transaction callback method."
     );
-    // await this.pool.query("BEGIN"); // This would begin a transaction on a pooled client, not ideal here.
   }
 
   async commitTransaction(): Promise<void> {
     console.warn(
       "commitTransaction not fully implemented for standalone use in this basic adapter."
     );
-    // await this.pool.query("COMMIT");
   }
 
   async rollbackTransaction(): Promise<void> {
     console.warn(
       "rollbackTransaction not fully implemented for standalone use in this basic adapter."
     );
-    // await this.pool.query("ROLLBACK");
   }
 
   async transaction<T>(

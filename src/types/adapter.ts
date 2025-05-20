@@ -37,6 +37,15 @@ export interface DatabaseAdapter {
   ): Promise<T[]>;
 
   /**
+   * Executes a prepared query, potentially with result shaping if includes are present.
+   * @param preparedQuery The PreparedQuery object from QueryBuilder.
+   * @returns A promise that resolves to an array of result rows, possibly shaped.
+   */
+  queryPrepared?<TTable extends import("./common.js").TableConfig<any, any>>(
+    preparedQuery: import("./common.js").PreparedQuery<TTable>
+  ): Promise<any[]>; // Return type will be complex with generics later
+
+  /**
    * Begins a transaction.
    * Optional: Not all adapters or scenarios might support/require this directly from the ORM.
    */

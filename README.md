@@ -169,12 +169,16 @@ Make sure to read notes/Phase5.md and notes/GoogleSQLSpanner.md when working on 
   - [x] Implemented Foreign Key DDL generation.
   - [x] **T5.2.1: Basic Relational Awareness in Query Builder:** Allow query methods to understand and correctly alias columns from tables with defined relationships. (Includes aliasing within SQL helper functions).
   - [~] **T5.2.2: Simple Eager Loading (One Level Deep):** Implement fetching of directly related data (e.g., user's posts). Start with one-to-many. (SQL generation complete; result shaping and full type safety pending).
+    - [ ] The advanced TypeScript type safety for the shaped results remains a future enhancement for T5.2.2.
   - [ ] **T5.2.3: Fluent Join API based on Schema Relations:** Enable joins based on pre-defined schema relations for a more ORM-like experience.
 - [x] **T5.3: Performance Optimizations (e.g., batching for Spanner).**
   - [x] Implemented selective DDL batching for Spanner, grouping validating DDLs (e.g., CREATE INDEX, ALTER TABLE ADD/ALTER COLUMN, ADD FOREIGN KEY) into batches of up to 5.
 - [~] **T5.4: Comprehensive Documentation & Examples.** (Ongoing - README updates are part of this, docusaurus is also part of this).
 - [~] **T5.5: Robust Testing Suite (unit & integration tests).** (Ongoing - Unit tests have been added for current features features, but new features will need more unit tests).
 - [~] **T5.6: Setup Docusaurus Documentation:** Implement Docusaurus for comprehensive, versioned documentation, deployable to GitHub Pages. Started, but need to add comprehensive docs.
+- [ ] **T5.7: Incremental Migration Generation:** Enhance `migrate create` to generate migrations based on the difference between the last applied schema state and the current schema definition, rather than always from an empty schema. This involves:
+  - Storing a snapshot of the schema after each migration generation (e.g., `latest.snapshot.json`).
+  - Using this snapshot as the "before" state for the next `migrate create` command.
 
 ### Beyond Phase 5: Future Considerations
 
@@ -330,7 +334,8 @@ npx spanner-orm-cli migrate create add-posts-table --schema ./dist/schema.js
 # This will create files like:
 # ./spanner-orm-migrations/YYYYMMDDHHMMSS-add-posts-table.pg.ts
 # ./spanner-orm-migrations/YYYYMMDDHHMMSS-add-posts-table.spanner.ts
-# These files will be pre-populated with DDL based on changes detected against an empty schema.
+# Currently, these files are pre-populated with DDL based on changes detected against an empty schema.
+# For true incremental migrations (diffing from the last known state), see task T5.7 in the roadmap.
 ```
 
 **2. Apply pending migrations:**
