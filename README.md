@@ -83,18 +83,17 @@ graph TD
 
 1.  **Installation:**
 
-    ```bash
-    # (Once published to npm)
-    # npm install spanner-orm
-    # bun install spanner-orm
-    # yarn add spanner-orm
+Using NPM:
 
-    # For now, clone and build locally:
-    git clone https://github.com/your-repo/spanner-orm.git # Replace with actual repo
-    cd spanner-orm
-    bun install
-    bun run build
-    ```
+```bash
+npm install spanner-orm
+```
+
+Or using Bun:
+
+```
+bun install spanner-orm
+```
 
 2.  **Define your schema (Drizzle-Inspired):** Create a `schema.ts` (or similar) file. `spanner-orm` allows you to define your data model in a way that's familiar to Drizzle ORM users, emphasizing composability and type safety.
 
