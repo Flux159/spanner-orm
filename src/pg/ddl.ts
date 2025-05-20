@@ -1,6 +1,6 @@
 // src/pg/ddl.ts
 
-import type { TableConfig, ColumnConfig } from "../types/common.js"; // Removed SQL import
+import type { TableConfig, ColumnConfig, SQL } from "../types/common.js"; // Added SQL import
 
 function escapeIdentifier(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
@@ -13,11 +13,19 @@ function formatDefaultValue(column: ColumnConfig<unknown, string>): string {
   if (
     typeof column.default === "object" &&
     column.default !== null &&
-    "sql" in column.default
+    (column.default as SQL)._isSQL === true
   ) {
-    // For sql tagged literals like sql`CURRENT_TIMESTAMP`
-    // The 'sql' property already holds the stringified SQL
-    return `DEFAULT ${column.default.sql}`;
+    // For SQL objects created by the sql`` tag
+    return `DEFAULT ${(column.default as SQL).toSqlString("postgres")}`;
+  }
+  if (
+    // This handles the { sql: "RAW_SQL" } case, which might be legacy or for direct use
+    typeof column.default === "object" &&
+    column.default !== null &&
+    "sql" in column.default &&
+    typeof (column.default as { sql: string }).sql === "string"
+  ) {
+    return `DEFAULT ${(column.default as { sql: string }).sql}`;
   }
   if (typeof column.default === "string") {
     return `DEFAULT '${column.default.replace(/'/g, "''")}'`;
@@ -91,20 +99,79 @@ export function generateCreateTablePostgres(tableConfig: TableConfig): string {
       for (const c in tableConfig.columns) {
         if (tableConfig.columns[c].primaryKey) pkCount++;
       }
-      if (pkCount === 1) {
+      if (pkCount === 1 && !tableConfig.compositePrimaryKey) {
+        // Also check no composite PK is defined
         columnSql += " PRIMARY KEY";
+      }
+    }
+
+    if (column.references) {
+      const referencedColumnConfig = column.references.referencesFn();
+      const referencedTableName = referencedColumnConfig._tableName; // Assumes _tableName is populated
+      const referencedColumnName = referencedColumnConfig.name;
+
+      if (!referencedTableName) {
+        console.warn(
+          `Could not determine referenced table name for column "${column.name}" in table "${tableConfig.name}". FK constraint skipped.`
+        );
+      } else {
+        columnSql += ` REFERENCES ${escapeIdentifier(
+          referencedTableName
+        )}(${escapeIdentifier(referencedColumnName)})`;
+        if (column.references.onDelete) {
+          columnSql += ` ON DELETE ${column.references.onDelete.toUpperCase()}`;
+        }
       }
     }
 
     columnsSql.push(columnSql);
   }
 
-  if (primaryKeyColumns.length > 0) {
-    // If primary keys are defined on columns, add a table-level PRIMARY KEY constraint
-    // This handles composite keys better if we extend it later.
-    // For now, Drizzle-style often defines PK on the column itself.
-    // If multiple columns are marked .primaryKey(), this will form a composite PK.
-    columnsSql.push(`PRIMARY KEY (${primaryKeyColumns.join(", ")})`);
+  // Handle composite primary key if defined at table level
+  if (
+    tableConfig.compositePrimaryKey &&
+    tableConfig.compositePrimaryKey.columns.length > 0
+  ) {
+    const compositePkCols =
+      tableConfig.compositePrimaryKey.columns.map(escapeIdentifier);
+    columnsSql.push(`PRIMARY KEY (${compositePkCols.join(", ")})`);
+  } else if (primaryKeyColumns.length > 0 && !tableConfig.compositePrimaryKey) {
+    // Fallback to primaryKeyColumns if no composite PK is explicitly set
+    // This handles the case where PKs are only marked on columns.
+    // If a composite PK is set, it takes precedence.
+    if (
+      primaryKeyColumns.length > 1 ||
+      (primaryKeyColumns.length === 1 &&
+        Object.values(tableConfig.columns).find(
+          (c) =>
+            c.name === primaryKeyColumns[0].replace(/"/g, "") &&
+            c.primaryKey &&
+            Object.values(tableConfig.columns).filter((c) => c.primaryKey)
+              .length > 1
+        ))
+    ) {
+      // Only add table-level PK if it's composite, or if single PK wasn't added inline
+      // The inline PK is added if pkCount === 1. If pkCount > 1, it means multiple columns are marked primaryKey
+      // but not as a composite key, which is an invalid state we should ideally prevent earlier.
+      // For now, this ensures a table-level PK for multiple individually marked PKs.
+      columnsSql.push(`PRIMARY KEY (${primaryKeyColumns.join(", ")})`);
+    } else if (primaryKeyColumns.length === 1) {
+      // Check if the single PK was already added inline
+      const pkColName = primaryKeyColumns[0].replace(/"/g, "");
+      const pkCol = Object.values(tableConfig.columns).find(
+        (c) => c.name === pkColName
+      );
+      if (
+        pkCol &&
+        !columnsSql.find(
+          (s) =>
+            s.startsWith(escapeIdentifier(pkColName)) &&
+            s.includes(" PRIMARY KEY")
+        )
+      ) {
+        columnsSql.push(`PRIMARY KEY (${primaryKeyColumns.join(", ")})`);
+      }
+    }
   }
 
   // Handle table-level indexes

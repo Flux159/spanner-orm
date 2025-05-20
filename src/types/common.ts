@@ -26,7 +26,7 @@ export interface ColumnConfig<T, TName extends string = string> {
     spanner: string; // e.g., 'STRING', 'INT64', 'TIMESTAMP'
   };
   notNull?: boolean;
-  default?: T | (() => T) | { sql: string }; // SQL string for default like sql`CURRENT_TIMESTAMP`
+  default?: T | (() => T) | SQL | { sql: string }; // Added SQL here, {sql: string} is for DDL representation of raw SQL
   primaryKey?: boolean; // For single column primary key
   unique?: boolean; // For unique constraints on a single column
   references?: ForeignKeyConfig;

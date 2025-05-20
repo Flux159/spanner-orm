@@ -3,6 +3,10 @@
 import path from "path";
 import fs from "fs/promises";
 import { Command, Option } from "commander";
+import { ConcretePgAdapter } from "./pg/adapter.js";
+import { ConcretePgliteAdapter } from "./pglite/adapter.js";
+import { ConcreteSpannerAdapter } from "./spanner/adapter.js";
+import type { DatabaseAdapter } from "./types/adapter.js";
 // import { generateCreateTablePostgres } from "./pg/ddl.js"; // Will be handled by migration-generator
 // import { generateCreateTableSpanner } from "./spanner/ddl.js"; // Will be handled by migration-generator
 import { generateSchemaSnapshot } from "./core/snapshot.js";
@@ -20,6 +24,7 @@ import type {
   Dialect,
   SchemaSnapshot, // Added
   MigrationExecutor, // Now needed
+  // Dialect, // Removed duplicate
 } from "./types/common.js";
 
 const MIGRATIONS_DIR = "spanner-orm-migrations";
@@ -41,13 +46,13 @@ interface DdlOptions {
 
 interface MigrateLatestOptions {
   schema: string;
-  dialect: Dialect;
+  // dialect: Dialect; // Will be determined by DB_DIALECT
   // Potentially add --dry-run later
 }
 
 interface MigrateDownOptions {
   schema: string;
-  dialect: Dialect;
+  // dialect: Dialect; // Will be determined by DB_DIALECT
   // Potentially add --steps <number> later
 }
 
@@ -205,6 +210,69 @@ function formatDdlForTemplate(ddlStatements: string[]): string {
     .join("\n");
 }
 
+async function getDatabaseAdapter(): Promise<DatabaseAdapter | null> {
+  const dbDialect = process.env.DB_DIALECT as Dialect | undefined;
+
+  if (!dbDialect) {
+    console.error(
+      "Error: DB_DIALECT environment variable is not set. Please set it to 'postgres' or 'spanner'."
+    );
+    return null;
+  }
+
+  let adapter: DatabaseAdapter;
+
+  try {
+    if (dbDialect === "postgres") {
+      const databaseUrl = process.env.DATABASE_URL;
+      if (!databaseUrl) {
+        console.error(
+          "Error: DATABASE_URL environment variable is not set for postgres dialect."
+        );
+        return null;
+      }
+      if (
+        databaseUrl.startsWith("postgres://") ||
+        databaseUrl.startsWith("postgresql://")
+      ) {
+        adapter = new ConcretePgAdapter(databaseUrl);
+      } else {
+        // Assume PGlite if not a postgres connection string
+        adapter = new ConcretePgliteAdapter(databaseUrl); // dataDir is the path
+      }
+    } else if (dbDialect === "spanner") {
+      const projectId = process.env.SPANNER_PROJECT_ID;
+      const instanceId = process.env.SPANNER_INSTANCE_ID;
+      const databaseId = process.env.SPANNER_DATABASE_ID;
+
+      if (!projectId || !instanceId || !databaseId) {
+        console.error(
+          "Error: SPANNER_PROJECT_ID, SPANNER_INSTANCE_ID, or SPANNER_DATABASE_ID environment variables are not set for spanner dialect."
+        );
+        return null;
+      }
+      adapter = new ConcreteSpannerAdapter({
+        projectId,
+        instanceId,
+        databaseId,
+      });
+    } else {
+      console.error(
+        `Error: Unsupported DB_DIALECT: ${dbDialect}. Must be 'postgres' or 'spanner'.`
+      );
+      return null;
+    }
+
+    console.log(`Connecting to ${dbDialect}...`);
+    await adapter.connect();
+    console.log(`Successfully connected to ${dbDialect}.`);
+    return adapter;
+  } catch (error) {
+    console.error(`Error connecting to ${dbDialect}:`, error);
+    return null;
+  }
+}
+
 async function handleMigrateCreate(
   name: string,
   options: MigrateCreateOptions
@@ -258,40 +326,20 @@ async function handleMigrateCreate(
 }
 
 async function handleMigrateLatest(options: MigrateLatestOptions) {
-  const { dialect, schema: schemaPath } = options;
+  const { schema: schemaPath } = options;
+  const adapter = await getDatabaseAdapter();
+
+  if (!adapter) {
+    console.error("Failed to initialize database adapter. Exiting.");
+    process.exit(1);
+  }
+  const dialect = adapter.dialect; // Get dialect from the adapter
   console.log(
     `Starting 'migrate latest' for dialect: ${dialect} using schema: ${schemaPath}`
   );
 
-  // TODO: Step 1: Establish database connection using the appropriate adapter.
-  // This is a placeholder. Actual connection logic will depend on adapter implementation.
-  // const db = getAdapter(dialect, connectionOptions);
-  // const adapterExecute = db.execute.bind(db);
-  // const adapterQuery = db.query.bind(db);
-
-  // Placeholder for actual SQL command execution
-  const executeCmdSql = async (
-    sql: string,
-    params?: unknown[]
-  ): Promise<void> => {
-    console.log(`Executing Command SQL (${dialect}): ${sql}`, params || "");
-    await Promise.resolve();
-  };
-
-  // Placeholder for actual SQL query execution (returning rows)
-  const queryRowsSql = async <T extends { [column: string]: any }>(
-    sqlCmd: string, // Renamed to avoid conflict with outer scope 'sql' if any
-    params?: unknown[]
-  ): Promise<T[]> => {
-    console.log(`Executing Query SQL (${dialect}): ${sqlCmd}`, params || "");
-    if (sqlCmd.includes(`SELECT name FROM ${MIGRATION_TABLE_NAME}`)) {
-      console.log(
-        "Simulating getAppliedMigrationNames: returning empty list for placeholder."
-      );
-      return Promise.resolve([]); // Simulate empty for now
-    }
-    return Promise.resolve([]); // Default empty result for other queries
-  };
+  const executeCmdSql = adapter.execute.bind(adapter);
+  const queryRowsSql = adapter.query.bind(adapter);
 
   try {
     // Step 2: Ensure migration tracking table exists.
@@ -301,30 +349,21 @@ async function handleMigrateLatest(options: MigrateLatestOptions) {
     const createTableDdlStatements = getCreateMigrationTableDDL(dialect);
     for (const ddl of createTableDdlStatements) {
       try {
-        await executeCmdSql(ddl); // Use executeCmdSql for DDL
+        await executeCmdSql(ddl);
       } catch (error: any) {
-        // For Spanner, "AlreadyExists" is a common error if table is there.
-        // For PG, "IF NOT EXISTS" handles it.
-        // A more robust check might query information_schema first for Spanner.
         if (
-          dialect === "spanner" &&
-          error.message &&
-          error.message.includes("AlreadyExists")
+          (dialect === "spanner" &&
+            error.message &&
+            error.message.includes("AlreadyExists")) ||
+          (dialect === "postgres" && // Covers pg and pglite
+            error.message &&
+            error.message.includes("already exists"))
         ) {
           console.log(
-            `Migration table '${MIGRATION_TABLE_NAME}' already exists (Spanner).`
-          );
-        } else if (
-          dialect === "postgres" &&
-          error.message &&
-          error.message.includes("already exists")
-        ) {
-          // This case should ideally not happen due to "IF NOT EXISTS"
-          console.log(
-            `Migration table '${MIGRATION_TABLE_NAME}' already exists (PostgreSQL).`
+            `Migration table '${MIGRATION_TABLE_NAME}' already exists.`
           );
         } else {
-          throw error; // Re-throw other errors
+          throw error;
         }
       }
     }
@@ -332,7 +371,7 @@ async function handleMigrateLatest(options: MigrateLatestOptions) {
 
     // Step 3: Get already applied migrations.
     const appliedMigrationNames = await getAppliedMigrationNames(
-      queryRowsSql, // Use queryRowsSql here
+      queryRowsSql,
       dialect
     );
     console.log(
@@ -341,7 +380,7 @@ async function handleMigrateLatest(options: MigrateLatestOptions) {
     );
 
     // Step 4: Read all migration file names from MIGRATIONS_DIR.
-    await ensureMigrationsDirExists(); // Ensure directory exists before reading
+    await ensureMigrationsDirExists();
     const allMigrationFiles = await fs.readdir(MIGRATIONS_DIR);
     const dialectSuffix = `.${dialect === "postgres" ? "pg" : dialect}.ts`;
 
@@ -351,11 +390,11 @@ async function handleMigrateLatest(options: MigrateLatestOptions) {
           file.endsWith(dialectSuffix) &&
           !appliedMigrationNames.includes(file.replace(dialectSuffix, ""))
       )
-      .sort(); // Sort chronologically by filename
+      .sort();
 
     if (pendingMigrations.length === 0) {
       console.log("No pending migrations to apply.");
-      return;
+      return; // Early exit if no pending migrations
     }
 
     console.log(
@@ -383,17 +422,18 @@ async function handleMigrateLatest(options: MigrateLatestOptions) {
           );
         }
 
-        // TODO: Implement transaction management per migration if possible.
-        // await adapter.beginTransaction();
-        await migrationModule.up(executeCmdSql, dialect); // Pass executeCmdSql to migration
+        // Transaction handling can be complex and adapter-specific.
+        // For simplicity, we'll assume individual statements are atomic or migrations handle their own transactions.
+        // if (adapter.beginTransaction) await adapter.beginTransaction();
+        await migrationModule.up(executeCmdSql, dialect);
         await recordMigrationApplied(executeCmdSql, migrationName, dialect);
-        // await adapter.commitTransaction();
+        // if (adapter.commitTransaction) await adapter.commitTransaction();
         console.log(`Successfully applied migration: ${migrationFile}`);
       } catch (error) {
-        // await db.rollbackTransaction();
+        // if (adapter.rollbackTransaction) await adapter.rollbackTransaction();
         console.error(`Failed to apply migration ${migrationFile}:`, error);
         console.error("Migration process halted due to error.");
-        process.exit(1); // Exit on first error
+        process.exit(1);
       }
     }
 
@@ -402,67 +442,33 @@ async function handleMigrateLatest(options: MigrateLatestOptions) {
     console.error("Error during migration process:", error);
     process.exit(1);
   } finally {
-    // TODO: Step 6: Close DB connection
-    // await db.close();
+    if (adapter) {
+      await adapter.disconnect();
+      console.log("Database connection closed.");
+    }
     console.log("Migrate latest process finished.");
   }
 }
 
 async function handleMigrateDown(options: MigrateDownOptions) {
-  const { dialect, schema: schemaPath } = options;
+  const { schema: schemaPath } = options;
+  const adapter = await getDatabaseAdapter();
+
+  if (!adapter) {
+    console.error("Failed to initialize database adapter. Exiting.");
+    process.exit(1);
+  }
+  const dialect = adapter.dialect;
   console.log(
     `Starting 'migrate down' for dialect: ${dialect} using schema: ${schemaPath}`
   );
 
-  // TODO: Step 1: Establish database connection (Placeholder)
-  // const db = getAdapter(dialect, connectionOptions);
-  // const adapterExecute = db.execute.bind(db);
-  // const adapterQuery = db.query.bind(db);
-
-  // Placeholder for actual SQL command execution
-  const executeCmdSql = async (
-    sql: string,
-    params?: unknown[]
-  ): Promise<void> => {
-    console.log(`Executing Command SQL (${dialect}): ${sql}`, params || "");
-    await Promise.resolve();
-  };
-
-  // Placeholder for actual SQL query execution (returning rows)
-  const queryRowsSql = async <T extends { [column: string]: any }>(
-    sqlCmd: string,
-    params?: unknown[]
-  ): Promise<T[]> => {
-    console.log(`Executing Query SQL (${dialect}): ${sqlCmd}`, params || "");
-    if (sqlCmd.includes(`SELECT name FROM ${MIGRATION_TABLE_NAME}`)) {
-      // Simulate that 'dummy-for-down' (or whatever the test creates) was the last applied.
-      // This requires knowing what the test will create or making the mock more sophisticated.
-      // For now, let's assume the test will create a migration that starts with the current timestamp.
-      // This is still a bit fragile for a generic placeholder.
-      // A better mock would be injected or configured by the test.
-      // For the current test structure, we need to make this mock aware of 'dummy-for-down'.
-      // Let's make it return a name that the test setup would create.
-      // The test creates "dummy-for-down". We need the timestamp prefix.
-      // This is hard to do reliably here.
-      // The test should mock getAppliedMigrationNames directly if it needs specific behavior.
-      // For now, let's keep the previous mock and adjust the test to create the file that this mock expects.
-      const mockLastName = "00000000000000-mock-last-migration";
-      console.log(
-        `Simulating getAppliedMigrationNames for 'down': returning ['${mockLastName}'].`
-      );
-      return Promise.resolve([{ name: mockLastName }] as unknown as T[]);
-    }
-    return Promise.resolve([]);
-  };
+  const executeCmdSql = adapter.execute.bind(adapter);
+  const queryRowsSql = adapter.query.bind(adapter);
 
   try {
-    // Step 2: Ensure migration tracking table exists (it should, if migrations were applied)
-    // We don't try to create it here; if it's missing, 'down' doesn't make sense.
-    // A more robust check might verify its existence and throw if not found.
-
-    // Step 3: Get all applied migrations, sorted chronologically.
     const appliedMigrationNames = await getAppliedMigrationNames(
-      queryRowsSql, // Use queryRowsSql here
+      queryRowsSql,
       dialect
     );
 
@@ -470,25 +476,12 @@ async function handleMigrateDown(options: MigrateDownOptions) {
       console.log(
         "No migrations have been applied for this dialect. Nothing to revert."
       );
-      return;
+      return; // Early exit
     }
 
-    // Step 4: Identify the last applied migration.
-    // getAppliedMigrationNames should return them sorted, so the last one is at the end.
-    // However, the current placeholder returns an empty array.
-    // For now, let's assume it returns a populated, sorted array for the logic.
-    // If using the placeholder:
-    // const lastMigrationName = "YYYYMMDDHHMMSS-some-migration-name"; // Manual placeholder if getApplied is mocked
-    // For real use:
     const lastMigrationName =
       appliedMigrationNames[appliedMigrationNames.length - 1];
-    if (!lastMigrationName) {
-      // Should not happen if length > 0, but good check
-      console.log(
-        "Could not determine the last applied migration. (Placeholder issue?)"
-      );
-      return;
-    }
+    // No need to check !lastMigrationName as length > 0 is confirmed
 
     const dialectSuffix = `.${dialect === "postgres" ? "pg" : dialect}.ts`;
     const migrationFile = `${lastMigrationName}${dialectSuffix}`;
@@ -500,7 +493,6 @@ async function handleMigrateDown(options: MigrateDownOptions) {
       migrationFile
     );
 
-    // Check if migration file exists
     if (!(await fs.stat(migrationPath).catch(() => false))) {
       console.error(
         `Migration file ${migrationFile} not found in ./${MIGRATIONS_DIR}. Cannot revert.`
@@ -521,14 +513,13 @@ async function handleMigrateDown(options: MigrateDownOptions) {
         );
       }
 
-      // TODO: Implement transaction management.
-      // await adapter.beginTransaction();
-      await migrationModule.down(executeCmdSql, dialect); // Pass executeCmdSql to migration
+      // if (adapter.beginTransaction) await adapter.beginTransaction();
+      await migrationModule.down(executeCmdSql, dialect);
       await recordMigrationReverted(executeCmdSql, lastMigrationName, dialect);
-      // await adapter.commitTransaction();
+      // if (adapter.commitTransaction) await adapter.commitTransaction();
       console.log(`Successfully reverted migration: ${migrationFile}`);
     } catch (error) {
-      // await db.rollbackTransaction();
+      // if (adapter.rollbackTransaction) await adapter.rollbackTransaction();
       console.error(`Failed to revert migration ${migrationFile}:`, error);
       console.error("Migration down process halted due to error.");
       process.exit(1);
@@ -537,7 +528,10 @@ async function handleMigrateDown(options: MigrateDownOptions) {
     console.error("Error during migrate down process:", error);
     process.exit(1);
   } finally {
-    // TODO: Close DB connection
+    if (adapter) {
+      await adapter.disconnect();
+      console.log("Database connection closed.");
+    }
     console.log("Migrate down process finished.");
   }
 }
@@ -581,30 +575,26 @@ migrateCommand
 
 migrateCommand
   .command("latest")
-  .description("Apply all pending migrations.")
+  .description(
+    "Apply all pending migrations. DB_DIALECT environment variable must be set."
+  )
   .requiredOption(
-    "-s, --schema <path>", // Schema might be needed for context or validation
+    "-s, --schema <path>",
     "Path to the schema file (e.g., ./dist/schema.js)"
   )
-  .addOption(
-    new Option("-d, --dialect <dialect>", "SQL dialect to apply migrations for")
-      .choices(["postgres", "spanner"] as const)
-      .makeOptionMandatory(true)
-  )
+  // Dialect option removed, will be inferred from DB_DIALECT
   .action(handleMigrateLatest);
 
 migrateCommand
   .command("down")
-  .description("Revert the last applied migration.")
+  .description(
+    "Revert the last applied migration. DB_DIALECT environment variable must be set."
+  )
   .requiredOption(
-    "-s, --schema <path>", // Schema might be needed for context or validation
+    "-s, --schema <path>",
     "Path to the schema file (e.g., ./dist/schema.js)"
   )
-  .addOption(
-    new Option("-d, --dialect <dialect>", "SQL dialect to revert migration for")
-      .choices(["postgres", "spanner"] as const)
-      .makeOptionMandatory(true)
-  )
+  // Dialect option removed, will be inferred from DB_DIALECT
   .action(handleMigrateDown);
 
 program.parseAsync(process.argv).catch((err) => {

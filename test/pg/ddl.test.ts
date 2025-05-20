@@ -33,9 +33,8 @@ describe("PostgreSQL DDL Generator", () => {
   "is_admin" BOOLEAN DEFAULT false,
   "bio" TEXT,
   "settings" JSONB DEFAULT '{"theme":"light"}',
-  "last_login" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY ("id")
-);`
+  "last_login" TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);` // Removed table-level PRIMARY KEY for single PK
       .replace(/\\s+/g, " ")
       .trim(); // Normalize whitespace for comparison
 
@@ -73,9 +72,8 @@ describe("PostgreSQL DDL Generator", () => {
   "sku" VARCHAR(50) NOT NULL UNIQUE,
   "is_active" BOOLEAN DEFAULT true,
   "data" JSONB,
-  PRIMARY KEY ("product_id"),
   CONSTRAINT "uq_product_sku" UNIQUE ("sku")
-);`
+);` // Removed table-level PRIMARY KEY for single PK, unique constraint from index is fine
       .replace(/\\s+/g, " ")
       .trim();
 
@@ -120,9 +118,8 @@ describe("PostgreSQL DDL Generator", () => {
     const expectedSql = `CREATE TABLE "categories" (
   "id" INTEGER NOT NULL PRIMARY KEY,
   "name" VARCHAR(100) NOT NULL,
-  PRIMARY KEY ("id"),
   CONSTRAINT "uq_categories_name" UNIQUE ("name")
-);`
+);` // Removed table-level PRIMARY KEY for single PK
       .replace(/\\s+/g, " ")
       .trim();
     const actualSql = generateCreateTablePostgres(categories)
@@ -136,9 +133,8 @@ describe("PostgreSQL DDL Generator", () => {
       'column with quotes"': text('col"umn').primaryKey(),
     });
     const expectedSql = `CREATE TABLE "table with spaces" (
-  "col""umn" TEXT NOT NULL PRIMARY KEY,
-  PRIMARY KEY ("col""umn")
-);`
+  "col""umn" TEXT NOT NULL PRIMARY KEY
+);` // Removed table-level PRIMARY KEY for single PK
       .replace(/\\s+/g, " ")
       .trim();
     const actualSql = generateCreateTablePostgres(weirdTable)
