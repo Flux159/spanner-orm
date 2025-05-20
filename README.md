@@ -171,15 +171,15 @@ Make sure to read notes/Phase5.md and notes/GoogleSQLSpanner.md when working on 
   - [x] Implemented `uuid()` helper function.
   - [x] Implemented Foreign Key DDL generation.
   - [x] **T5.2.1: Basic Relational Awareness in Query Builder:** Allow query methods to understand and correctly alias columns from tables with defined relationships. (Includes aliasing within SQL helper functions).
-  - [~] **T5.2.2: Simple Eager Loading (One Level Deep):** Implement fetching of directly related data (e.g., user's posts). Start with one-to-many. (SQL generation complete; result shaping and full type safety pending).
-    - [ ] The advanced TypeScript type safety for the shaped results remains a future enhancement for T5.2.2.
-  - [ ] **T5.2.3: Fluent Join API based on Schema Relations:** Enable joins based on pre-defined schema relations for a more ORM-like experience.
+  - [x] **T5.2.2: Simple Eager Loading (One Level Deep):** Implement fetching of directly related data (e.g., user's posts). Start with one-to-many. (SQL generation complete; result shaping and full type safety pending).
+    - [x] The advanced TypeScript type safety for the shaped results remains a future enhancement for T5.2.2.
+  - [x] **T5.2.3: Fluent Join API based on Schema Relations:** Enable joins based on pre-defined schema relations for a more ORM-like experience.
 - [x] **T5.3: Performance Optimizations (e.g., batching for Spanner).**
   - [x] Implemented selective DDL batching for Spanner, grouping validating DDLs (e.g., CREATE INDEX, ALTER TABLE ADD/ALTER COLUMN, ADD FOREIGN KEY) into batches of up to 5.
 - [~] **T5.4: Comprehensive Documentation & Examples.** (Ongoing - README updates are part of this, docusaurus is also part of this).
 - [~] **T5.5: Robust Testing Suite (unit & integration tests).** (Ongoing - Unit tests have been added for current features features, but new features will need more unit tests).
 - [~] **T5.6: Setup Docusaurus Documentation:** Implement Docusaurus for comprehensive, versioned documentation, deployable to GitHub Pages. Started, but need to add comprehensive docs.
-- [ ] **T5.7: Incremental Migration Generation:** Enhance `migrate create` to generate migrations based on the difference between the last applied schema state and the current schema definition, rather than always from an empty schema. This involves:
+- [x] **T5.7: Incremental Migration Generation:** Enhance `migrate create` to generate migrations based on the difference between the last applied schema state and the current schema definition, rather than always from an empty schema. This involves:
   - Storing a snapshot of the schema after each migration generation (e.g., `latest.snapshot.json`).
   - Using this snapshot as the "before" state for the next `migrate create` command.
 
@@ -190,6 +190,24 @@ Make sure to read notes/Phase5.md and notes/GoogleSQLSpanner.md when working on 
   - Exploration of PostgreSQL extensions for feature parity (e.g., Apache AGE for graph capabilities).
 - **Further Performance Enhancements.**
 - **Community-Driven Features.**
+
+### Phase 6: Support Basic GQL / Graph DDL Dialect for Interleaved tables
+
+- [ ] **T6.1 Implement Graph DDL Dialect for Interleaved Tables**
+  - **Description:** GQL (Graph Query Language in Spanner) should be doable with regular SQL, we don't need a fluent API for this right now, just the ability to generate the correct migrations for interleaved tables, then run example GQL via the sql / raw template tags.
+
+### Phase 7: Developer Experience & Fluent API (Future)
+
+- [ ] **T7.1: Implement Fluent Database Interaction API (`db` object)**
+  - **Description:** Develop a high-level fluent API, typically exposed as a `db` object, that simplifies database interactions. This API will wrap the `QueryBuilder` and the `DatabaseAdapter`, allowing users to write chainable queries that are directly `await`-able (thenable) for execution against the database.
+  - **Key Features:**
+    - Instantiate with a configured `DatabaseAdapter` (e.g., `new OrmClient(adapter)`).
+    - Support for `db.select()`, `db.insert()`, `db.update()`, `db.deleteFrom()`, and `db.raw()`.
+    - Methods return a chainable and thenable `ExecutableQuery` object.
+    - Seamlessly integrates query building, preparation, execution, and (for SELECTs) result shaping.
+    - Provides strong TypeScript inference for query results.
+    - Ensures a consistent API experience across PostgreSQL, Pglite, and Spanner.
+  - **Impact:** Greatly improves the developer experience by providing a more intuitive and common ORM interaction pattern.
 
 ## Getting Started
 
