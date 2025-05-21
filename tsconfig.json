@@ -12,6 +12,8 @@
     "skipLibCheck": true,
     "noEmit": false,
     "sourceMap": true,
+    "declaration": true,
+    "declarationDir": "dist",
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
