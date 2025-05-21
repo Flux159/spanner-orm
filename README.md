@@ -145,7 +145,7 @@ bun install spanner-orm
       ...baseModel,
       userId: uuid("user_id") // Assuming user_id is also a UUID
         .notNull()
-        .references(() => users.id, { onDelete: "cascade" }),
+        .references(() => users.columns.id, { onDelete: "cascade" }),
     };
 
     // For resources that have visibility permissions
@@ -174,8 +174,11 @@ bun install spanner-orm
       },
       (t) => ({
         indexes: [
-          index({ columns: [t.fileType] }), // Example non-unique index
-          uniqueIndex({ name: "uq_gcs_object", columns: [t.gcsObjectName] }), // Example unique index
+          index({ columns: [t.fileType.name] }), // Example non-unique index
+          uniqueIndex({
+            name: "uq_gcs_object",
+            columns: [t.gcsObjectName.name],
+          }), // Example unique index
         ],
       })
     );
@@ -197,10 +200,10 @@ Once you have defined your schema (e.g., in `src/schema.ts`), you can generate D
 # The CLI will be available via the 'bin' script in package.json
 
 # Generate PostgreSQL DDL
-npx spanner-orm-cli ddl --schema ./path/to/your/schema.ts --dialect pg
+npx spanner-orm-cli ddl --schema ./path/to/your/schema.ts --dialect postgres
 
 # Example with a schema file in dist (after build) and output to file
-npx spanner-orm-cli ddl --schema ./dist/schema.js --dialect pg --output ./generated-pg.sql
+npx spanner-orm-cli ddl --schema ./dist/schema.js --dialect postgres --output ./generated-pg.sql
 
 # Generate Spanner DDL
 npx spanner-orm-cli ddl --schema ./dist/schema.js --dialect spanner
