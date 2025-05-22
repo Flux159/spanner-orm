@@ -74,5 +74,3 @@ export * from "./core/functions.js";
 // Migration specific exports (if any are intended for programmatic use)
 // export * from './core/migration-generator';
 // export * from './core/migration-meta';
-
-console.log("spanner-orm loaded"); // Optional: a log to confirm loading

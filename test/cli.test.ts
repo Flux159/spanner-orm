@@ -277,8 +277,8 @@ describe("spanner-orm-cli", () => {
           expect(content).toContain(") PRIMARY KEY (sku)");
 
           // Check for DOWN DDL (Spanner)
-          expect(content).toContain("DROP TABLE products;");
-          expect(content).toContain("DROP TABLE users;");
+          expect(content).toContain("await executeSql(`DROP TABLE products`)");
+          expect(content).toContain("await executeSql(`DROP TABLE users`)");
         }
 
         // Verify snapshot was created
@@ -352,11 +352,15 @@ describe("spanner-orm-cli", () => {
             "utf-8"
           );
           // UP should only add the age column
-          expect(content).toContain("ALTER TABLE users ADD COLUMN age INT64;");
+          expect(content).toContain(
+            "await executeSql(`ALTER TABLE users ADD COLUMN age INT64`)"
+          );
           expect(content).not.toContain("CREATE TABLE users"); // Should not recreate table
           expect(content).not.toContain("CREATE TABLE products");
           // DOWN should only remove the age column
-          expect(content).toContain("ALTER TABLE users DROP COLUMN age;");
+          expect(content).toContain(
+            "await executeSql(`ALTER TABLE users DROP COLUMN age`)"
+          );
         }
 
         // Verify snapshot was updated for V2
@@ -444,12 +448,14 @@ describe("spanner-orm-cli", () => {
           expect(content).toContain("orderId INT64 NOT NULL");
           expect(content).toContain("userId INT64");
           expect(content).toContain(
-            "FOREIGN KEY (userId) REFERENCES users (id)"
+            "FOREIGN KEY (userId) REFERENCES users (id)" // This is part of CREATE TABLE or ALTER TABLE
           );
           expect(content).not.toContain("CREATE TABLE users");
-          expect(content).not.toContain("ALTER TABLE users ADD COLUMN age"); // This was in previous migration
+          expect(content).not.toContain(
+            "await executeSql(`ALTER TABLE users ADD COLUMN age INT64`)"
+          ); // This was in previous migration
           // DOWN should only drop the orders table
-          expect(content).toContain("DROP TABLE orders;");
+          expect(content).toContain("await executeSql(`DROP TABLE orders`)");
         }
 
         // Verify snapshot was updated for V3

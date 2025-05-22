@@ -32,42 +32,73 @@ function escapeIdentifierPostgres(name: string): string {
 
 function formatDefaultValuePostgres(
   columnDefault: ColumnSnapshot["default"],
-  columnName: string // For warning messages
+  columnName: string, // For warning messages
+  hasClientDefaultFn?: boolean
 ): string {
   if (columnDefault === undefined) {
     return "";
   }
+
+  // 1. Handle client-side default functions (UUIDs etc.)
+  if (
+    hasClientDefaultFn &&
+    typeof columnDefault === "object" &&
+    columnDefault !== null &&
+    (columnDefault as { function?: string }).function === "[FUNCTION_DEFAULT]"
+  ) {
+    return ""; // No DDL, no warning
+  }
+
+  // 2. Handle SQL objects from sql`` tag
   if (
     typeof columnDefault === "object" &&
     columnDefault !== null &&
-    "sql" in columnDefault
+    (columnDefault as any)._isSQL === true && // Check for SQL marker
+    typeof (columnDefault as any).toSqlString === "function"
   ) {
-    return `DEFAULT ${columnDefault.sql}`;
+    return `DEFAULT ${(columnDefault as any).toSqlString("postgres")}`;
   }
+
+  // 3. Handle raw SQL provided as { sql: "RAW_SQL" }
+  if (
+    typeof columnDefault === "object" &&
+    columnDefault !== null &&
+    "sql" in columnDefault &&
+    typeof (columnDefault as { sql: string }).sql === "string"
+  ) {
+    return `DEFAULT ${(columnDefault as { sql: string }).sql}`;
+  }
+
+  // 4. Handle literal string defaults
   if (typeof columnDefault === "string") {
     return `DEFAULT '${columnDefault.replace(/'/g, "''")}'`;
   }
-  if (
-    typeof columnDefault === "object" &&
-    columnDefault !== null &&
-    !("sql" in columnDefault) &&
-    !("function" in columnDefault)
-  ) {
-    return `DEFAULT '${JSON.stringify(columnDefault).replace(/'/g, "''")}'`;
-  }
+
+  // 5. Handle literal number or boolean defaults
   if (typeof columnDefault === "number" || typeof columnDefault === "boolean") {
     return `DEFAULT ${columnDefault}`;
   }
+
+  // 6. Handle function marker for non-client-side functions (should warn)
   if (
     typeof columnDefault === "object" &&
     columnDefault !== null &&
-    "function" in columnDefault
+    (columnDefault as { function?: string }).function === "[FUNCTION_DEFAULT]"
   ) {
     console.warn(
       `Function default for column "${columnName}" cannot be directly represented in DDL. Use sql\`...\` or a literal value.`
     );
     return "";
   }
+
+  // 7. Handle other object defaults (e.g., for JSON/JSONB)
+  if (
+    typeof columnDefault === "object" &&
+    columnDefault !== null // Ensure it's not an SQL object or function marker already handled
+  ) {
+    return `DEFAULT '${JSON.stringify(columnDefault).replace(/'/g, "''")}'`;
+  }
+
   return "";
 }
 
@@ -83,7 +114,11 @@ function generatePgCreateTableDDL(table: TableSnapshot): string {
     if (column.notNull || column.primaryKey) {
       columnSql += " NOT NULL";
     }
-    const defaultSql = formatDefaultValuePostgres(column.default, column.name);
+    const defaultSql = formatDefaultValuePostgres(
+      column.default,
+      column.name,
+      column._hasClientDefaultFn
+    );
     if (defaultSql) {
       columnSql += ` ${defaultSql}`;
     }
@@ -225,7 +260,8 @@ function generatePgDdl(diffActions: TableDiffAction[]): string[] {
                 if (column.unique) colSql += " UNIQUE";
                 const defaultSql = formatDefaultValuePostgres(
                   column.default,
-                  column.name
+                  column.name,
+                  column._hasClientDefaultFn
                 );
                 if (defaultSql) colSql += ` ${defaultSql}`;
                 ddlStatements.push(`${colSql};`);
@@ -273,10 +309,13 @@ function generatePgDdl(diffActions: TableDiffAction[]): string[] {
                   }
                 }
                 if (changes.hasOwnProperty("default")) {
+                  // Note: _hasClientDefaultFn might not be available on `changes.default` directly
+                  // This part might need more context if we're changing TO a client default fn
                   if (changes.default !== undefined) {
                     const defaultSql = formatDefaultValuePostgres(
                       changes.default,
-                      colChange.columnName
+                      colChange.columnName,
+                      (colChange.changes as ColumnSnapshot)._hasClientDefaultFn // Pass from full snapshot if available
                     );
                     ddlStatements.push(
                       `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} ${
@@ -451,44 +490,79 @@ function escapeIdentifierSpanner(name: string): string {
 
 function formatDefaultValueSpanner(
   columnDefault: ColumnSnapshot["default"],
-  columnName: string
+  columnName: string,
+  hasClientDefaultFn?: boolean
 ): string {
   if (columnDefault === undefined) return "";
+
+  // 1. Handle client-side default functions (UUIDs etc.)
+  if (
+    hasClientDefaultFn &&
+    typeof columnDefault === "object" &&
+    columnDefault !== null &&
+    (columnDefault as { function?: string }).function === "[FUNCTION_DEFAULT]"
+  ) {
+    return ""; // No DDL, no warning
+  }
+
+  // 2. Handle SQL objects from sql`` tag
   if (
     typeof columnDefault === "object" &&
     columnDefault !== null &&
-    "sql" in columnDefault
+    (columnDefault as any)._isSQL === true && // Check for SQL marker
+    typeof (columnDefault as any).toSqlString === "function"
   ) {
-    const sqlValue = columnDefault.sql as string;
+    const sqlString = (columnDefault as any).toSqlString("spanner");
+    if (sqlString.toUpperCase() === "CURRENT_TIMESTAMP") {
+      return `DEFAULT (CURRENT_TIMESTAMP())`;
+    }
+    return `DEFAULT (${sqlString})`;
+  }
+
+  // 3. Handle raw SQL provided as { sql: "RAW_SQL" }
+  if (
+    typeof columnDefault === "object" &&
+    columnDefault !== null &&
+    "sql" in columnDefault &&
+    typeof (columnDefault as { sql: string }).sql === "string"
+  ) {
+    const sqlValue = (columnDefault as { sql: string }).sql;
     return `DEFAULT (${
       sqlValue.toUpperCase() === "CURRENT_TIMESTAMP"
         ? "CURRENT_TIMESTAMP()"
         : sqlValue
     })`;
   }
+
+  // 4. Handle literal string defaults
   if (typeof columnDefault === "string")
     return `DEFAULT ('${columnDefault.replace(/'/g, "''")}')`;
-  if (
-    typeof columnDefault === "object" &&
-    columnDefault !== null &&
-    !("function" in columnDefault)
-  ) {
-    return `DEFAULT (JSON '${JSON.stringify(columnDefault).replace(
-      /'/g,
-      "''"
-    )}')`;
-  }
+
+  // 5. Handle literal number defaults
   if (typeof columnDefault === "number") return `DEFAULT (${columnDefault})`;
+
+  // 6. Handle literal boolean defaults
   if (typeof columnDefault === "boolean")
     return `DEFAULT (${columnDefault ? "TRUE" : "FALSE"})`;
+
+  // 7. Handle function marker for non-client-side functions (should warn)
   if (
     typeof columnDefault === "object" &&
     columnDefault !== null &&
-    "function" in columnDefault
+    (columnDefault as { function?: string }).function === "[FUNCTION_DEFAULT]"
   ) {
     console.warn(
       `Function default for Spanner column "${columnName}" cannot be directly represented in DDL.`
     );
+    return "";
+  }
+
+  // 8. Handle other object defaults (e.g., for JSON)
+  if (typeof columnDefault === "object" && columnDefault !== null) {
+    return `DEFAULT (JSON '${JSON.stringify(columnDefault).replace(
+      /'/g,
+      "''"
+    )}')`;
   }
   return "";
 }
@@ -505,7 +579,11 @@ function generateSpannerCreateTableDDL(table: TableSnapshot): string[] {
       column.dialectTypes.spanner
     }`;
     if (column.notNull || column.primaryKey) columnSql += " NOT NULL";
-    const defaultSql = formatDefaultValueSpanner(column.default, column.name);
+    const defaultSql = formatDefaultValueSpanner(
+      column.default,
+      column.name,
+      column._hasClientDefaultFn
+    );
     if (defaultSql) columnSql += ` ${defaultSql}`;
     if (column.primaryKey)
       primaryKeyColumns.push(escapeIdentifierSpanner(column.name));
@@ -530,7 +608,7 @@ function generateSpannerCreateTableDDL(table: TableSnapshot): string[] {
       table.interleave.parentTable
     )} ON DELETE ${table.interleave.onDelete.toUpperCase()}`;
   }
-  ddlStatements.push(`${createTableSql};`);
+  ddlStatements.push(createTableSql); // Removed semicolon here
 
   for (const columnName in table.columns) {
     const column = table.columns[columnName];
@@ -541,7 +619,7 @@ function generateSpannerCreateTableDDL(table: TableSnapshot): string[] {
       ddlStatements.push(
         `CREATE UNIQUE INDEX ${uniqueIndexName} ON ${tableName} (${escapeIdentifierSpanner(
           column.name
-        )});`
+        )})` // Removed semicolon here
       );
     }
   }
@@ -559,7 +637,7 @@ function generateSpannerCreateTableDDL(table: TableSnapshot): string[] {
       ddlStatements.push(
         `CREATE ${
           index.unique ? "UNIQUE " : ""
-        }INDEX ${indexName} ON ${tableName} (${columns});`
+        }INDEX ${indexName} ON ${tableName} (${columns})` // Removed semicolon here
       );
     }
   }
@@ -585,7 +663,7 @@ function generateSpannerForeignKeyConstraintDDL(
     columnName
   )}) REFERENCES ${escapeIdentifierSpanner(
     fk.referencedTable
-  )} (${escapeIdentifierSpanner(fk.referencedColumn)})${onDeleteAction};`;
+  )} (${escapeIdentifierSpanner(fk.referencedColumn)})${onDeleteAction}`; // Removed semicolon here
 }
 
 function generateSpannerCreateTableDDLWithForeignKeys(
@@ -639,7 +717,7 @@ function generateSpannerDdl(diffActions: TableDiffAction[]): string[][] {
         break;
       case "remove":
         allDdlStatements.push(
-          `DROP TABLE ${escapeIdentifierSpanner(action.tableName)};`
+          `DROP TABLE ${escapeIdentifierSpanner(action.tableName)}` // Removed semicolon
         );
         break;
       case "change":
@@ -655,17 +733,18 @@ function generateSpannerDdl(diffActions: TableDiffAction[]): string[][] {
                 if (column.notNull) colSql += " NOT NULL";
                 const defaultSql = formatDefaultValueSpanner(
                   column.default,
-                  column.name
+                  column.name,
+                  column._hasClientDefaultFn
                 );
                 if (defaultSql) colSql += ` ${defaultSql}`;
-                allDdlStatements.push(`${colSql};`);
+                allDdlStatements.push(colSql); // Removed semicolon
                 if (column.unique) {
                   allDdlStatements.push(
                     `CREATE UNIQUE INDEX ${escapeIdentifierSpanner(
                       `uq_${action.tableName}_${column.name}`
                     )} ON ${tableName} (${escapeIdentifierSpanner(
                       column.name
-                    )});`
+                    )})` // Removed semicolon
                   );
                 }
                 if (colChange.column.references) {
@@ -674,7 +753,7 @@ function generateSpannerDdl(diffActions: TableDiffAction[]): string[][] {
                       action.tableName,
                       colChange.column.name,
                       colChange.column.references
-                    )
+                    ) // generateSpannerForeignKeyConstraintDDL now returns without semicolon
                   );
                 }
                 break;
@@ -683,7 +762,7 @@ function generateSpannerDdl(diffActions: TableDiffAction[]): string[][] {
                 allDdlStatements.push(
                   `ALTER TABLE ${tableName} DROP COLUMN ${escapeIdentifierSpanner(
                     colChange.columnName
-                  )};`
+                  )}` // Removed semicolon
                 );
                 break;
               case "change": {
@@ -695,7 +774,7 @@ function generateSpannerDdl(diffActions: TableDiffAction[]): string[][] {
                   const newType = changes.dialectTypes?.spanner || changes.type;
                   if (newType) {
                     allDdlStatements.push(
-                      `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} ${newType};`
+                      `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} ${newType}` // Removed semicolon
                     );
                     console.warn(
                       `Spanner DDL for changing column type for ${tableName}.${columnName} to ${newType} generated. Review for compatibility.`
@@ -706,7 +785,7 @@ function generateSpannerDdl(diffActions: TableDiffAction[]): string[][] {
                   allDdlStatements.push(
                     `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} ${
                       changes.notNull ? "NOT NULL" : "DROP NOT NULL"
-                    };`
+                    }` // Removed semicolon
                   );
                   if (!changes.notNull)
                     console.warn(
@@ -742,7 +821,7 @@ function generateSpannerDdl(diffActions: TableDiffAction[]): string[][] {
                     allDdlStatements.push(
                       `ALTER TABLE ${tableName} DROP CONSTRAINT ${escapeIdentifierSpanner(
                         `FK_${action.tableName}_${colChange.columnName}_TO_BE_DROPPED`
-                      )};`
+                      )}` // Removed semicolon
                     );
                   }
                 }
@@ -769,13 +848,13 @@ function generateSpannerDdl(diffActions: TableDiffAction[]): string[][] {
                     index.unique ? "UNIQUE " : ""
                   }INDEX ${indexName} ON ${tableName} (${index.columns
                     .map(escapeIdentifierSpanner)
-                    .join(", ")});`
+                    .join(", ")})` // Removed semicolon
                 );
                 break;
               }
               case "remove":
                 allDdlStatements.push(
-                  `DROP INDEX ${escapeIdentifierSpanner(idxChange.indexName)};`
+                  `DROP INDEX ${escapeIdentifierSpanner(idxChange.indexName)}` // Removed semicolon
                 );
                 break;
               case "change":
@@ -783,7 +862,7 @@ function generateSpannerDdl(diffActions: TableDiffAction[]): string[][] {
                   `Index change for "${idxChange.indexName}" on ${tableName} handled as DROP/ADD.`
                 );
                 allDdlStatements.push(
-                  `DROP INDEX ${escapeIdentifierSpanner(idxChange.indexName)};`
+                  `DROP INDEX ${escapeIdentifierSpanner(idxChange.indexName)}` // Removed semicolon
                 );
                 if (idxChange.changes && idxChange.changes.columns) {
                   const newIndexName = escapeIdentifierSpanner(
@@ -795,7 +874,7 @@ function generateSpannerDdl(diffActions: TableDiffAction[]): string[][] {
                   allDdlStatements.push(
                     `CREATE ${
                       idxChange.changes.unique ? "UNIQUE " : ""
-                    }INDEX ${newIndexName} ON ${tableName} (${newColumns});`
+                    }INDEX ${newIndexName} ON ${tableName} (${newColumns})` // Removed semicolon
                   );
                 } else {
                   console.error(

@@ -27,21 +27,32 @@ function formatDefaultValueSpanner(
   if (column.default === undefined) {
     return "";
   }
+
+  // 1. Handle SQL objects from sql`` tag (e.g., sql`CURRENT_TIMESTAMP`)
   if (
     typeof column.default === "object" &&
     column.default !== null &&
-    (column.default as SQL)._isSQL === true
+    (column.default as SQL)._isSQL === true && // Check the marker
+    typeof (column.default as SQL).toSqlString === "function" // Ensure it has the method
   ) {
-    // For SQL objects created by the sql`` tag
-    // Spanner's CURRENT_TIMESTAMP() needs to be CURRENT_TIMESTAMP() not just CURRENT_TIMESTAMP
     const sqlString = (column.default as SQL).toSqlString("spanner");
+    // Spanner's CURRENT_TIMESTAMP() needs to be CURRENT_TIMESTAMP()
     if (sqlString.toUpperCase() === "CURRENT_TIMESTAMP") {
       return `DEFAULT (CURRENT_TIMESTAMP())`;
     }
+    // Other SQL expressions also need to be wrapped in parentheses for Spanner DEFAULT
     return `DEFAULT (${sqlString})`;
   }
+
+  // 2. Handle client-side default functions (e.g., from $defaultFn for UUIDs)
+  if (column._hasClientDefaultFn && typeof column.default === "function") {
+    // This is a client-side default, so no DDL representation.
+    // The warning is suppressed because we've explicitly acknowledged it.
+    return "";
+  }
+
+  // 3. Handle raw SQL provided as { sql: "RAW_SQL" }
   if (
-    // This handles the { sql: "RAW_SQL" } case
     typeof column.default === "object" &&
     column.default !== null &&
     "sql" in column.default &&
@@ -53,31 +64,42 @@ function formatDefaultValueSpanner(
     }
     return `DEFAULT (${sqlValue})`;
   }
+
+  // 4. Handle literal string defaults
   if (typeof column.default === "string") {
-    // Spanner strings are typically single-quoted, but can use triple quotes.
-    // Standard SQL string literals are single-quoted.
     return `DEFAULT ('${column.default.replace(/'/g, "''")}')`;
   }
+
+  // 5. Handle literal number defaults
+  if (typeof column.default === "number") {
+    return `DEFAULT (${column.default})`;
+  }
+
+  // 6. Handle literal boolean defaults
+  if (typeof column.default === "boolean") {
+    return `DEFAULT (${column.default ? "TRUE" : "FALSE"})`; // Spanner uses TRUE/FALSE keywords
+  }
+
+  // 7. Handle other function defaults (that are not client-side $defaultFn)
+  if (typeof column.default === "function") {
+    // This function default is not marked as _hasClientDefaultFn,
+    // so it's unexpected here for DDL generation.
+    console.warn(
+      `Unrecognized function default for Spanner column "${column.name}" cannot be directly represented in DDL. Use sql\`...\`, a literal value, or $defaultFn for client-side defaults.`
+    );
+    return "";
+  }
+
+  // 8. Handle object defaults (e.g., for JSON) that are not SQL objects
+  // This should come after SQL object check to avoid misinterpreting SQL objects.
   if (typeof column.default === "object" && column.default !== null) {
-    // For JSON defaults that are objects
-    // Spanner JSON type takes a string representation of JSON.
+    // Spanner JSON type takes a string representation of JSON, often with JSON keyword.
     return `DEFAULT (JSON '${JSON.stringify(column.default).replace(
       /'/g,
       "''"
     )}')`;
   }
-  if (typeof column.default === "number") {
-    return `DEFAULT (${column.default})`;
-  }
-  if (typeof column.default === "boolean") {
-    return `DEFAULT (${column.default ? "TRUE" : "FALSE"})`; // Spanner uses TRUE/FALSE keywords
-  }
-  if (typeof column.default === "function") {
-    console.warn(
-      `Function default for Spanner column "${column.name}" cannot be directly represented in DDL. Use sql\`...\` or a literal value.`
-    );
-    return "";
-  }
+
   return "";
 }
 

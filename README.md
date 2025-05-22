@@ -9,14 +9,13 @@ A TypeScript ORM for Google Spanner & PostgreSQL, designed for Node.js and Bun. 
 
 `spanner-orm` is engineered to deliver a seamless and powerful experience for managing data across PostgreSQL and Google Spanner. It focuses on these core requirements:
 
-- **Unified Object Model:** Define your database schema _once_ using a Drizzle-inspired syntax. This single object model seamlessly supports both PostgreSQL (including Pglite for local/embedded use) and Google Spanner, enabling consistent data modeling across diverse deployment targets (local, enterprise, global scale).
-- **Cross-Dialect Migration Generation & Execution:** Automatically produce and execute migration files containing the precise DDL for both PostgreSQL and Google Spanner. Migrations can be run via the `spanner-orm-cli migrate` command or programmatically, ensuring reliable schema evolution.
-- **Flexible Querying with Fluent API & Raw SQL:** Construct type-safe queries using an intuitive fluent API (the `db` object) or the underlying `QueryBuilder`. For complex scenarios or when direct SQL is preferred, seamlessly fall back to raw SQL using the `sql` template literal tag.
-- **Optimized SQL for Each Dialect:**
-  - **Google Spanner:** Generates Google SQL, leveraging Spanner's unique features.
-  - **PostgreSQL/Pglite:** Produces standard, highly compatible SQL.
-    This allows developers to use Pglite for local/embedded needs, PostgreSQL for traditional deployments, and Spanner for web-scale applications, all from one codebase.
-- **Composable Schemas (Drizzle-Inspired):** Easily create and reuse schema components (e.g., `id`, `timestamps`, `ownableResource`), promoting DRY principles and maintainable data models.
+- **Unified Object Model for PostgreSQL & Spanner:** Define your database schema _once_ using a Drizzle-inspired syntax. This single object model is designed to seamlessly support both PostgreSQL (including Pglite for local/embedded use) and Google Spanner. This enables consistent data modeling whether you're building for local development, enterprise deployments, or global-scale web applications.
+- **Cross-Dialect Migration Generation & Execution:** The ORM automatically produces migration files containing the precise DDL (Data Definition Language) for both PostgreSQL and Google Spanner. These migrations can be executed via the `spanner-orm-cli migrate` command or programmatically, ensuring reliable and consistent schema evolution across both database systems.
+- **Flexible Querying: Query Builder & Raw SQL:** Construct type-safe queries using an intuitive fluent API (via the `db` client object) or the underlying `QueryBuilder` for more complex scenarios. When direct control is needed or for features not yet abstracted, you can seamlessly fall back to writing raw SQL using the `sql` template literal tag, with results still being typed if possible.
+- **Dialect-Specific SQL Generation:**
+  - **Google Spanner:** Leverages Google SQL, ensuring that generated DDL and DML (Data Manipulation Language) are optimized for Spanner's unique architecture and capabilities.
+  - **PostgreSQL/Pglite:** Produces standard, highly compatible SQL suitable for PostgreSQL and Pglite. This allows developers to use Pglite for local development or embedded applications, PostgreSQL for traditional server-based deployments, and Google Spanner for applications requiring web-scale, global distribution, all managed from a single, consistent codebase.
+- **Composable Schemas (Drizzle-Inspired):** Easily create and reuse schema components (e.g., common fields like `id`, `timestamps`, or base entity structures like `ownableResource`), promoting DRY (Don't Repeat Yourself) principles and leading to more maintainable and understandable data models, similar to patterns found in Drizzle ORM.
 
 ## Core Features
 
@@ -145,7 +144,7 @@ bun install spanner-orm
       ...baseModel,
       userId: uuid("user_id") // Assuming user_id is also a UUID
         .notNull()
-        .references(() => users.id, { onDelete: "cascade" }),
+        .references(() => users.columns.id, { onDelete: "cascade" }),
     };
 
     // For resources that have visibility permissions
@@ -174,8 +173,11 @@ bun install spanner-orm
       },
       (t) => ({
         indexes: [
-          index({ columns: [t.fileType] }), // Example non-unique index
-          uniqueIndex({ name: "uq_gcs_object", columns: [t.gcsObjectName] }), // Example unique index
+          index({ columns: [t.fileType.name] }), // Example non-unique index
+          uniqueIndex({
+            name: "uq_gcs_object",
+            columns: [t.gcsObjectName.name],
+          }), // Example unique index
         ],
       })
     );
@@ -197,10 +199,10 @@ Once you have defined your schema (e.g., in `src/schema.ts`), you can generate D
 # The CLI will be available via the 'bin' script in package.json
 
 # Generate PostgreSQL DDL
-npx spanner-orm-cli ddl --schema ./path/to/your/schema.ts --dialect pg
+npx spanner-orm-cli ddl --schema ./path/to/your/schema.ts --dialect postgres
 
 # Example with a schema file in dist (after build) and output to file
-npx spanner-orm-cli ddl --schema ./dist/schema.js --dialect pg --output ./generated-pg.sql
+npx spanner-orm-cli ddl --schema ./dist/schema.js --dialect postgres --output ./generated-pg.sql
 
 # Generate Spanner DDL
 npx spanner-orm-cli ddl --schema ./dist/schema.js --dialect spanner
