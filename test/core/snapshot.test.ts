@@ -127,6 +127,7 @@ describe("generateSchemaSnapshot", () => {
       dialectTypes: { postgres: "VARCHAR(36)", spanner: "STRING(36)" },
       primaryKey: true,
       default: { function: "[FUNCTION_DEFAULT]" }, // crypto.randomUUID
+      _hasClientDefaultFn: true,
     });
     // email column
     expect(usersTable.columns.email).toEqual({

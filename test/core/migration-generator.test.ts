@@ -720,7 +720,7 @@ describe("generateMigrationDDL", () => {
           "  UserId INT64 NOT NULL,\n" +
           "  Email STRING(255) NOT NULL,\n" +
           "  Bio STRING(MAX)\n" +
-          ") PRIMARY KEY (UserId);"
+          ") PRIMARY KEY (UserId)"
       );
     });
 
@@ -759,7 +759,7 @@ describe("generateMigrationDDL", () => {
       expect(ddlBatches[0][0]).toContain("CREATE TABLE Products");
       expect(ddlBatches[1].length).toBe(1);
       expect(ddlBatches[1][0]).toBe(
-        "CREATE UNIQUE INDEX UQ_ProductCode ON Products (ProductCode);"
+        "CREATE UNIQUE INDEX UQ_ProductCode ON Products (ProductCode)"
       );
       const ddl = ddlBatches.flat(); // Keep this for checking total statements if needed, though covered by batch checks.
       expect(ddl.length).toBe(2); // CREATE TABLE, CREATE UNIQUE INDEX
@@ -812,10 +812,10 @@ describe("generateMigrationDDL", () => {
           "  DetailId INT64 NOT NULL,\n" +
           "  Notes STRING(MAX)\n" +
           ") PRIMARY KEY (OrderId, DetailId),\n" +
-          "  INTERLEAVE IN PARENT Orders ON DELETE CASCADE;"
+          "  INTERLEAVE IN PARENT Orders ON DELETE CASCADE"
       );
       expect(ddl[1]).toBe(
-        "CREATE INDEX IDX_OrderDetails_Notes ON OrderDetails (Notes);"
+        "CREATE INDEX IDX_OrderDetails_Notes ON OrderDetails (Notes)"
       );
     });
 
@@ -831,7 +831,7 @@ describe("generateMigrationDDL", () => {
       ) as string[][];
       expect(ddlBatches.length).toBe(1);
       expect(ddlBatches[0].length).toBe(1);
-      expect(ddlBatches[0][0]).toBe("DROP TABLE OldProducts;");
+      expect(ddlBatches[0][0]).toBe("DROP TABLE OldProducts");
     });
 
     it("should generate ADD COLUMN DDL for Spanner", () => {
@@ -862,7 +862,7 @@ describe("generateMigrationDDL", () => {
       ) as string[][];
       const ddl = ddlBatches.flat();
       expect(ddl[0]).toBe(
-        "ALTER TABLE Users ADD COLUMN PhoneNumber STRING(20) DEFAULT ('N/A');"
+        "ALTER TABLE Users ADD COLUMN PhoneNumber STRING(20) DEFAULT ('N/A')"
       );
     });
 
@@ -883,7 +883,7 @@ describe("generateMigrationDDL", () => {
         "spanner"
       ) as string[][];
       const ddl = ddlBatches.flat();
-      expect(ddl[0]).toBe("ALTER TABLE Users DROP COLUMN Bio;");
+      expect(ddl[0]).toBe("ALTER TABLE Users DROP COLUMN Bio");
     });
 
     it("should generate ALTER COLUMN TYPE DDL for Spanner", () => {
@@ -916,7 +916,7 @@ describe("generateMigrationDDL", () => {
         "spanner"
       ) as string[][];
       const ddl = ddlBatches.flat();
-      expect(ddl[0]).toBe("ALTER TABLE Users ALTER COLUMN UserId STRING(36);");
+      expect(ddl[0]).toBe("ALTER TABLE Users ALTER COLUMN UserId STRING(36)");
       expect(consoleWarnSpy).toHaveBeenCalledWith(
         `Spanner DDL for changing column type for Users.UserId to STRING(36) generated. Review for compatibility.`
       );
@@ -946,7 +946,7 @@ describe("generateMigrationDDL", () => {
         "spanner"
       ) as string[][];
       const ddl = ddlBatches.flat();
-      expect(ddl[0]).toBe("ALTER TABLE Users ALTER COLUMN Email NOT NULL;");
+      expect(ddl[0]).toBe("ALTER TABLE Users ALTER COLUMN Email NOT NULL");
     });
 
     it("should issue a warning when trying to make a Spanner column nullable (as it requires type re-specification)", () => {
@@ -1148,7 +1148,7 @@ describe("generateMigrationDDL", () => {
       const ddl = ddlBatches.flat();
       expect(ddl.length).toBe(1);
       expect(ddl[0]).toBe(
-        "ALTER TABLE Albums ADD CONSTRAINT FK_Albums_ArtistId FOREIGN KEY (ArtistId) REFERENCES Artists (ArtistId) ON DELETE NO ACTION;"
+        "ALTER TABLE Albums ADD CONSTRAINT FK_Albums_ArtistId FOREIGN KEY (ArtistId) REFERENCES Artists (ArtistId) ON DELETE NO ACTION"
       );
     });
 
@@ -1182,7 +1182,7 @@ describe("generateMigrationDDL", () => {
       const ddl = ddlBatches.flat();
       expect(ddl.length).toBe(1);
       expect(ddl[0]).toBe(
-        "ALTER TABLE Tracks DROP CONSTRAINT FK_Tracks_AlbumId_TO_BE_DROPPED;"
+        "ALTER TABLE Tracks DROP CONSTRAINT FK_Tracks_AlbumId_TO_BE_DROPPED"
       );
       expect(consoleWarnSpy).toHaveBeenCalledWith(
         `Dropping FK for Tracks.AlbumId. Constraint name needed.`
@@ -1224,11 +1224,9 @@ describe("generateMigrationDDL", () => {
       ) as string[][];
       const ddl = ddlBatches.flat();
       expect(ddl.length).toBe(2);
-      expect(ddl[0]).toBe(
-        "ALTER TABLE Playlists ADD COLUMN UserId STRING(36);"
-      );
+      expect(ddl[0]).toBe("ALTER TABLE Playlists ADD COLUMN UserId STRING(36)");
       expect(ddl[1]).toBe(
-        "ALTER TABLE Playlists ADD CONSTRAINT FK_Playlists_UserId FOREIGN KEY (UserId) REFERENCES Users (UserId);"
+        "ALTER TABLE Playlists ADD CONSTRAINT FK_Playlists_UserId FOREIGN KEY (UserId) REFERENCES Users (UserId)"
       );
     });
   });
@@ -1402,8 +1400,8 @@ describe("generateMigrationDDL", () => {
       expect(ddlBatches.length).toBe(2);
       expect(ddlBatches[0].length).toBe(5);
       expect(ddlBatches[1].length).toBe(1);
-      expect(ddlBatches[0][0]).toBe("DROP TABLE OldTable1;");
-      expect(ddlBatches[1][0]).toBe("DROP TABLE OldTable6;");
+      expect(ddlBatches[0][0]).toBe("DROP TABLE OldTable1");
+      expect(ddlBatches[1][0]).toBe("DROP TABLE OldTable6");
     });
 
     it("should correctly batch when a non-validating DDL follows a full validating batch", () => {
@@ -1461,9 +1459,9 @@ describe("generateMigrationDDL", () => {
       ) as string[][];
       expect(ddlBatches.length).toBe(2);
       expect(ddlBatches[0].length).toBe(5); // Validating batch
-      expect(ddlBatches[0][0]).toContain("ALTER TABLE T1 ADD COLUMN c1 BOOL;");
+      expect(ddlBatches[0][0]).toContain("ALTER TABLE T1 ADD COLUMN c1 BOOL");
       expect(ddlBatches[1].length).toBe(1); // Non-validating batch
-      expect(ddlBatches[1][0]).toBe("DROP TABLE OldTableDrop;");
+      expect(ddlBatches[1][0]).toBe("DROP TABLE OldTableDrop");
     });
   });
 });
