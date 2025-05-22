@@ -3,9 +3,9 @@
 import path from "path";
 import fs from "fs/promises";
 import { Command, Option } from "commander";
-import { ConcretePgAdapter } from "./pg/adapter.js";
-import { ConcretePgliteAdapter } from "./pglite/adapter.js";
-import { ConcreteSpannerAdapter } from "./spanner/adapter.js";
+import { PostgresAdapter } from "./pg/adapter.js";
+import { PgliteAdapter } from "./pglite/adapter.js";
+import { SpannerAdapter } from "./spanner/adapter.js";
 import type { DatabaseAdapter } from "./types/adapter.js";
 // import { generateCreateTablePostgres } from "./pg/ddl.js"; // Will be handled by migration-generator
 // import { generateCreateTableSpanner } from "./spanner/ddl.js"; // Will be handled by migration-generator
@@ -272,10 +272,10 @@ async function getDatabaseAdapter(): Promise<DatabaseAdapter | null> {
         databaseUrl.startsWith("postgres://") ||
         databaseUrl.startsWith("postgresql://")
       ) {
-        adapter = new ConcretePgAdapter(databaseUrl);
+        adapter = new PostgresAdapter(databaseUrl);
       } else {
         // Assume PGlite if not a postgres connection string
-        adapter = new ConcretePgliteAdapter(databaseUrl); // dataDir is the path
+        adapter = new PgliteAdapter(databaseUrl); // dataDir is the path
       }
     } else if (dbDialect === "spanner") {
       const projectId = process.env.SPANNER_PROJECT_ID;
@@ -288,7 +288,7 @@ async function getDatabaseAdapter(): Promise<DatabaseAdapter | null> {
         );
         return null;
       }
-      adapter = new ConcreteSpannerAdapter({
+      adapter = new SpannerAdapter({
         projectId,
         instanceId,
         databaseId,

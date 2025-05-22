@@ -199,16 +199,15 @@ Once you have defined your schema (e.g., in `src/schema.ts`), you can generate D
 # The CLI will be available via the 'bin' script in package.json
 
 # Generate PostgreSQL DDL
-npx spanner-orm-cli ddl --schema ./path/to/your/schema.ts --dialect postgres
-
-# Example with a schema file in dist (after build) and output to file
-npx spanner-orm-cli ddl --schema ./dist/schema.js --dialect postgres --output ./generated-pg.sql
+npx spanner-orm-cli ddl --schema ./path/to/your/schema.js --dialect postgres
 
 # Generate Spanner DDL
 npx spanner-orm-cli ddl --schema ./dist/schema.js --dialect spanner
 ```
 
 This will print the generated `CREATE TABLE` statements to standard output or the specified file.
+
+Note if you're using bunx, you can write your schema files in Typescript without having to compile them to JS.
 
 ### Managing Migrations with the CLI
 
@@ -226,9 +225,9 @@ npx spanner-orm-cli migrate create add-posts-table --schema ./dist/schema.js
 # This will create files like:
 # ./spanner-orm-migrations/YYYYMMDDHHMMSS-add-posts-table.pg.ts
 # ./spanner-orm-migrations/YYYYMMDDHHMMSS-add-posts-table.spanner.ts
-# Currently, these files are pre-populated with DDL based on changes detected against an empty schema.
-# For true incremental migrations (diffing from the last known state), see task T5.7 in the roadmap.
 ```
+
+There will also be a latest.snapshot.json file created keeping track of the current state of your schema for new migrations in the future.
 
 **2. Apply pending migrations:**
 
@@ -239,6 +238,11 @@ This command applies all pending migrations to your database for the specified d
 # Apply latest migrations (dialect determined by DB_DIALECT environment variable)
 # Example: export DB_DIALECT=postgres
 #          export DATABASE_URL=postgresql://user:pass@host:port/db
+npx spanner-orm-cli migrate latest --schema ./dist/schema.js
+
+# Apply latest migrations for pglite - use postgres dialect with a local file for DATABASE_URL
+# export DB_DIALECT=postgres
+# export DATABASE_URL="./spannerormtest.db"
 npx spanner-orm-cli migrate latest --schema ./dist/schema.js
 
 # Example for Spanner:
@@ -271,9 +275,9 @@ import { OrmClient, sql, users, posts, count } from "spanner-orm";
 
 // Example: Initialize with a Pglite adapter
 // import { PGlite } from "@electric-sql/pglite";
-// import { ConcretePgliteAdapter } from "spanner-orm"; // Or your specific adapter
+// import { PgliteAdapter } from "spanner-orm"; // Or your specific adapter
 // const pglite = new PGlite(); // In-memory
-// const adapter = new ConcretePgliteAdapter(pglite);
+// const adapter = new PgliteAdapter(pglite);
 // const db = new OrmClient(adapter, "postgres"); // 'postgres' is the dialect for PGlite
 
 async function runFluentExamples(db: OrmClient) {
@@ -367,11 +371,11 @@ Here's how you can use the `QueryBuilder` to construct and execute queries. This
 
 ```typescript
 import { QueryBuilder, sql, users, posts, count } from "spanner-orm";
-// import { ConcretePgliteAdapter } from "spanner-orm"; // Or your specific adapter
+// import { PgliteAdapter } from "spanner-orm"; // Or your specific adapter
 // import { PGlite } from "@electric-sql/pglite";
 
 // const pglite = new PGlite();
-// const adapter = new ConcretePgliteAdapter(pglite);
+// const adapter = new PgliteAdapter(pglite);
 // await adapter.connect(); // Ensure adapter is connected
 
 async function runQueryBuilderExamples(adapter) {

@@ -30,9 +30,9 @@ export {
 export { QueryBuilder } from "./core/query-builder.js"; // Exporting QB if users want to use it directly
 
 // Adapters (Users might import specific adapters if not using a generic setup)
-export { ConcretePgAdapter } from "./pg/adapter.js";
-export { ConcretePgliteAdapter } from "./pglite/adapter.js";
-export { ConcreteSpannerAdapter } from "./spanner/adapter.js";
+export { PostgresAdapter } from "./pg/adapter.js";
+export { PgliteAdapter } from "./pglite/adapter.js";
+export { SpannerAdapter } from "./spanner/adapter.js";
 
 // Common Types (Exporting types that users might need for type safety)
 export type {
