@@ -108,6 +108,7 @@ abstract class BaseColumnBuilder<
   // Placeholder for Drizzle-like .$defaultFn()
   $defaultFn(fn: () => TDataType): this {
     this.config.default = fn;
+    this.config._hasClientDefaultFn = true; // Set the flag
     return this;
   }
 }

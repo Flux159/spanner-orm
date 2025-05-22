@@ -29,19 +29,30 @@ function transformColumn(
   if (columnConfig.unique) snapshot.unique = true;
 
   if (columnConfig.default !== undefined) {
-    if (typeof columnConfig.default === "function") {
-      // For now, represent function defaults as a string placeholder.
-      // In the future, we might try to serialize the function name or a more descriptive tag.
-      snapshot.default = { function: "[FUNCTION_DEFAULT]" };
+    // Check for SQL object first
+    if (
+      typeof columnConfig.default === "object" &&
+      columnConfig.default !== null &&
+      (columnConfig.default as any)._isSQL === true // Check for SQL marker
+    ) {
+      snapshot.default = columnConfig.default; // Preserve the SQL object
+    } else if (typeof columnConfig.default === "function") {
+      // For client-side functions or other function defaults
+      snapshot.default = { function: "[FUNCTION_DEFAULT]" }; // Represent as function marker
     } else if (
       typeof columnConfig.default === "object" &&
       columnConfig.default !== null &&
-      "sql" in columnConfig.default
+      "sql" in columnConfig.default // For { sql: "RAW_SQL" }
     ) {
-      snapshot.default = { sql: columnConfig.default.sql };
+      snapshot.default = { sql: (columnConfig.default as { sql: string }).sql };
     } else {
-      snapshot.default = columnConfig.default;
+      snapshot.default = columnConfig.default; // Literals
     }
+  }
+
+  // Copy the _hasClientDefaultFn flag if it exists
+  if (columnConfig._hasClientDefaultFn) {
+    snapshot._hasClientDefaultFn = true;
   }
 
   if (columnConfig.references) {
