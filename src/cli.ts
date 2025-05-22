@@ -184,7 +184,12 @@ async function handleDdlGeneration(options: DdlOptions) {
     tables: {},
   };
   const schemaDiff = generateSchemaDiff(emptySnapshot, currentSnapshot);
-  const ddlStatementsResult = generateMigrationDDL(schemaDiff, options.dialect);
+  // Pass currentSnapshot as the newSchemaSnapshot because the diff is from empty to current
+  const ddlStatementsResult = generateMigrationDDL(
+    schemaDiff,
+    currentSnapshot,
+    options.dialect
+  );
 
   let outputDdl = "";
   if (options.dialect === "spanner") {
@@ -360,8 +365,14 @@ async function handleMigrateCreate(
   let allMigrationsGeneratedSuccessfully = true;
 
   for (const dialect of dialects) {
-    const upDdl = generateMigrationDDL(upSchemaDiff, dialect);
-    const downDdl = generateMigrationDDL(downSchemaDiff, dialect);
+    // For upDdl, newSchemaSnapshot is currentSnapshot (diff is previous -> current)
+    const upDdl = generateMigrationDDL(upSchemaDiff, currentSnapshot, dialect);
+    // For downDdl, newSchemaSnapshot is previousSnapshot (diff is current -> previous)
+    const downDdl = generateMigrationDDL(
+      downSchemaDiff,
+      previousSnapshot,
+      dialect
+    );
 
     const formattedUpDdl = formatDdlForTemplate(upDdl, dialect);
     const formattedDownDdl = formatDdlForTemplate(downDdl, dialect);

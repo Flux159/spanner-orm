@@ -9,9 +9,19 @@ import type {
   IndexSnapshot,
   CompositePrimaryKeySnapshot,
   InterleaveSnapshot,
+  SchemaSnapshot, // Added for new argument
 } from "../../src/types/common";
 
 const V1_SNAPSHOT_VERSION = "1.0.0";
+
+const createMockNewSchemaSnapshot = (
+  tables: Record<string, TableSnapshot>,
+  dialect: "postgres" | "spanner"
+): SchemaSnapshot => ({
+  version: V1_SNAPSHOT_VERSION,
+  dialect,
+  tables,
+});
 
 const createSampleColumn = (
   name: string,
@@ -65,7 +75,15 @@ describe("generateMigrationDDL", () => {
         toVersion: V1_SNAPSHOT_VERSION,
         tableChanges: [{ action: "add", table: usersTable }],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { users: usersTable },
+        "postgres"
+      );
+      const ddl = generateMigrationDDL(
+        schemaDiff,
+        newSnapshot,
+        "postgres"
+      ) as string[];
       // Expect CREATE TABLE + ALTER TABLE for unique constraint
       expect(ddl.length).toBe(2);
       expect(ddl[0]).toBe(
@@ -119,7 +137,15 @@ describe("generateMigrationDDL", () => {
         toVersion: V1_SNAPSHOT_VERSION,
         tableChanges: [{ action: "add", table: orderItemsTable }],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { order_items: orderItemsTable },
+        "postgres"
+      );
+      const ddl = generateMigrationDDL(
+        schemaDiff,
+        newSnapshot,
+        "postgres"
+      ) as string[];
       // Expect CREATE TABLE + CREATE UNIQUE INDEX for the table-level unique constraint
       expect(ddl.length).toBe(2);
       expect(ddl[0]).toBe(
@@ -159,7 +185,15 @@ describe("generateMigrationDDL", () => {
         toVersion: V1_SNAPSHOT_VERSION,
         tableChanges: [{ action: "add", table: productsTable }],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { products: productsTable },
+        "postgres"
+      );
+      const ddl = generateMigrationDDL(
+        schemaDiff,
+        newSnapshot,
+        "postgres"
+      ) as string[];
       expect(ddl.length).toBe(2);
       expect(ddl[0]).toContain('CREATE TABLE "products"');
       expect(ddl[1]).toBe(
@@ -173,7 +207,12 @@ describe("generateMigrationDDL", () => {
         toVersion: V1_SNAPSHOT_VERSION,
         tableChanges: [{ action: "remove", tableName: "old_users" }],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
+      const newSnapshot = createMockNewSchemaSnapshot({}, "postgres"); // No tables after removal
+      const ddl = generateMigrationDDL(
+        schemaDiff,
+        newSnapshot,
+        "postgres"
+      ) as string[];
       expect(ddl.length).toBe(1);
       expect(ddl[0]).toBe('DROP TABLE "old_users";');
     });
@@ -200,7 +239,24 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
+      const usersTableAfterAdd = createSampleTable("users", {
+        new_col: createSampleColumn(
+          "new_col",
+          "boolean",
+          { pg: "BOOLEAN", spanner: "BOOL" },
+          { notNull: true, default: false }
+        ),
+        // Assuming other columns might exist, but new_col is key for the snapshot
+      });
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { users: usersTableAfterAdd },
+        "postgres"
+      );
+      const ddl = generateMigrationDDL(
+        schemaDiff,
+        newSnapshot,
+        "postgres"
+      ) as string[];
       expect(ddl[0]).toBe(
         'ALTER TABLE "users" ADD COLUMN "new_col" BOOLEAN NOT NULL DEFAULT false;'
       );
@@ -218,7 +274,19 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
+      // Snapshot after 'old_col' is removed from 'users' table
+      const usersTableAfterDrop = createSampleTable("users", {
+        // No 'old_col' here
+      });
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { users: usersTableAfterDrop },
+        "postgres"
+      );
+      const ddl = generateMigrationDDL(
+        schemaDiff,
+        newSnapshot,
+        "postgres"
+      ) as string[];
       expect(ddl[0]).toBe('ALTER TABLE "users" DROP COLUMN "old_col";');
     });
 
@@ -233,7 +301,7 @@ describe("generateMigrationDDL", () => {
             columnChanges: [
               {
                 action: "change",
-                columnName: "age",
+                columnName: "age", // JS key
                 changes: {
                   type: "bigint",
                   dialectTypes: { postgres: "BIGINT", spanner: "INT64" },
@@ -243,7 +311,23 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
+      const usersTableAfterTypeChange = createSampleTable("users", {
+        age: createSampleColumn(
+          // JS key
+          "age", // DB name
+          "bigint",
+          { pg: "BIGINT", spanner: "INT64" } // New type
+        ),
+      });
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { users: usersTableAfterTypeChange },
+        "postgres"
+      );
+      const ddl = generateMigrationDDL(
+        schemaDiff,
+        newSnapshot,
+        "postgres"
+      ) as string[];
       expect(ddl[0]).toBe(
         'ALTER TABLE "users" ALTER COLUMN "age" SET DATA TYPE BIGINT;'
       );
@@ -267,7 +351,23 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
+      const usersTableAfterSetNotNull = createSampleTable("users", {
+        email: createSampleColumn(
+          "email",
+          "varchar",
+          { pg: "VARCHAR(255)", spanner: "STRING(255)" },
+          { notNull: true } // Changed property
+        ),
+      });
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { users: usersTableAfterSetNotNull },
+        "postgres"
+      );
+      const ddl = generateMigrationDDL(
+        schemaDiff,
+        newSnapshot,
+        "postgres"
+      ) as string[];
       expect(ddl[0]).toBe(
         'ALTER TABLE "users" ALTER COLUMN "email" SET NOT NULL;'
       );
@@ -291,7 +391,23 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
+      const usersTableAfterDropNotNull = createSampleTable("users", {
+        email: createSampleColumn(
+          "email",
+          "varchar",
+          { pg: "VARCHAR(255)", spanner: "STRING(255)" },
+          { notNull: false } // Changed property
+        ),
+      });
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { users: usersTableAfterDropNotNull },
+        "postgres"
+      );
+      const ddl = generateMigrationDDL(
+        schemaDiff,
+        newSnapshot,
+        "postgres"
+      ) as string[];
       expect(ddl[0]).toBe(
         'ALTER TABLE "users" ALTER COLUMN "email" DROP NOT NULL;'
       );
@@ -315,7 +431,23 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
+      const usersTableAfterSetDefault = createSampleTable("users", {
+        score: createSampleColumn(
+          "score",
+          "integer",
+          { pg: "INTEGER", spanner: "INT64" },
+          { default: 0 } // Changed property
+        ),
+      });
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { users: usersTableAfterSetDefault },
+        "postgres"
+      );
+      const ddl = generateMigrationDDL(
+        schemaDiff,
+        newSnapshot,
+        "postgres"
+      ) as string[];
       expect(ddl[0]).toBe(
         'ALTER TABLE "users" ALTER COLUMN "score" DEFAULT 0;'
       );
@@ -339,7 +471,23 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
+      const usersTableAfterDropDefault = createSampleTable("users", {
+        score: createSampleColumn(
+          "score",
+          "integer",
+          { pg: "INTEGER", spanner: "INT64" },
+          { default: undefined } // Changed property
+        ),
+      });
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { users: usersTableAfterDropDefault },
+        "postgres"
+      );
+      const ddl = generateMigrationDDL(
+        schemaDiff,
+        newSnapshot,
+        "postgres"
+      ) as string[];
       expect(ddl[0]).toBe(
         'ALTER TABLE "users" ALTER COLUMN "score" DROP DEFAULT;'
       );
@@ -363,7 +511,23 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
+      const productsTableAfterAddUnique = createSampleTable("products", {
+        product_code: createSampleColumn(
+          "product_code",
+          "varchar",
+          { pg: "VARCHAR(50)", spanner: "STRING(50)" },
+          { unique: true }
+        ),
+      });
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { products: productsTableAfterAddUnique },
+        "postgres"
+      );
+      const ddl = generateMigrationDDL(
+        schemaDiff,
+        newSnapshot,
+        "postgres"
+      ) as string[];
       expect(ddl[0]).toBe(
         'ALTER TABLE "products" ADD CONSTRAINT "uq_products_product_code" UNIQUE ("product_code");'
       );
@@ -387,7 +551,23 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
+      const productsTableAfterDropUnique = createSampleTable("products", {
+        product_code: createSampleColumn(
+          "product_code",
+          "varchar",
+          { pg: "VARCHAR(50)", spanner: "STRING(50)" },
+          { unique: false }
+        ),
+      });
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { products: productsTableAfterDropUnique },
+        "postgres"
+      );
+      const ddl = generateMigrationDDL(
+        schemaDiff,
+        newSnapshot,
+        "postgres"
+      ) as string[];
       expect(ddl[0]).toBe(
         'ALTER TABLE "products" DROP CONSTRAINT "uq_products_product_code";'
       );
@@ -414,7 +594,25 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
+      const usersTableAfterAddIndex = createSampleTable(
+        "users",
+        {
+          bio: createSampleColumn("bio", "text", {
+            pg: "TEXT",
+            spanner: "STRING(MAX)",
+          }),
+        },
+        [{ name: "idx_users_bio", columns: ["bio"], unique: false }]
+      );
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { users: usersTableAfterAddIndex },
+        "postgres"
+      );
+      const ddl = generateMigrationDDL(
+        schemaDiff,
+        newSnapshot,
+        "postgres"
+      ) as string[];
       expect(ddl[0]).toBe('CREATE INDEX "idx_users_bio" ON "users" ("bio");');
     });
 
@@ -439,7 +637,25 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
+      const usersTableAfterAddUniqueIndex = createSampleTable(
+        "users",
+        {
+          username: createSampleColumn("username", "varchar", {
+            pg: "VARCHAR(50)",
+            spanner: "STRING(50)",
+          }),
+        },
+        [{ name: "uq_users_username", columns: ["username"], unique: true }]
+      );
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { users: usersTableAfterAddUniqueIndex },
+        "postgres"
+      );
+      const ddl = generateMigrationDDL(
+        schemaDiff,
+        newSnapshot,
+        "postgres"
+      ) as string[];
       expect(ddl[0]).toBe(
         'CREATE UNIQUE INDEX "uq_users_username" ON "users" ("username");'
       );
@@ -459,7 +675,22 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
+      const usersTableAfterDropIndex = createSampleTable("users", {
+        // Assuming columns still exist, just index is gone
+        email: createSampleColumn("email", "varchar", {
+          pg: "VARCHAR(255)",
+          spanner: "STRING(255)",
+        }),
+      }); // No index 'idx_users_email_old'
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { users: usersTableAfterDropIndex },
+        "postgres"
+      );
+      const ddl = generateMigrationDDL(
+        schemaDiff,
+        newSnapshot,
+        "postgres"
+      ) as string[];
       expect(ddl[0]).toBe('DROP INDEX "idx_users_email_old";');
     });
 
@@ -482,7 +713,35 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
+      const usersTableAfterChangeIndex = createSampleTable(
+        "users",
+        {
+          status: createSampleColumn("status", "varchar", {
+            pg: "VARCHAR(20)",
+            spanner: "STRING(20)",
+          }),
+          type: createSampleColumn("type", "varchar", {
+            pg: "VARCHAR(20)",
+            spanner: "STRING(20)",
+          }),
+        },
+        [
+          {
+            name: "idx_users_status",
+            columns: ["status", "type"],
+            unique: false,
+          },
+        ]
+      );
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { users: usersTableAfterChangeIndex },
+        "postgres"
+      );
+      const ddl = generateMigrationDDL(
+        schemaDiff,
+        newSnapshot,
+        "postgres"
+      ) as string[];
       expect(consoleWarnSpy).toHaveBeenCalledWith(
         'Index change for "idx_users_status" on table "users" will be handled as DROP and ADD for PG.'
       );
@@ -509,7 +768,30 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
+      const ordersTableAfterSetPk = createSampleTable(
+        "orders",
+        {
+          order_id: createSampleColumn("order_id", "integer", {
+            pg: "INTEGER",
+            spanner: "INT64",
+          }),
+          customer_id: createSampleColumn("customer_id", "integer", {
+            pg: "INTEGER",
+            spanner: "INT64",
+          }),
+        },
+        undefined,
+        { name: "pk_orders", columns: ["order_id", "customer_id"] }
+      );
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { orders: ordersTableAfterSetPk },
+        "postgres"
+      );
+      const ddl = generateMigrationDDL(
+        schemaDiff,
+        newSnapshot,
+        "postgres"
+      ) as string[];
       expect(ddl.length).toBe(1);
       expect(ddl[0]).toBe(
         'ALTER TABLE "orders" ADD CONSTRAINT "pk_orders" PRIMARY KEY ("order_id", "customer_id");'
@@ -531,7 +813,26 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
+      const itemsTableAfterSetPkDefaultName = createSampleTable(
+        "items",
+        {
+          item_uuid: createSampleColumn("item_uuid", "uuid", {
+            pg: "UUID",
+            spanner: "STRING(36)",
+          }),
+        },
+        undefined,
+        { columns: ["item_uuid"] }
+      ); // Name will be defaulted
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { items: itemsTableAfterSetPkDefaultName },
+        "postgres"
+      );
+      const ddl = generateMigrationDDL(
+        schemaDiff,
+        newSnapshot,
+        "postgres"
+      ) as string[];
       expect(ddl.length).toBe(1);
       expect(ddl[0]).toBe(
         'ALTER TABLE "items" ADD CONSTRAINT "pk_items" PRIMARY KEY ("item_uuid");'
@@ -553,7 +854,25 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
+      const ordersTableAfterDropPk = createSampleTable("orders", {
+        order_id: createSampleColumn("order_id", "integer", {
+          pg: "INTEGER",
+          spanner: "INT64",
+        }),
+        customer_id: createSampleColumn("customer_id", "integer", {
+          pg: "INTEGER",
+          spanner: "INT64",
+        }),
+      }); // No PK
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { orders: ordersTableAfterDropPk },
+        "postgres"
+      );
+      const ddl = generateMigrationDDL(
+        schemaDiff,
+        newSnapshot,
+        "postgres"
+      ) as string[];
       expect(ddl.length).toBe(1);
       expect(ddl[0]).toBe(
         'ALTER TABLE "orders" DROP CONSTRAINT "pk_orders_old";'
@@ -577,7 +896,21 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
+      const itemsTableAfterDropPkDefaultName = createSampleTable("items", {
+        item_uuid: createSampleColumn("item_uuid", "uuid", {
+          pg: "UUID",
+          spanner: "STRING(36)",
+        }),
+      }); // No PK
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { items: itemsTableAfterDropPkDefaultName },
+        "postgres"
+      );
+      const ddl = generateMigrationDDL(
+        schemaDiff,
+        newSnapshot,
+        "postgres"
+      ) as string[];
       expect(ddl.length).toBe(1);
       expect(ddl[0]).toBe('ALTER TABLE "items" DROP CONSTRAINT "pk_items";');
       expect(consoleWarnSpy).toHaveBeenCalledWith(
@@ -597,7 +930,7 @@ describe("generateMigrationDDL", () => {
             columnChanges: [
               {
                 action: "change", // Assuming FK is added to an existing column or column is changed to have an FK
-                columnName: "user_id",
+                columnName: "user_id", // JS Key
                 changes: {
                   references: {
                     name: "fk_posts_user_id",
@@ -611,7 +944,32 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
+      const postsTableAfterAddFk = createSampleTable("posts", {
+        user_id: createSampleColumn(
+          // JS Key
+          "user_id", // DB Name
+          "integer",
+          { pg: "INTEGER", spanner: "INT64" }, // Assuming type
+          {
+            // from changes
+            references: {
+              name: "fk_posts_user_id",
+              referencedTable: "users",
+              referencedColumn: "id",
+              onDelete: "cascade",
+            },
+          }
+        ),
+      });
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { posts: postsTableAfterAddFk },
+        "postgres"
+      );
+      const ddl = generateMigrationDDL(
+        schemaDiff,
+        newSnapshot,
+        "postgres"
+      ) as string[];
       expect(ddl.length).toBe(1);
       expect(ddl[0]).toBe(
         'ALTER TABLE "posts" ADD CONSTRAINT "fk_posts_user_id" FOREIGN KEY ("user_id") REFERENCES "users" ("id") ON DELETE CASCADE;'
@@ -632,7 +990,7 @@ describe("generateMigrationDDL", () => {
             columnChanges: [
               {
                 action: "change",
-                columnName: "post_id",
+                columnName: "post_id", // JS Key
                 changes: {
                   references: null, // Signal to remove the FK
                 },
@@ -641,7 +999,24 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
+      const commentsTableAfterDropFk = createSampleTable("comments", {
+        post_id: createSampleColumn(
+          // JS Key
+          "post_id", // DB Name
+          "integer",
+          { pg: "INTEGER", spanner: "INT64" }, // Assuming type
+          { references: undefined } // FK removed
+        ),
+      });
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { comments: commentsTableAfterDropFk },
+        "postgres"
+      );
+      const ddl = generateMigrationDDL(
+        schemaDiff,
+        newSnapshot,
+        "postgres"
+      ) as string[];
       expect(ddl.length).toBe(1);
       // This will use the placeholder name due to current limitations
       expect(ddl[0]).toBe(
@@ -665,7 +1040,7 @@ describe("generateMigrationDDL", () => {
               {
                 action: "add",
                 column: createSampleColumn(
-                  "user_account_id",
+                  "user_account_id", // DB Name
                   "integer",
                   { pg: "INTEGER", spanner: "INT64" },
                   {
@@ -682,7 +1057,31 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
+      const profilesTableAfterAddColFk = createSampleTable("profiles", {
+        user_account_id: createSampleColumn(
+          // JS Key (same as DB name here)
+          "user_account_id", // DB Name
+          "integer",
+          { pg: "INTEGER", spanner: "INT64" },
+          {
+            references: {
+              name: "fk_profiles_user_account",
+              referencedTable: "user_accounts",
+              referencedColumn: "account_id",
+              onDelete: "set null",
+            },
+          }
+        ),
+      });
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { profiles: profilesTableAfterAddColFk },
+        "postgres"
+      );
+      const ddl = generateMigrationDDL(
+        schemaDiff,
+        newSnapshot,
+        "postgres"
+      ) as string[];
       expect(ddl.length).toBe(2);
       expect(ddl[0]).toBe(
         'ALTER TABLE "profiles" ADD COLUMN "user_account_id" INTEGER;'
@@ -718,8 +1117,13 @@ describe("generateMigrationDDL", () => {
         toVersion: V1_SNAPSHOT_VERSION,
         tableChanges: [{ action: "add", table: usersTable }],
       };
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { Users: usersTable },
+        "spanner"
+      );
       const ddlBatches = generateMigrationDDL(
         schemaDiff,
+        newSnapshot,
         "spanner"
       ) as string[][];
       // Expecting CREATE TABLE and potentially CREATE UNIQUE INDEX for Email if `unique:true` was set
@@ -759,8 +1163,13 @@ describe("generateMigrationDDL", () => {
         toVersion: V1_SNAPSHOT_VERSION,
         tableChanges: [{ action: "add", table: productsTable }],
       };
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { Products: productsTable },
+        "spanner"
+      );
       const ddlBatches = generateMigrationDDL(
         schemaDiff,
+        newSnapshot,
         "spanner"
       ) as string[][];
       // With selective batching, CREATE TABLE (non-validating) and CREATE UNIQUE INDEX (validating)
@@ -806,8 +1215,13 @@ describe("generateMigrationDDL", () => {
         toVersion: V1_SNAPSHOT_VERSION,
         tableChanges: [{ action: "add", table: orderDetailsTable }],
       };
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { OrderDetails: orderDetailsTable },
+        "spanner"
+      );
       const ddlBatches = generateMigrationDDL(
         schemaDiff,
+        newSnapshot,
         "spanner"
       ) as string[][];
       const ddl = ddlBatches.flat();
@@ -831,8 +1245,10 @@ describe("generateMigrationDDL", () => {
         toVersion: V1_SNAPSHOT_VERSION,
         tableChanges: [{ action: "remove", tableName: "OldProducts" }],
       };
+      const newSnapshot = createMockNewSchemaSnapshot({}, "spanner");
       const ddlBatches = generateMigrationDDL(
         schemaDiff,
+        newSnapshot,
         "spanner"
       ) as string[][];
       expect(ddlBatches.length).toBe(1);
@@ -852,7 +1268,7 @@ describe("generateMigrationDDL", () => {
               {
                 action: "add",
                 column: createSampleColumn(
-                  "PhoneNumber",
+                  "PhoneNumber", // DB Name
                   "varchar",
                   { pg: "VARCHAR(20)", spanner: "STRING(20)" },
                   { default: "N/A" }
@@ -862,8 +1278,21 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
+      const usersTableAfterAddCol = createSampleTable("Users", {
+        PhoneNumber: createSampleColumn(
+          "PhoneNumber",
+          "varchar",
+          { pg: "VARCHAR(20)", spanner: "STRING(20)" },
+          { default: "N/A" }
+        ),
+      });
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { Users: usersTableAfterAddCol },
+        "spanner"
+      );
       const ddlBatches = generateMigrationDDL(
         schemaDiff,
+        newSnapshot,
         "spanner"
       ) as string[][];
       const ddl = ddlBatches.flat();
@@ -884,8 +1313,16 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
+      const usersTableAfterDropCol = createSampleTable("Users", {
+        /* No Bio column */
+      });
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { Users: usersTableAfterDropCol },
+        "spanner"
+      );
       const ddlBatches = generateMigrationDDL(
         schemaDiff,
+        newSnapshot,
         "spanner"
       ) as string[][];
       const ddl = ddlBatches.flat();
@@ -904,7 +1341,7 @@ describe("generateMigrationDDL", () => {
             columnChanges: [
               {
                 action: "change",
-                columnName: "UserId",
+                columnName: "UserId", // JS Key
                 changes: {
                   type: "string",
                   dialectTypes: {
@@ -917,8 +1354,21 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
+      const usersTableAfterTypeChangeSpanner = createSampleTable("Users", {
+        UserId: createSampleColumn(
+          // JS Key
+          "UserId", // DB Name
+          "string",
+          { pg: "VARCHAR(36)", spanner: "STRING(36)" } // New type
+        ),
+      });
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { Users: usersTableAfterTypeChangeSpanner },
+        "spanner"
+      );
       const ddlBatches = generateMigrationDDL(
         schemaDiff,
+        newSnapshot,
         "spanner"
       ) as string[][];
       const ddl = ddlBatches.flat();
@@ -947,8 +1397,21 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
+      const usersTableAfterSetNotNullSpanner = createSampleTable("Users", {
+        Email: createSampleColumn(
+          "Email",
+          "varchar",
+          { pg: "VARCHAR(255)", spanner: "STRING(255)" },
+          { notNull: true }
+        ),
+      });
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { Users: usersTableAfterSetNotNullSpanner },
+        "spanner"
+      );
       const ddlBatches = generateMigrationDDL(
         schemaDiff,
+        newSnapshot,
         "spanner"
       ) as string[][];
       const ddl = ddlBatches.flat();
@@ -974,7 +1437,19 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      generateMigrationDDL(schemaDiff, "spanner");
+      const usersTableAfterDropNotNullSpanner = createSampleTable("Users", {
+        Email: createSampleColumn(
+          "Email",
+          "varchar",
+          { pg: "VARCHAR(255)", spanner: "STRING(255)" },
+          { notNull: false }
+        ),
+      });
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { Users: usersTableAfterDropNotNullSpanner },
+        "spanner"
+      );
+      generateMigrationDDL(schemaDiff, newSnapshot, "spanner");
       expect(consoleWarnSpy).toHaveBeenCalledWith(
         `Spanner DDL for making Users.Email nullable may require re-specifying type and 'DROP NOT NULL' is not standard; typically, you just omit NOT NULL.` // Updated
       );
@@ -1000,7 +1475,19 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      generateMigrationDDL(schemaDiff, "spanner");
+      const usersTableAfterSetDefaultSpanner = createSampleTable("Users", {
+        Bio: createSampleColumn(
+          "Bio",
+          "text",
+          { pg: "TEXT", spanner: "STRING(MAX)" },
+          { default: "New default" }
+        ),
+      });
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { Users: usersTableAfterSetDefaultSpanner },
+        "spanner"
+      );
+      generateMigrationDDL(schemaDiff, newSnapshot, "spanner");
       expect(consoleWarnSpy).toHaveBeenCalledWith(
         `Spanner does not support ALTER COLUMN SET DEFAULT for Users.Bio. Default changes require table recreation or other strategies.` // Updated
       );
@@ -1025,7 +1512,19 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
-      generateMigrationDDL(schemaDiff, "spanner");
+      const usersTableAfterSetUniqueSpanner = createSampleTable("Users", {
+        Email: createSampleColumn(
+          "Email",
+          "varchar",
+          { pg: "VARCHAR(255)", spanner: "STRING(255)" },
+          { unique: true }
+        ),
+      });
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { Users: usersTableAfterSetUniqueSpanner },
+        "spanner"
+      );
+      generateMigrationDDL(schemaDiff, newSnapshot, "spanner");
       expect(consoleWarnSpy).toHaveBeenCalledWith(
         `Spanner 'unique' constraint changes for Users.Email are typically handled via separate CREATE/DROP UNIQUE INDEX operations. Ensure index diffs cover this.` // Updated
       );
@@ -1050,8 +1549,24 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
+      const usersTableAfterSetPkSpanner = createSampleTable(
+        "Users",
+        {
+          NewPkCol: createSampleColumn("NewPkCol", "string", {
+            pg: "TEXT",
+            spanner: "STRING(MAX)",
+          }),
+        },
+        undefined,
+        { columns: ["NewPkCol"] }
+      );
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { Users: usersTableAfterSetPkSpanner },
+        "spanner"
+      );
       const ddlBatches = generateMigrationDDL(
         schemaDiff,
+        newSnapshot,
         "spanner"
       ) as string[][];
       const ddl = ddlBatches.flat();
@@ -1080,8 +1595,16 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
+      const productsTableAfterDropPkSpanner = createSampleTable("Products", {
+        // columns...
+      }); // No PK
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { Products: productsTableAfterDropPkSpanner },
+        "spanner"
+      );
       const ddlBatches = generateMigrationDDL(
         schemaDiff,
+        newSnapshot,
         "spanner"
       ) as string[][];
       const ddl = ddlBatches.flat();
@@ -1110,8 +1633,22 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
+      const orderItemsTableAfterInterleaveChange = createSampleTable(
+        "OrderItems",
+        {
+          // columns...
+        },
+        undefined,
+        undefined,
+        { parentTable: "NewParent", onDelete: "no action" }
+      );
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { OrderItems: orderItemsTableAfterInterleaveChange },
+        "spanner"
+      );
       const ddlBatches = generateMigrationDDL(
         schemaDiff,
+        newSnapshot,
         "spanner"
       ) as string[][];
       const ddl = ddlBatches.flat();
@@ -1133,7 +1670,7 @@ describe("generateMigrationDDL", () => {
             columnChanges: [
               {
                 action: "change",
-                columnName: "ArtistId",
+                columnName: "ArtistId", // JS Key
                 changes: {
                   references: {
                     name: "FK_Albums_ArtistId",
@@ -1147,8 +1684,29 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
+      const albumsTableAfterFkChange = createSampleTable("Albums", {
+        ArtistId: createSampleColumn(
+          // JS Key
+          "ArtistId", // DB Name
+          "integer",
+          { pg: "INTEGER", spanner: "INT64" }, // Assuming type
+          {
+            references: {
+              name: "FK_Albums_ArtistId",
+              referencedTable: "Artists",
+              referencedColumn: "ArtistId",
+              onDelete: "no action",
+            },
+          }
+        ),
+      });
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { Albums: albumsTableAfterFkChange },
+        "spanner"
+      );
       const ddlBatches = generateMigrationDDL(
         schemaDiff,
+        newSnapshot,
         "spanner"
       ) as string[][];
       const ddl = ddlBatches.flat();
@@ -1172,7 +1730,7 @@ describe("generateMigrationDDL", () => {
             columnChanges: [
               {
                 action: "change",
-                columnName: "AlbumId",
+                columnName: "AlbumId", // JS Key
                 changes: {
                   references: null,
                 },
@@ -1181,8 +1739,22 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
+      const tracksTableAfterDropFk = createSampleTable("Tracks", {
+        AlbumId: createSampleColumn(
+          // JS Key
+          "AlbumId", // DB Name
+          "integer",
+          { pg: "INTEGER", spanner: "INT64" }, // Assuming type
+          { references: undefined } // FK removed
+        ),
+      });
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { Tracks: tracksTableAfterDropFk },
+        "spanner"
+      );
       const ddlBatches = generateMigrationDDL(
         schemaDiff,
+        newSnapshot,
         "spanner"
       ) as string[][];
       const ddl = ddlBatches.flat();
@@ -1208,7 +1780,7 @@ describe("generateMigrationDDL", () => {
               {
                 action: "add",
                 column: createSampleColumn(
-                  "UserId",
+                  "UserId", // DB Name
                   "STRING(36)",
                   { pg: "VARCHAR(36)", spanner: "STRING(36)" },
                   {
@@ -1224,8 +1796,28 @@ describe("generateMigrationDDL", () => {
           },
         ],
       };
+      const playlistsTableAfterAddColFk = createSampleTable("Playlists", {
+        UserId: createSampleColumn(
+          // JS Key (same as DB name)
+          "UserId", // DB Name
+          "STRING(36)",
+          { pg: "VARCHAR(36)", spanner: "STRING(36)" },
+          {
+            references: {
+              name: "FK_Playlists_UserId",
+              referencedTable: "Users",
+              referencedColumn: "UserId",
+            },
+          }
+        ),
+      });
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { Playlists: playlistsTableAfterAddColFk },
+        "spanner"
+      );
       const ddlBatches = generateMigrationDDL(
         schemaDiff,
+        newSnapshot,
         "spanner"
       ) as string[][];
       const ddl = ddlBatches.flat();
@@ -1343,9 +1935,46 @@ describe("generateMigrationDDL", () => {
       // Batch 3: [ALTER...field6] (validating, size 1, new batch because previous validating batch was full)
       // Batch 4: [CREATE TABLE TestTable2] (non-validating batch ends because next is validating)
       // Batch 5: [CREATE UNIQUE INDEX idx_data] (validating, size 1)
+      const table1Snapshot =
+        schemaDiff.tableChanges[0].action === "add"
+          ? schemaDiff.tableChanges[0].table
+          : undefined;
+      const table2Snapshot =
+        schemaDiff.tableChanges[2].action === "add"
+          ? schemaDiff.tableChanges[2].table
+          : undefined;
 
+      // Construct newSchemaSnapshot based on the final state of tables after all changes in schemaDiff
+      // This is a simplified representation; a real scenario might need more complex logic
+      // to build the 'after' state if changes were more intricate (e.g., column modifications within TestTable1).
+      const finalTables: Record<string, TableSnapshot> = {};
+      if (table1Snapshot) {
+        // Simulate adding columns from columnChanges to table1Snapshot
+        const finalTable1Cols = { ...table1Snapshot.columns };
+        const colChanges =
+          schemaDiff.tableChanges[1].action === "change"
+            ? schemaDiff.tableChanges[1].columnChanges
+            : [];
+        if (colChanges) {
+          for (const colChange of colChanges) {
+            if (colChange.action === "add") {
+              finalTable1Cols[colChange.column.name] = colChange.column; // Assuming key is same as name for simplicity here
+            }
+          }
+        }
+        finalTables[table1Snapshot.name] = {
+          ...table1Snapshot,
+          columns: finalTable1Cols,
+        };
+      }
+      if (table2Snapshot) {
+        finalTables[table2Snapshot.name] = table2Snapshot;
+      }
+
+      const newSnapshot = createMockNewSchemaSnapshot(finalTables, "spanner");
       const ddlBatches = generateMigrationDDL(
         schemaDiff,
+        newSnapshot,
         "spanner"
       ) as string[][];
 
@@ -1413,8 +2042,10 @@ describe("generateMigrationDDL", () => {
           { action: "remove", tableName: "OldTable6" }, // 6th non-validating
         ],
       };
+      const newSnapshot = createMockNewSchemaSnapshot({}, "spanner"); // Empty tables after removals
       const ddlBatches = generateMigrationDDL(
         schemaDiff,
+        newSnapshot,
         "spanner"
       ) as string[][];
       // All are non-validating, so they should be batched by SPANNER_DDL_BATCH_SIZE
@@ -1474,8 +2105,29 @@ describe("generateMigrationDDL", () => {
           { action: "remove", tableName: "OldTableDrop" }, // Non-validating
         ],
       };
+
+      // Construct the newSchemaSnapshot: T1 with c1-c5, OldTableDrop is removed.
+      const t1Cols: Record<string, ColumnSnapshot> = {};
+      const colChangesToAdd =
+        schemaDiff.tableChanges[0].action === "change"
+          ? schemaDiff.tableChanges[0].columnChanges
+          : [];
+      if (colChangesToAdd) {
+        for (const colChange of colChangesToAdd) {
+          if (colChange.action === "add") {
+            t1Cols[colChange.column.name] = colChange.column; // Assuming key is same as name
+          }
+        }
+      }
+      const t1TableSnapshot = createSampleTable("T1", t1Cols);
+      const newSnapshot = createMockNewSchemaSnapshot(
+        { T1: t1TableSnapshot },
+        "spanner"
+      );
+
       const ddlBatches = generateMigrationDDL(
         schemaDiff,
+        newSnapshot,
         "spanner"
       ) as string[][];
 

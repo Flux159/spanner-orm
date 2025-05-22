@@ -1,0 +1,1 @@
+Okay, so if you look at both the migrations generated now inside of the spanner-orm-migrations folder - we have an error on referencing the FOREIGN KEY (userId) when it should be user_id accordin gto the table. We need to fix up foreign key generation it seems for both postgres & spanner

@@ -20,6 +20,7 @@ import type {
   CompositePrimaryKeySnapshot,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   ColumnConfig, // Added for formatDefaultValuePostgres
+  SchemaSnapshot, // Added for FK generation
 } from "../types/common.js";
 import { reservedKeywords } from "../spanner/reservedKeywords.js";
 
@@ -189,7 +190,10 @@ function generatePgForeignKeyConstraintDDL(
   )} (${escapeIdentifierPostgres(fk.referencedColumn)})${onDeleteAction};`;
 }
 
-function generatePgDdl(diffActions: TableDiffAction[]): string[] {
+function generatePgDdl(
+  diffActions: TableDiffAction[],
+  newSchemaSnapshot: SchemaSnapshot
+): string[] {
   let tableNameEsc: string; // Declare once here for the whole function scope
   const createTableStatements: string[] = [];
   const addColumnStatements: string[] = [];
@@ -221,13 +225,13 @@ function generatePgDdl(diffActions: TableDiffAction[]): string[] {
         createTableStatements.push(generatePgCreateTableDDL(table));
 
         // Collect FKs for later
-        for (const columnName in table.columns) {
-          const column = table.columns[columnName];
+        for (const propKey in table.columns) {
+          const column = table.columns[propKey];
           if (column.references) {
             addForeignKeyStatements.push(
               generatePgForeignKeyConstraintDDL(
                 table.name, // Use original table name for FK definition
-                columnName,
+                column.name, // Use actual DB column name
                 column.references
               )
             );
@@ -409,7 +413,9 @@ function generatePgDdl(diffActions: TableDiffAction[]): string[] {
                     addForeignKeyStatements.push(
                       generatePgForeignKeyConstraintDDL(
                         originalTableNameForChange,
-                        currentColumnName,
+                        // Use the actual DB column name from the new schema snapshot
+                        newSchemaSnapshot.tables[originalTableNameForChange]
+                          .columns[currentColumnName].name,
                         changes.references as NonNullable<
                           ColumnSnapshot["references"]
                         >
@@ -546,6 +552,8 @@ function generatePgDdl(diffActions: TableDiffAction[]): string[] {
   return finalDdlStatements;
 }
 
+// --- Spanner DDL Generation Helpers --- (Similar changes as for PG)
+
 const spannerReservedKeywords = reservedKeywords;
 
 function escapeIdentifierSpanner(name: string): string {
@@ -680,6 +688,8 @@ function generateSpannerJustCreateTableDDL(table: TableSnapshot): string {
   return createTableSql;
 }
 
+// Note: generateSpannerForeignKeyConstraintDDL itself is fine, the issue is what's passed to it.
+
 function generateSpannerForeignKeyConstraintDDL(
   tableName: string,
   columnName: string,
@@ -719,7 +729,10 @@ function isSpannerDdlValidating(ddl: string): boolean {
   return false;
 }
 
-function generateSpannerDdl(diffActions: TableDiffAction[]): string[][] {
+function generateSpannerDdl(
+  diffActions: TableDiffAction[],
+  newSchemaSnapshot: SchemaSnapshot
+): string[][] {
   const createTableStatements: string[] = [];
   const addColumnStatements: string[] = [];
   const createIndexStatements: string[] = [];
@@ -744,8 +757,8 @@ function generateSpannerDdl(diffActions: TableDiffAction[]): string[][] {
         const table = action.table;
         createTableStatements.push(generateSpannerJustCreateTableDDL(table));
 
-        for (const columnName in table.columns) {
-          const column = table.columns[columnName];
+        for (const propKey in table.columns) {
+          const column = table.columns[propKey];
           if (column.unique && !column.primaryKey) {
             const uniqueIndexName = escapeIdentifierSpanner(
               `uq_${table.name}_${column.name}`
@@ -760,7 +773,7 @@ function generateSpannerDdl(diffActions: TableDiffAction[]): string[][] {
             addForeignKeyStatements.push(
               generateSpannerForeignKeyConstraintDDL(
                 table.name,
-                columnName,
+                column.name, // Use actual DB column name
                 column.references
               )
             );
@@ -885,7 +898,10 @@ function generateSpannerDdl(diffActions: TableDiffAction[]): string[][] {
                     addForeignKeyStatements.push(
                       generateSpannerForeignKeyConstraintDDL(
                         originalTableName,
-                        currentColumnName,
+                        // Use the actual DB column name from the new schema snapshot
+                        newSchemaSnapshot.tables[originalTableName].columns[
+                          currentColumnName
+                        ].name,
                         changes.references as NonNullable<
                           ColumnSnapshot["references"]
                         >
@@ -1047,6 +1063,7 @@ function generateSpannerDdl(diffActions: TableDiffAction[]): string[][] {
 
 export function generateMigrationDDL(
   schemaDiff: SchemaDiff,
+  newSchemaSnapshot: SchemaSnapshot, // Added newSchemaSnapshot
   dialect: Dialect
 ): string[] | string[][] {
   // Return type updated for Spanner
@@ -1056,9 +1073,9 @@ export function generateMigrationDDL(
 
   switch (dialect) {
     case "postgres":
-      return generatePgDdl(schemaDiff.tableChanges);
+      return generatePgDdl(schemaDiff.tableChanges, newSchemaSnapshot);
     case "spanner":
-      return generateSpannerDdl(schemaDiff.tableChanges); // This now returns string[][]
+      return generateSpannerDdl(schemaDiff.tableChanges, newSchemaSnapshot); // This now returns string[][]
     default:
       throw new Error(`Unsupported dialect for DDL generation: ${dialect}`);
   }

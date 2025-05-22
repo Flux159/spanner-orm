@@ -82,3 +82,9 @@ export const uploads = table(
     ],
   })
 );
+
+export const posts = table("posts", {
+  ...permissibleResource, // Includes id, createdAt, updatedAt, userId, visibility
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+});
