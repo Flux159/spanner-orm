@@ -68,6 +68,8 @@ export type {
   IndexDiffAction,
 } from "./types/index.js"; // Using the new barrel file
 
+export type { MigrationExecutor } from "./types/index.js"; // Exporting MigrationExecutor for migration tasks
+
 // Functions
 export * from "./core/functions.js";
 
