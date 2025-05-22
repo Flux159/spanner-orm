@@ -38,13 +38,13 @@ Okay, we'll use environment variables for database connection configuration. Her
        - If `"postgres"`:
 
          - Read `process.env.DATABASE_URL`.
-         - If `DATABASE_URL` starts with `postgres://` or `postgresql://`, instantiate and return `ConcretePgAdapter`.
-         - Else, instantiate and return `ConcretePgliteAdapter` using `DATABASE_URL` as the `dataDir`.
+         - If `DATABASE_URL` starts with `postgres://` or `postgresql://`, instantiate and return `PgAdapter`.
+         - Else, instantiate and return `PgliteAdapter` using `DATABASE_URL` as the `dataDir`.
 
        - If `"spanner"`:
 
          - Read `process.env.SPANNER_PROJECT_ID`, `process.env.SPANNER_INSTANCE_ID`, `process.env.SPANNER_DATABASE_ID`.
-         - Instantiate and return `ConcreteSpannerAdapter`.
+         - Instantiate and return `SpannerAdapter`.
 
        - If dialect is missing or unsupported, or required env vars for the dialect are missing, log an error and return `null` (or throw an error).
 

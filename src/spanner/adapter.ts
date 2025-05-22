@@ -25,7 +25,7 @@ export interface SpannerConnectionOptions extends ConnectionOptions {
 
 // SpannerTransactionAdapter is effectively replaced by the global OrmTransaction interface
 
-export class ConcreteSpannerAdapter implements DatabaseAdapter {
+export class SpannerAdapter implements DatabaseAdapter {
   readonly dialect = "spanner";
   private spannerClient?: Spanner;
   private instance?: Instance;

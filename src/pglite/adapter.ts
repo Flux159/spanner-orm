@@ -18,7 +18,7 @@ export interface PgliteConnectionOptions extends ConnectionOptions {
 
 // PgliteTransactionAdapter is effectively replaced by the global Transaction interface
 
-export class ConcretePgliteAdapter implements DatabaseAdapter {
+export class PgliteAdapter implements DatabaseAdapter {
   readonly dialect = "postgres"; // Treat PGlite as PostgreSQL for ORM dialect purposes
   private pglite: PGlite;
   private ready: Promise<void>;
