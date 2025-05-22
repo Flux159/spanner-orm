@@ -136,3 +136,6 @@ dist
 .pnp.*
 
 website/build
+
+spanner-orm-migrations
+spannerorgpglite.db

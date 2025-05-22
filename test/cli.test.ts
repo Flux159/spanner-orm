@@ -96,16 +96,18 @@ describe("spanner-orm-cli", () => {
         "postgres",
       ]);
 
-      const expectedPgUsersDDL = `CREATE TABLE "users" (
+      const expectedPgUsersDDLTable = `CREATE TABLE "users" (
   "id" INTEGER NOT NULL PRIMARY KEY,
   "name" TEXT NOT NULL,
-  "email" TEXT UNIQUE
+  "email" TEXT
 );`;
+      const expectedPgUsersDDLConstraint = `ALTER TABLE "users" ADD CONSTRAINT "uq_users_email" UNIQUE ("email");`;
       const expectedPgProductsDDL = `CREATE TABLE "products" (
   "sku" TEXT NOT NULL PRIMARY KEY,
   "description" TEXT
 );`;
-      expect(stdout).toContain(expectedPgUsersDDL);
+      expect(stdout).toContain(expectedPgUsersDDLTable);
+      expect(stdout).toContain(expectedPgUsersDDLConstraint);
       expect(stdout).toContain(expectedPgProductsDDL);
     });
 
@@ -245,7 +247,10 @@ describe("spanner-orm-cli", () => {
           expect(content).toContain('CREATE TABLE "users"');
           expect(content).toContain('"id" INTEGER NOT NULL PRIMARY KEY'); // More specific
           expect(content).toContain('"name" TEXT NOT NULL');
-          expect(content).toContain('"email" TEXT UNIQUE'); // Corrected: inline unique
+          expect(content).toContain('"email" TEXT'); // No longer inline unique
+          expect(content).toContain(
+            'ALTER TABLE "users" ADD CONSTRAINT "uq_users_email" UNIQUE ("email");'
+          );
 
           expect(content).toContain('CREATE TABLE "products"');
           expect(content).toContain('"sku" TEXT NOT NULL PRIMARY KEY'); // More specific
