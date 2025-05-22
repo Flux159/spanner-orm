@@ -53,7 +53,7 @@ describe("generateMigrationDDL", () => {
           "email",
           "varchar",
           { pg: "VARCHAR(255)", spanner: "STRING(255)" },
-          { notNull: true, unique: true }
+          { notNull: true, unique: true } // This unique will be a separate statement
         ),
         bio: createSampleColumn("bio", "text", {
           pg: "TEXT",
@@ -66,13 +66,19 @@ describe("generateMigrationDDL", () => {
         tableChanges: [{ action: "add", table: usersTable }],
       };
       const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
-      expect(ddl.length).toBe(1);
+      // Expect CREATE TABLE + ALTER TABLE for unique constraint
+      expect(ddl.length).toBe(2);
       expect(ddl[0]).toBe(
         'CREATE TABLE "users" (\n' +
           '  "id" INTEGER NOT NULL PRIMARY KEY,\n' +
-          '  "email" VARCHAR(255) NOT NULL UNIQUE,\n' +
+          // Unique is no longer inline in the base CREATE TABLE for this helper's output
+          '  "email" VARCHAR(255) NOT NULL,\n' +
           '  "bio" TEXT\n' +
           ");"
+      );
+      // The unique constraint on 'email' is now generated as a separate ALTER TABLE statement
+      expect(ddl[1]).toBe(
+        'ALTER TABLE "users" ADD CONSTRAINT "uq_users_email" UNIQUE ("email");'
       );
     });
 
@@ -114,15 +120,20 @@ describe("generateMigrationDDL", () => {
         tableChanges: [{ action: "add", table: orderItemsTable }],
       };
       const ddl = generateMigrationDDL(schemaDiff, "postgres") as string[];
-      expect(ddl.length).toBe(1);
+      // Expect CREATE TABLE + CREATE UNIQUE INDEX for the table-level unique constraint
+      expect(ddl.length).toBe(2);
       expect(ddl[0]).toBe(
         'CREATE TABLE "order_items" (\n' +
           '  "order_id" INTEGER NOT NULL,\n' +
           '  "item_id" INTEGER NOT NULL,\n' +
           '  "quantity" INTEGER DEFAULT 1,\n' +
-          '  PRIMARY KEY ("order_id", "item_id"),\n' +
-          '  CONSTRAINT "uq_order_item" UNIQUE ("order_id", "item_id")\n' +
+          // PK is inline
+          '  PRIMARY KEY ("order_id", "item_id")\n' +
           ");"
+      );
+      // The unique constraint uq_order_item is now a separate CREATE UNIQUE INDEX
+      expect(ddl[1]).toBe(
+        'CREATE UNIQUE INDEX "uq_order_item" ON "order_items" ("order_id", "item_id");'
       );
     });
 
@@ -570,7 +581,7 @@ describe("generateMigrationDDL", () => {
       expect(ddl.length).toBe(1);
       expect(ddl[0]).toBe('ALTER TABLE "items" DROP CONSTRAINT "pk_items";');
       expect(consoleWarnSpy).toHaveBeenCalledWith(
-        'Primary key name for DROP operation on table "items" for PostgreSQL was not provided. Assuming default name ""pk_items"". This might fail.'
+        'Primary key name for DROP PK on "items" not provided. Assuming default ""pk_items"".' // Updated warning
       );
       consoleWarnSpy.mockRestore();
     });
@@ -637,7 +648,7 @@ describe("generateMigrationDDL", () => {
         'ALTER TABLE "comments" DROP CONSTRAINT "fk_comments_post_id_TO_BE_DROPPED";'
       );
       expect(consoleWarnSpy).toHaveBeenCalledWith(
-        'Attempting to DROP foreign key for comments.post_id because its \'references\' property was set to null. The specific constraint name is required for PostgreSQL. Using placeholder name ""fk_comments_post_id_TO_BE_DROPPED"". This DDL will likely FAIL. The schema diff process should provide the exact name of the FK constraint to drop.'
+        'Attempting to DROP foreign key for comments.post_id. The specific constraint name is required. Using placeholder: "fk_comments_post_id_TO_BE_DROPPED". This will likely FAIL.' // Updated warning
       );
       consoleWarnSpy.mockRestore();
     });
@@ -763,11 +774,6 @@ describe("generateMigrationDDL", () => {
       );
       const ddl = ddlBatches.flat(); // Keep this for checking total statements if needed, though covered by batch checks.
       expect(ddl.length).toBe(2); // CREATE TABLE, CREATE UNIQUE INDEX
-      // Original check for ddl[1] is now ddlBatches[1][0]
-      // This specific check is now part of the batch check above.
-      // expect(ddl[1]).toBe(
-      //   "CREATE UNIQUE INDEX UQ_ProductCode ON Products (ProductCode);"
-      // );
     });
 
     it("should generate CREATE TABLE with INTERLEAVE and non-unique index", () => {
@@ -970,7 +976,7 @@ describe("generateMigrationDDL", () => {
       };
       generateMigrationDDL(schemaDiff, "spanner");
       expect(consoleWarnSpy).toHaveBeenCalledWith(
-        `Spanner DDL for making Users.Email nullable may require re-specifying type.`
+        `Spanner DDL for making Users.Email nullable may require re-specifying type and 'DROP NOT NULL' is not standard; typically, you just omit NOT NULL.` // Updated
       );
       consoleWarnSpy.mockRestore();
     });
@@ -996,7 +1002,7 @@ describe("generateMigrationDDL", () => {
       };
       generateMigrationDDL(schemaDiff, "spanner");
       expect(consoleWarnSpy).toHaveBeenCalledWith(
-        `Spanner does not support ALTER COLUMN SET DEFAULT for Users.Bio.`
+        `Spanner does not support ALTER COLUMN SET DEFAULT for Users.Bio. Default changes require table recreation or other strategies.` // Updated
       );
       consoleWarnSpy.mockRestore();
     });
@@ -1021,7 +1027,7 @@ describe("generateMigrationDDL", () => {
       };
       generateMigrationDDL(schemaDiff, "spanner");
       expect(consoleWarnSpy).toHaveBeenCalledWith(
-        `Spanner 'unique' constraint changes for Users.Email handled via index diffs.`
+        `Spanner 'unique' constraint changes for Users.Email are typically handled via separate CREATE/DROP UNIQUE INDEX operations. Ensure index diffs cover this.` // Updated
       );
       consoleWarnSpy.mockRestore();
     });
@@ -1051,7 +1057,7 @@ describe("generateMigrationDDL", () => {
       const ddl = ddlBatches.flat();
       expect(ddl.length).toBe(0);
       expect(consoleWarnSpy).toHaveBeenCalledWith(
-        `Spanner does not support altering PKs on existing table "Users".`
+        `Spanner does not support altering Primary Keys on existing table "Users". This requires table recreation.` // Updated
       );
       consoleWarnSpy.mockRestore();
     });
@@ -1081,7 +1087,7 @@ describe("generateMigrationDDL", () => {
       const ddl = ddlBatches.flat();
       expect(ddl.length).toBe(0);
       expect(consoleWarnSpy).toHaveBeenCalledWith(
-        `Spanner does not support altering PKs on existing table "Products".`
+        `Spanner does not support altering Primary Keys on existing table "Products". This requires table recreation.` // Updated
       );
       consoleWarnSpy.mockRestore();
     });
@@ -1111,7 +1117,7 @@ describe("generateMigrationDDL", () => {
       const ddl = ddlBatches.flat();
       expect(ddl.length).toBe(0);
       expect(consoleWarnSpy).toHaveBeenCalledWith(
-        `Spanner does not support altering interleave for table "OrderItems".`
+        `Spanner does not support altering interleave for table "OrderItems". This requires table recreation.` // Updated
       );
       consoleWarnSpy.mockRestore();
     });
@@ -1185,7 +1191,7 @@ describe("generateMigrationDDL", () => {
         "ALTER TABLE Tracks DROP CONSTRAINT FK_Tracks_AlbumId_TO_BE_DROPPED"
       );
       expect(consoleWarnSpy).toHaveBeenCalledWith(
-        `Dropping FK for Tracks.AlbumId. Constraint name needed.`
+        `Attempting to DROP foreign key for Tracks.AlbumId. The specific constraint name is required. Using placeholder: FK_Tracks_AlbumId_TO_BE_DROPPED. This will likely FAIL.` // Updated
       );
       consoleWarnSpy.mockRestore();
     });
