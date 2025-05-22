@@ -10,16 +10,26 @@ function formatDefaultValue(column: ColumnConfig<unknown, string>): string {
   if (column.default === undefined) {
     return "";
   }
+
+  // 1. Handle SQL objects from sql`` tag (e.g., sql`CURRENT_TIMESTAMP`)
   if (
     typeof column.default === "object" &&
     column.default !== null &&
-    (column.default as SQL)._isSQL === true
+    (column.default as SQL)._isSQL === true && // Check the marker
+    typeof (column.default as SQL).toSqlString === "function" // Ensure it has the method
   ) {
-    // For SQL objects created by the sql`` tag
     return `DEFAULT ${(column.default as SQL).toSqlString("postgres")}`;
   }
+
+  // 2. Handle client-side default functions (e.g., from $defaultFn for UUIDs)
+  if (column._hasClientDefaultFn && typeof column.default === "function") {
+    // This is a client-side default, so no DDL representation.
+    // The warning is suppressed because we've explicitly acknowledged it.
+    return "";
+  }
+
+  // 3. Handle raw SQL provided as { sql: "RAW_SQL" }
   if (
-    // This handles the { sql: "RAW_SQL" } case, which might be legacy or for direct use
     typeof column.default === "object" &&
     column.default !== null &&
     "sql" in column.default &&
@@ -27,29 +37,38 @@ function formatDefaultValue(column: ColumnConfig<unknown, string>): string {
   ) {
     return `DEFAULT ${(column.default as { sql: string }).sql}`;
   }
+
+  // 4. Handle literal string defaults
   if (typeof column.default === "string") {
     return `DEFAULT '${column.default.replace(/'/g, "''")}'`;
   }
-  if (typeof column.default === "object" && column.default !== null) {
-    // For JSON/JSONB defaults that are objects
-    return `DEFAULT '${JSON.stringify(column.default).replace(/'/g, "''")}'`;
-  }
+
+  // 5. Handle literal number or boolean defaults
   if (
     typeof column.default === "number" ||
     typeof column.default === "boolean"
   ) {
     return `DEFAULT ${column.default}`;
   }
+
+  // 6. Handle other function defaults (that are not client-side $defaultFn)
+  // These might still be problematic if they don't resolve to a known type or SQL.
   if (typeof column.default === "function") {
-    // For $defaultFn, we'd ideally execute it, but for DDL generation,
-    // this might not be what we want unless it's a placeholder for a DB function.
-    // For now, we'll skip function defaults in DDL, assuming they are app-level.
-    // Or, the function itself should return an SQL object.
+    // This function default is not marked as _hasClientDefaultFn,
+    // so it's unexpected here for DDL generation.
     console.warn(
-      `Function default for column "${column.name}" cannot be directly represented in DDL. Use sql\`...\` or a literal value.`
+      `Unrecognized function default for column "${column.name}" cannot be directly represented in DDL. Use sql\`...\`, a literal value, or $defaultFn for client-side defaults.`
     );
     return "";
   }
+
+  // 7. Handle object defaults (e.g., for JSON/JSONB) that are not SQL objects
+  // This should come after SQL object check to avoid misinterpreting SQL objects.
+  if (typeof column.default === "object" && column.default !== null) {
+    // This will stringify other objects, typically for JSON/JSONB.
+    return `DEFAULT '${JSON.stringify(column.default).replace(/'/g, "''")}'`;
+  }
+
   return "";
 }
 

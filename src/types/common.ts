@@ -31,6 +31,7 @@ export interface ColumnConfig<T, TName extends string = string> {
   unique?: boolean; // For unique constraints on a single column
   references?: ForeignKeyConfig;
   _tableName?: string; // Internal: Name of the table this column belongs to
+  _hasClientDefaultFn?: boolean; // Internal: Flag for client-side default functions
   // Placeholder for more advanced properties like $onUpdate, $type from example
 }
 
