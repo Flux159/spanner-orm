@@ -392,7 +392,8 @@ export interface ColumnSnapshot {
   type: string; // Generic type e.g., 'text', 'varchar'
   dialectTypes: { postgres: string; spanner: string };
   notNull?: boolean;
-  default?: unknown | { sql: string } | { function: string }; // Store actual value, SQL, or a marker for function
+  default?: unknown | SQL | { sql: string } | { function: string }; // Explicitly include SQL type
+  _hasClientDefaultFn?: boolean; // Added to snapshot for client-side default functions
   primaryKey?: boolean;
   unique?: boolean;
   references?: {
