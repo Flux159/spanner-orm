@@ -31,6 +31,7 @@ export interface ColumnConfig<T, TName extends string = string> {
   unique?: boolean; // For unique constraints on a single column
   references?: ForeignKeyConfig;
   _tableName?: string; // Internal: Name of the table this column belongs to
+  _hasClientDefaultFn?: boolean; // Internal: Flag for client-side default functions
   // Placeholder for more advanced properties like $onUpdate, $type from example
 }
 
@@ -391,7 +392,8 @@ export interface ColumnSnapshot {
   type: string; // Generic type e.g., 'text', 'varchar'
   dialectTypes: { postgres: string; spanner: string };
   notNull?: boolean;
-  default?: unknown | { sql: string } | { function: string }; // Store actual value, SQL, or a marker for function
+  default?: unknown | SQL | { sql: string } | { function: string }; // Explicitly include SQL type
+  _hasClientDefaultFn?: boolean; // Added to snapshot for client-side default functions
   primaryKey?: boolean;
   unique?: boolean;
   references?: {

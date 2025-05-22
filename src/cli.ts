@@ -184,9 +184,20 @@ async function handleDdlGeneration(options: DdlOptions) {
     tables: {},
   };
   const schemaDiff = generateSchemaDiff(emptySnapshot, currentSnapshot);
-  const ddlStatements = generateMigrationDDL(schemaDiff, options.dialect);
+  const ddlStatementsResult = generateMigrationDDL(schemaDiff, options.dialect);
 
-  const outputDdl = ddlStatements.join("\n\n");
+  let outputDdl = "";
+  if (options.dialect === "spanner") {
+    // ddlStatementsResult is string[][] for Spanner
+    const spannerDdlBatches = ddlStatementsResult as string[][];
+    outputDdl = spannerDdlBatches
+      .map((batch) => batch.join(";\n") + (batch.length > 0 ? ";" : "")) // Add semicolon to each statement in a batch
+      .join("\n\n"); // Separate batches with double newline
+  } else {
+    // ddlStatementsResult is string[] for other dialects (e.g., Postgres)
+    const pgDdlStatements = ddlStatementsResult as string[];
+    outputDdl = pgDdlStatements.join("\n\n"); // Existing behavior for Postgres
+  }
 
   if (options.output) {
     const outputPath = path.resolve(process.cwd(), options.output);
