@@ -139,17 +139,24 @@ function diffTables(
     }
 
     const indexChanges: IndexDiffAction[] = [];
-    const oldIndexes = oldTable.indexes || [];
-    const newIndexes = newTable.indexes || [];
-    const oldIndexMap = new Map(
-      oldIndexes.map((idx) => [idx.name || JSON.stringify(idx.columns), idx])
+    const oldIndexes = oldTable.tableIndexes || []; // Changed from indexes
+    const newIndexes = newTable.tableIndexes || []; // Changed from indexes
+    const oldIndexMap = new Map<string, IndexSnapshot>( // Added explicit typing
+      oldIndexes.map((idx: IndexSnapshot) => [
+        idx.name || JSON.stringify(idx.columns),
+        idx,
+      ])
     );
-    const newIndexMap = new Map(
-      newIndexes.map((idx) => [idx.name || JSON.stringify(idx.columns), idx])
+    const newIndexMap = new Map<string, IndexSnapshot>( // Added explicit typing
+      newIndexes.map((idx: IndexSnapshot) => [
+        idx.name || JSON.stringify(idx.columns),
+        idx,
+      ])
     );
 
     // Removed indexes
-    for (const [idxIdentifier, oldIdx] of oldIndexMap) {
+    for (const [idxIdentifier, oldIdxValue] of oldIndexMap) {
+      const oldIdx = oldIdxValue as IndexSnapshot; // Ensure type
       if (!newIndexMap.has(idxIdentifier)) {
         // Prefer name for removal if available
         indexChanges.push({
@@ -159,20 +166,22 @@ function diffTables(
       }
     }
     // Added or changed indexes
-    for (const [idxIdentifier, newIdx] of newIndexMap) {
-      const oldIdx = oldIndexMap.get(idxIdentifier);
+    for (const [idxIdentifier, newIdxValue] of newIndexMap) {
+      const newIdx = newIdxValue as IndexSnapshot; // Ensure type
+      const oldIdx = oldIndexMap.get(idxIdentifier) as
+        | IndexSnapshot
+        | undefined; // Ensure type, can be undefined
       if (!oldIdx) {
         indexChanges.push({ action: "add", index: newIdx });
       } else {
+        // Both oldIdx and newIdx are confirmed to be IndexSnapshot here
         const { name: _n1, ...oldIdxProps } = oldIdx;
         const { name: _n2, ...newIdxProps } = newIdx;
         const idxDiff = compareIndexes(oldIdxProps, newIdxProps);
         if (Object.keys(idxDiff).length > 0) {
-          // For simplicity, index changes are often handled as drop and recreate.
-          // However, providing a "change" action can be useful for analysis.
           indexChanges.push({
             action: "change",
-            indexName: newIdx.name || idxIdentifier, // Use name if available
+            indexName: newIdx.name || idxIdentifier,
             changes: idxDiff,
           });
         }
