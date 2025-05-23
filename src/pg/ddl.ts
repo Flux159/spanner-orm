@@ -73,7 +73,7 @@ function formatDefaultValue(column: ColumnConfig<unknown, string>): string {
 }
 
 export function generateCreateTablePostgres(tableConfig: TableConfig): string {
-  const tableName = escapeIdentifier(tableConfig.name);
+  const tableName = escapeIdentifier(tableConfig.tableName);
   const columnsSql: string[] = [];
   const primaryKeyColumns: string[] = []; // Changed to const
 
@@ -131,7 +131,7 @@ export function generateCreateTablePostgres(tableConfig: TableConfig): string {
 
       if (!referencedTableName) {
         console.warn(
-          `Could not determine referenced table name for column "${column.name}" in table "${tableConfig.name}". FK constraint skipped.`
+          `Could not determine referenced table name for column "${column.name}" in table "${tableConfig.tableName}". FK constraint skipped.`
         );
       } else {
         columnSql += ` REFERENCES ${escapeIdentifier(
@@ -194,11 +194,13 @@ export function generateCreateTablePostgres(tableConfig: TableConfig): string {
   }
 
   // Handle table-level indexes
-  if (tableConfig.indexes) {
-    for (const index of tableConfig.indexes) {
+  if (tableConfig.tableIndexes) {
+    for (const index of tableConfig.tableIndexes) {
       const indexName = index.name
         ? escapeIdentifier(index.name)
-        : escapeIdentifier(`uq_${tableConfig.name}_${index.columns.join("_")}`); // Ensure generated name is escaped
+        : escapeIdentifier(
+            `uq_${tableConfig.tableName}_${index.columns.join("_")}`
+          ); // Ensure generated name is escaped
       // const uniqueKeyword = index.unique ? "UNIQUE " : ""; // Removed unused uniqueKeyword
       const columns = index.columns.map(escapeIdentifier).join(", ");
       // CREATE UNIQUE INDEX idx_name ON table_name (column1, column2);

@@ -144,7 +144,7 @@ bun install spanner-orm
       ...baseModel,
       userId: uuid("user_id") // Assuming user_id is also a UUID
         .notNull()
-        .references(() => users.columns.id, { onDelete: "cascade" }),
+        .references(() => users.id, { onDelete: "cascade" }), // Changed to users.id
     };
 
     // For resources that have visibility permissions
@@ -172,12 +172,13 @@ bun install spanner-orm
         metadata: jsonb("metadata"), // Example for JSONB
       },
       (t) => ({
-        indexes: [
-          index({ columns: [t.fileType.name] }), // Example non-unique index
+        tableIndexes: [
+          // Renamed from indexes
+          index({ columns: [t.fileType.name] }), // t.fileType is already the column config
           uniqueIndex({
             name: "uq_gcs_object",
-            columns: [t.gcsObjectName.name],
-          }), // Example unique index
+            columns: [t.gcsObjectName.name], // t.gcsObjectName is already the column config
+          }),
         ],
       })
     );
@@ -283,14 +284,14 @@ import { OrmClient, sql, users, posts, count } from "spanner-orm";
 async function runFluentExamples(db: OrmClient) {
   // 1. Basic SELECT with WHERE, ORDER BY, LIMIT
   const recentUsers = await db
-    .select({ id: users.columns.id, name: users.columns.name })
+    .select({ id: users.id, name: users.name }) // Changed to direct access
     .from(users)
     .where(
-      sql`${users.columns.createdAt} > ${new Date(
+      sql`${users.createdAt} > ${new Date( // Changed to direct access
         Date.now() - 24 * 60 * 60 * 1000
       )}`
     )
-    .orderBy(users.columns.createdAt, "DESC")
+    .orderBy(users.createdAt, "DESC") // Changed to direct access
     .limit(10);
   console.log("Recent Users:", recentUsers);
   // recentUsers is typed as: Array<{ id: string; name: string; }> (assuming id is uuid/string)
@@ -305,16 +306,16 @@ async function runFluentExamples(db: OrmClient) {
   const updateResult = await db
     .update(users)
     .set({ name: "Alice in Chains" })
-    .where(sql`${users.columns.email} = ${"alice@example.com"}`);
+    .where(sql`${users.email} = ${"alice@example.com"}`); // Changed to direct access
   console.log("Update Result:", updateResult); // e.g., { count: 1 }
 
   // 4. SELECT with Eager Loading (include)
   // Assuming 'posts' table has a 'userId' column referencing 'users.id'
   // And your schema definitions correctly set up this relation for the ORM to understand.
   const usersWithPosts = await db
-    .select({ id: users.columns.id, userName: users.columns.name })
+    .select({ id: users.id, userName: users.name }) // Changed to direct access
     .from(users)
-    .where(sql`${users.columns.email} = ${"alice@example.com"}`)
+    .where(sql`${users.email} = ${"alice@example.com"}`) // Changed to direct access
     .include({
       posts: {
         // 'posts' is the relation name defined in your schema or inferred
@@ -329,7 +330,7 @@ async function runFluentExamples(db: OrmClient) {
   // 5. DELETE a user
   const deleteResult = await db
     .deleteFrom(users)
-    .where(sql`${users.columns.email} = ${"alice@example.com"}`);
+    .where(sql`${users.email} = ${"alice@example.com"}`); // Changed to direct access
   console.log("Delete Result:", deleteResult); // e.g., { count: 1 }
 
   // 6. Raw SQL Query
@@ -341,9 +342,9 @@ async function runFluentExamples(db: OrmClient) {
   // 7. Transaction Example
   await db.transaction(async (txDb) => {
     const user = await txDb
-      .select({ id: users.columns.id })
+      .select({ id: users.id }) // Changed to direct access
       .from(users)
-      .where(sql`${users.columns.name} = ${"Bob The Builder"}`)
+      .where(sql`${users.name} = ${"Bob The Builder"}`) // Changed to direct access
       .limit(1);
 
     if (user.length > 0) {
@@ -384,14 +385,14 @@ async function runQueryBuilderExamples(adapter) {
 
   // 1. Basic SELECT with WHERE
   const recentUsersQuery = new QueryBuilder() // Create a new QB for each query
-    .select({ id: users.columns.id, name: users.columns.name })
+    .select({ id: users.id, name: users.name }) // Changed to direct access
     .from(users)
     .where(
-      sql`${users.columns.createdAt} > ${new Date(
+      sql`${users.createdAt} > ${new Date( // Changed to direct access
         Date.now() - 24 * 60 * 60 * 1000
       )}`
     )
-    .orderBy(users.columns.createdAt, "DESC")
+    .orderBy(users.createdAt, "DESC") // Changed to direct access
     .limit(10);
 
   const recentUsersPrepared = recentUsersQuery.prepare(adapter.dialect);

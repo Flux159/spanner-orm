@@ -104,7 +104,7 @@ function formatDefaultValueSpanner(
 }
 
 export function generateCreateTableSpanner(tableConfig: TableConfig): string {
-  const tableName = escapeIdentifierSpanner(tableConfig.name);
+  const tableName = escapeIdentifierSpanner(tableConfig.tableName);
   const columnsSql: string[] = [];
   const primaryKeyColumns: string[] = [];
   const foreignKeySqls: string[] = [];
@@ -141,12 +141,12 @@ export function generateCreateTableSpanner(tableConfig: TableConfig): string {
 
       if (!referencedTableName) {
         console.warn(
-          `Could not determine referenced table name for column "${column.name}" in table "${tableConfig.name}". FK constraint skipped for Spanner.`
+          `Could not determine referenced table name for column "${column.name}" in table "${tableConfig.tableName}". FK constraint skipped for Spanner.`
         );
       } else {
         // Spanner FK constraint names are optional but good practice. Auto-generate one.
         const fkName = escapeIdentifierSpanner(
-          `fk_${tableConfig.name}_${column.name}_${referencedTableName}`
+          `fk_${tableConfig.tableName}_${column.name}_${referencedTableName}`
         );
         let fkSql = `CONSTRAINT ${fkName} FOREIGN KEY (${escapeIdentifierSpanner(
           column.name
@@ -166,7 +166,7 @@ export function generateCreateTableSpanner(tableConfig: TableConfig): string {
         ) {
           console.warn(
             `Spanner does not support ON DELETE ${column.references.onDelete.toUpperCase()} for FK on ${
-              tableConfig.name
+              tableConfig.tableName
             }.${column.name}. Defaulting to NO ACTION.`
           );
         }

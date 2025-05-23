@@ -6,7 +6,8 @@ import type {
   SchemaSnapshot,
   TableSnapshot,
   ColumnSnapshot,
-  IndexSnapshot,
+  IndexSnapshot, // Keep this for the return type of the map
+  IndexConfig, // Add this for the input type of the map callback
   CompositePrimaryKeySnapshot,
   InterleaveSnapshot,
   TableColumns,
@@ -100,11 +101,13 @@ function transformTable(
     );
   }
 
-  const indexes: IndexSnapshot[] = (tableConfig.indexes || []).map(
-    (idx): IndexSnapshot => ({
+  const indexes: IndexSnapshot[] = (tableConfig.tableIndexes || []).map(
+    // Changed from .indexes
+    (idx: IndexConfig): IndexSnapshot => ({
+      // Changed idx type to IndexConfig
       name: idx.name,
       columns: idx.columns,
-      unique: idx.unique || false, // Ensure unique is always present
+      unique: idx.unique || false, // Ensure unique is always present, defaulting to false if undefined
     })
   );
 
@@ -125,9 +128,9 @@ function transformTable(
   }
 
   return {
-    name: tableConfig.name,
+    tableName: tableConfig.tableName, // Changed from name
     columns,
-    indexes: indexes.length > 0 ? indexes : undefined,
+    tableIndexes: indexes.length > 0 ? indexes : undefined, // Changed from indexes
     compositePrimaryKey,
     interleave,
   };

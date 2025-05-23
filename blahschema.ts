@@ -45,7 +45,7 @@ const ownableResource = {
   ...baseModel,
   userId: uuid("user_id") // Assuming user_id is also a UUID
     .notNull()
-    .references(() => users.columns.id, { onDelete: "cascade" }),
+    .references(() => users.id, { onDelete: "cascade" }),
 };
 
 // For resources that have visibility permissions
