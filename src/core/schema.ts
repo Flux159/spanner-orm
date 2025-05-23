@@ -2,22 +2,23 @@
 import crypto from "node:crypto"; // Added for uuid helper
 import type {
   ColumnConfig,
-  TableConfig,
+  TableConfig, // Base config type
+  Table, // User-facing table type with direct column access
   IndexConfig,
   SQL,
-  // ForeignKeyConfig, // Not directly used as a type annotation here
   OnDeleteAction,
   CompositePrimaryKeyConfig,
-  Dialect, // Added Dialect import
+  Dialect,
+  TableColumns, // Added for explicit typing
 } from "../types/common.js";
 import { sql } from "../types/common.js"; // Import the sql tagged template literal
 
 // Global registry for table configurations
-const tableRegistry = new Map<string, TableConfig<any, any>>();
+// Stores the fully constructed table objects (Table type)
+const tableRegistry = new Map<string, Table<any, any>>();
 
-export function getTableConfig(
-  tableName: string
-): TableConfig<any, any> | undefined {
+export function getTableConfig(tableName: string): Table<any, any> | undefined {
+  // Return type changed to Table
   return tableRegistry.get(tableName);
 }
 
@@ -252,57 +253,94 @@ export function table<
     BaseColumnBuilder<unknown, string, ColumnConfig<unknown, string>>
   >
 >(
-  name: TTableName,
-  columns: TColumns,
+  tableNameInput: TTableName, // Renamed from name to tableNameInput to avoid conflict
+  columnsInput: TColumns, // Renamed from columns to columnsInput
   extra?: (table: TableBuilderColumns<TColumns>) => {
-    indexes?: IndexConfig[];
+    indexes?: IndexConfig[]; // This will be mapped to tableIndexes
     primaryKey?: CompositePrimaryKeyConfig;
     interleave?: TableConfig<any, any>["interleave"]; // Spanner specific
   }
-): TableConfig<TTableName, TableBuilderColumns<TColumns>> {
-  const builtColumnsArray = Object.entries(columns).map(([key, builder]) => {
-    const colConfig = builder.build();
-    colConfig._tableName = name; // Assign table name to column config
-    return [key, colConfig];
-  });
+): Table<TTableName, TableBuilderColumns<TColumns>> {
+  // Return type changed to user-facing Table
+  const builtColumnsArray = Object.entries(columnsInput).map(
+    ([key, builder]) => {
+      const colConfig = builder.build();
+      colConfig._tableName = tableNameInput; // Assign table name to column config
+      return [key, colConfig];
+    }
+  );
 
   const builtColumns = Object.fromEntries(
     builtColumnsArray
   ) as TableBuilderColumns<TColumns>;
 
-  const tableConfig: TableConfig<TTableName, TableBuilderColumns<TColumns>> = {
-    name,
+  // Start with the base TableConfig structure
+  const baseTableConfig: TableConfig<
+    TTableName,
+    TableBuilderColumns<TColumns>
+  > = {
+    tableName: tableNameInput,
     columns: builtColumns,
-    _isTable: true, // Added marker for CLI detection
+    _isTable: true,
   };
 
+  // Apply extra configurations
   if (extra) {
     const extraConfig = extra(builtColumns);
     if (extraConfig.indexes) {
-      tableConfig.indexes = extraConfig.indexes;
+      baseTableConfig.tableIndexes = extraConfig.indexes; // Assign to tableIndexes
     }
     if (extraConfig.primaryKey) {
-      // Ensure no individual column is also marked as primaryKey if a composite one is defined
       const individualPks = Object.values(builtColumns).filter(
         (c) => c.primaryKey
       );
       if (individualPks.length > 0) {
         throw new Error(
-          `Table "${name}" cannot have both a composite primary key and individual column primary keys (${individualPks
+          `Table "${tableNameInput}" cannot have both a composite primary key and individual column primary keys (${individualPks
             .map((c) => c.name)
             .join(", ")}).`
         );
       }
-      tableConfig.compositePrimaryKey = extraConfig.primaryKey;
+      baseTableConfig.compositePrimaryKey = extraConfig.primaryKey;
     }
     if (extraConfig.interleave) {
-      tableConfig.interleave = extraConfig.interleave;
+      baseTableConfig.interleave = extraConfig.interleave;
     }
-    // Handle other extra configurations here
   }
 
-  tableRegistry.set(name, tableConfig); // Register the table
-  return tableConfig;
+  // Create the final table object by mixing in columns directly
+  // Use 'as any' for the initial object to allow dynamic property assignment
+  const finalTableObject = { ...baseTableConfig } as any;
+
+  const reservedKeys = [
+    "tableName",
+    "columns",
+    "tableIndexes",
+    "compositePrimaryKey",
+    "interleave",
+    "_isTable",
+  ];
+
+  for (const colKey in builtColumns) {
+    if (Object.prototype.hasOwnProperty.call(builtColumns, colKey)) {
+      if (reservedKeys.includes(colKey) || colKey in baseTableConfig) {
+        console.warn(
+          `Column name "${colKey}" on table "${tableNameInput}" conflicts with a reserved table property. Access this column via ".columns.${colKey}".`
+        );
+      } else {
+        finalTableObject[colKey] = builtColumns[colKey];
+      }
+    }
+  }
+
+  // Cast to the final Table type
+  const fullyTypedTable = finalTableObject as Table<
+    TTableName,
+    TableBuilderColumns<TColumns>
+  >;
+
+  tableRegistry.set(tableNameInput, fullyTypedTable); // Register the fully typed table
+  return fullyTypedTable;
 }
 
 // --- Index Functions ---

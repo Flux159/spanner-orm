@@ -105,7 +105,7 @@ function formatDefaultValuePostgres(
 }
 
 function generatePgCreateTableDDL(table: TableSnapshot): string {
-  const tableName = escapeIdentifierPostgres(table.name);
+  const tableName = escapeIdentifierPostgres(table.tableName);
   // eslint-disable-next-line prefer-const
   let columnsSql: string[] = [];
   const primaryKeyColumns: string[] = [];
@@ -147,7 +147,7 @@ function generatePgCreateTableDDL(table: TableSnapshot): string {
       } else if (colIndex === -1) {
         // This case should ideally not happen if primaryKeyColumns is populated correctly
         console.warn(
-          `Primary key column ${primaryKeyColumns[0]} not found in SQL definitions for table ${table.name}. Adding PRIMARY KEY clause separately.`
+          `Primary key column ${primaryKeyColumns[0]} not found in SQL definitions for table ${table.tableName}. Adding PRIMARY KEY clause separately.`
         );
         columnsSql.push(`PRIMARY KEY (${primaryKeyColumns.join(", ")})`);
       }
@@ -213,7 +213,7 @@ function generatePgDdl(
   for (const action of diffActions) {
     // Determine and assign tableNameEsc based on the action type before the switch
     if (action.action === "add") {
-      tableNameEsc = escapeIdentifierPostgres(action.table.name);
+      tableNameEsc = escapeIdentifierPostgres(action.table.tableName);
     } else {
       // For 'remove' or 'change', action.tableName is available
       tableNameEsc = escapeIdentifierPostgres(action.tableName);
@@ -231,7 +231,7 @@ function generatePgDdl(
           if (column.references) {
             addForeignKeyStatements.push(
               generatePgForeignKeyConstraintDDL(
-                table.name, // Use original table name for FK definition
+                table.tableName, // Use original table name for FK definition
                 column.name, // Use actual DB column name
                 column.references
               )
@@ -240,12 +240,12 @@ function generatePgDdl(
           // Handle column-level unique constraints (not part of PK)
           if (column.unique && !column.primaryKey) {
             const constraintName = escapeIdentifierPostgres(
-              `uq_${table.name}_${column.name}`
+              `uq_${table.tableName}_${column.name}`
             );
             createIndexStatements.push(
               // Using createIndexStatements for unique constraints too
               `ALTER TABLE ${escapeIdentifierPostgres(
-                table.name
+                table.tableName
               )} ADD CONSTRAINT ${constraintName} UNIQUE (${escapeIdentifierPostgres(
                 column.name
               )});`
@@ -254,13 +254,13 @@ function generatePgDdl(
         }
 
         // Collect table-level indexes (unique and non-unique)
-        if (table.indexes) {
-          for (const index of table.indexes) {
+        if (table.tableIndexes) {
+          for (const index of table.tableIndexes) {
             const indexName = index.name
               ? escapeIdentifierPostgres(index.name)
               : escapeIdentifierPostgres(
                   `${index.unique ? "uq" : "idx"}_${
-                    table.name
+                    table.tableName
                   }_${index.columns.join("_")}`
                 );
             const columns = index.columns
@@ -270,13 +270,13 @@ function generatePgDdl(
               // Prefer CREATE UNIQUE INDEX over ALTER TABLE ADD CONSTRAINT for multi-column unique indexes defined in table.indexes
               createIndexStatements.push(
                 `CREATE UNIQUE INDEX ${indexName} ON ${escapeIdentifierPostgres(
-                  table.name
+                  table.tableName
                 )} (${columns});`
               );
             } else {
               createIndexStatements.push(
                 `CREATE INDEX ${indexName} ON ${escapeIdentifierPostgres(
-                  table.name
+                  table.tableName
                 )} (${columns});`
               );
             }
@@ -647,7 +647,7 @@ function formatDefaultValueSpanner(
 }
 
 function generateSpannerJustCreateTableDDL(table: TableSnapshot): string {
-  const tableName = escapeIdentifierSpanner(table.name);
+  const tableName = escapeIdentifierSpanner(table.tableName);
   const columnsSql: string[] = [];
   const primaryKeyColumns: string[] = [];
 
@@ -748,7 +748,7 @@ function generateSpannerDdl(
   for (const action of diffActions) {
     let currentTableNameEsc: string;
     if (action.action === "add") {
-      currentTableNameEsc = escapeIdentifierSpanner(action.table.name);
+      currentTableNameEsc = escapeIdentifierSpanner(action.table.tableName);
     } else {
       currentTableNameEsc = escapeIdentifierSpanner(action.tableName);
     }
@@ -762,7 +762,7 @@ function generateSpannerDdl(
           const column = table.columns[propKey];
           if (column.unique && !column.primaryKey) {
             const uniqueIndexName = escapeIdentifierSpanner(
-              `uq_${table.name}_${column.name}`
+              `uq_${table.tableName}_${column.name}`
             );
             createIndexStatements.push(
               `CREATE UNIQUE INDEX ${uniqueIndexName} ON ${currentTableNameEsc} (${escapeIdentifierSpanner(
@@ -773,7 +773,7 @@ function generateSpannerDdl(
           if (column.references) {
             addForeignKeyStatements.push(
               generateSpannerForeignKeyConstraintDDL(
-                table.name,
+                table.tableName,
                 column.name, // Use actual DB column name
                 column.references
               )
@@ -781,13 +781,13 @@ function generateSpannerDdl(
           }
         }
 
-        if (table.indexes) {
-          for (const index of table.indexes) {
+        if (table.tableIndexes) {
+          for (const index of table.tableIndexes) {
             const indexName = index.name
               ? escapeIdentifierSpanner(index.name)
               : escapeIdentifierSpanner(
                   `${index.unique ? "uq" : "idx"}_${
-                    table.name
+                    table.tableName
                   }_${index.columns.join("_")}`
                 );
             const columns = index.columns

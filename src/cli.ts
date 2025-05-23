@@ -123,8 +123,8 @@ async function loadSchemaTablesMap(
     );
 
     potentialTables.forEach((table) => {
-      if (table.name) {
-        tablesMap[table.name] = table;
+      if (table.tableName) {
+        tablesMap[table.tableName] = table;
       }
     });
 
@@ -151,9 +151,9 @@ async function loadSchemaTablesMap(
             typeof item === "object" &&
             item !== null &&
             (item as { _isTable?: boolean })._isTable === true &&
-            (item as TableConfig).name
+            (item as TableConfig).tableName
           ) {
-            tablesMap[(item as TableConfig).name] = item as TableConfig;
+            tablesMap[(item as TableConfig).tableName] = item as TableConfig;
           }
         });
       }
@@ -161,7 +161,7 @@ async function loadSchemaTablesMap(
 
     if (Object.keys(tablesMap).length === 0) {
       console.error(
-        `No table definitions found in ${absoluteSchemaPath}. Ensure tables are exported, have an '_isTable: true' property, and a 'name' property.`
+        `No table definitions found in ${absoluteSchemaPath}. Ensure tables are exported, have an '_isTable: true' property, and a 'tableName' property.`
       );
       process.exit(1);
     }

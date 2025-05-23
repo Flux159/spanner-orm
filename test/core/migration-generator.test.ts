@@ -36,15 +36,15 @@ const createSampleColumn = (
 });
 
 const createSampleTable = (
-  name: string,
+  tableName: string, // Renamed from name
   columns: Record<string, ColumnSnapshot>,
   indexes?: IndexSnapshot[],
   pk?: CompositePrimaryKeySnapshot,
   interleave?: InterleaveSnapshot
 ): TableSnapshot => ({
-  name,
+  tableName, // Renamed from name
   columns,
-  indexes,
+  tableIndexes: indexes, // Renamed from indexes
   compositePrimaryKey: pk,
   interleave,
 });
@@ -1958,17 +1958,18 @@ describe("generateMigrationDDL", () => {
         if (colChanges) {
           for (const colChange of colChanges) {
             if (colChange.action === "add") {
-              finalTable1Cols[colChange.column.name] = colChange.column; // Assuming key is same as name for simplicity here
+              finalTable1Cols[colChange.column.name] = colChange.column;
             }
           }
         }
-        finalTables[table1Snapshot.name] = {
+        finalTables[table1Snapshot.tableName] = {
+          // Changed from .name
           ...table1Snapshot,
           columns: finalTable1Cols,
         };
       }
       if (table2Snapshot) {
-        finalTables[table2Snapshot.name] = table2Snapshot;
+        finalTables[table2Snapshot.tableName] = table2Snapshot; // Changed from .name
       }
 
       const newSnapshot = createMockNewSchemaSnapshot(finalTables, "spanner");

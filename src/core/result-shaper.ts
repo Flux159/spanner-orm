@@ -31,7 +31,7 @@ export function shapeResults<
   if (primaryKeyColumns.length === 0) {
     // Cannot reliably group without a primary key on the main table
     console.warn(
-      `Warning: Cannot shape results for table ${primaryTable.name} as it has no defined primary key. Returning raw data.`
+      `Warning: Cannot shape results for table ${primaryTable.tableName} as it has no defined primary key. Returning raw data.`
     );
     return rawData as ShapedResultItem<TPrimaryTable, TInclude>[];
   }
