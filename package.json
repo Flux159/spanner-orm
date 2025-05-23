@@ -8,12 +8,6 @@
     "spanner-orm-cli": "./dist/cli.js"
   },
   "license": "MIT",
-  "scripts": {
-    "build": "rm -rf dist && tsc && chmod +x ./dist/cli.js",
-    "start": "bun dist/index.js",
-    "test": "vitest run",
-    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
-  },
   "dependencies": {
     "commander": "^14.0.0"
   },
@@ -32,6 +26,15 @@
     "execa": "^9.5.3",
     "typescript": "^5.0.4",
     "typescript-eslint": "^8.31.0",
-    "vitest": "^3.1.2"
+    "vitest": "^3.1.2",
+    "hugo-bin": "^0.144.5"
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc && chmod +x ./dist/cli.js",
+    "start": "bun dist/index.js",
+    "test": "vitest run",
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "docs:dev": "hugo server -s website",
+    "docs:build": "hugo -s website --minify"
   }
 }
