@@ -43,8 +43,8 @@ jobs:
       - name: Build Hugo site
         run: bun run docs:build # Uses the script from package.json. Output will be in 'website/public' by default with Hextra or as specified in the script.
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
+      # - name: Setup Pages
+      #   uses: actions/configure-pages@v5
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
