@@ -34,7 +34,7 @@ export type PgConnectionOptions = PoolConfig | string | ConnectionOptions;
 //   ): Promise<T[]>;
 // }
 
-export class ConcretePgAdapter implements DatabaseAdapter {
+export class PostgresAdapter implements DatabaseAdapter {
   readonly dialect = "postgres";
   private pool: Pool;
   private isConnected: boolean = false;

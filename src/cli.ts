@@ -3,9 +3,9 @@
 import path from "path";
 import fs from "fs/promises";
 import { Command, Option } from "commander";
-import { ConcretePgAdapter } from "./pg/adapter.js";
-import { ConcretePgliteAdapter } from "./pglite/adapter.js";
-import { ConcreteSpannerAdapter } from "./spanner/adapter.js";
+import { PostgresAdapter } from "./pg/adapter.js";
+import { PgliteAdapter } from "./pglite/adapter.js";
+import { SpannerAdapter } from "./spanner/adapter.js";
 import type { DatabaseAdapter } from "./types/adapter.js";
 // import { generateCreateTablePostgres } from "./pg/ddl.js"; // Will be handled by migration-generator
 // import { generateCreateTableSpanner } from "./spanner/ddl.js"; // Will be handled by migration-generator
@@ -184,7 +184,12 @@ async function handleDdlGeneration(options: DdlOptions) {
     tables: {},
   };
   const schemaDiff = generateSchemaDiff(emptySnapshot, currentSnapshot);
-  const ddlStatementsResult = generateMigrationDDL(schemaDiff, options.dialect);
+  // Pass currentSnapshot as the newSchemaSnapshot because the diff is from empty to current
+  const ddlStatementsResult = generateMigrationDDL(
+    schemaDiff,
+    currentSnapshot,
+    options.dialect
+  );
 
   let outputDdl = "";
   if (options.dialect === "spanner") {
@@ -272,10 +277,10 @@ async function getDatabaseAdapter(): Promise<DatabaseAdapter | null> {
         databaseUrl.startsWith("postgres://") ||
         databaseUrl.startsWith("postgresql://")
       ) {
-        adapter = new ConcretePgAdapter(databaseUrl);
+        adapter = new PostgresAdapter(databaseUrl);
       } else {
         // Assume PGlite if not a postgres connection string
-        adapter = new ConcretePgliteAdapter(databaseUrl); // dataDir is the path
+        adapter = new PgliteAdapter(databaseUrl); // dataDir is the path
       }
     } else if (dbDialect === "spanner") {
       const projectId = process.env.SPANNER_PROJECT_ID;
@@ -288,7 +293,7 @@ async function getDatabaseAdapter(): Promise<DatabaseAdapter | null> {
         );
         return null;
       }
-      adapter = new ConcreteSpannerAdapter({
+      adapter = new SpannerAdapter({
         projectId,
         instanceId,
         databaseId,
@@ -360,8 +365,14 @@ async function handleMigrateCreate(
   let allMigrationsGeneratedSuccessfully = true;
 
   for (const dialect of dialects) {
-    const upDdl = generateMigrationDDL(upSchemaDiff, dialect);
-    const downDdl = generateMigrationDDL(downSchemaDiff, dialect);
+    // For upDdl, newSchemaSnapshot is currentSnapshot (diff is previous -> current)
+    const upDdl = generateMigrationDDL(upSchemaDiff, currentSnapshot, dialect);
+    // For downDdl, newSchemaSnapshot is previousSnapshot (diff is current -> previous)
+    const downDdl = generateMigrationDDL(
+      downSchemaDiff,
+      previousSnapshot,
+      dialect
+    );
 
     const formattedUpDdl = formatDdlForTemplate(upDdl, dialect);
     const formattedDownDdl = formatDdlForTemplate(downDdl, dialect);

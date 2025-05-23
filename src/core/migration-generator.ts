@@ -20,6 +20,7 @@ import type {
   CompositePrimaryKeySnapshot,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   ColumnConfig, // Added for formatDefaultValuePostgres
+  SchemaSnapshot, // Added for FK generation
 } from "../types/common.js";
 import { reservedKeywords } from "../spanner/reservedKeywords.js";
 
@@ -85,9 +86,10 @@ function formatDefaultValuePostgres(
     columnDefault !== null &&
     (columnDefault as { function?: string }).function === "[FUNCTION_DEFAULT]"
   ) {
-    console.warn(
-      `Function default for column "${columnName}" cannot be directly represented in DDL. Use sql\`...\` or a literal value.`
-    );
+    // TODO: See if we want to warn here - it's kinda annoying if user already knows its going to be client side $defaultFn
+    // console.warn(
+    //   `Function default for column "${columnName}" cannot be directly represented in DDL. Use sql\`...\` or a literal value.`
+    // );
     return "";
   }
 
@@ -104,6 +106,7 @@ function formatDefaultValuePostgres(
 
 function generatePgCreateTableDDL(table: TableSnapshot): string {
   const tableName = escapeIdentifierPostgres(table.name);
+  // eslint-disable-next-line prefer-const
   let columnsSql: string[] = [];
   const primaryKeyColumns: string[] = [];
 
@@ -122,9 +125,10 @@ function generatePgCreateTableDDL(table: TableSnapshot): string {
     if (defaultSql) {
       columnSql += ` ${defaultSql}`;
     }
-    if (column.unique) {
-      columnSql += " UNIQUE";
-    }
+    // Unique constraints (non-PK) will be handled separately as ALTER TABLE or CREATE UNIQUE INDEX
+    // if (column.unique) {
+    //   columnSql += " UNIQUE";
+    // }
     if (column.primaryKey) {
       primaryKeyColumns.push(escapeIdentifierPostgres(column.name));
     }
@@ -133,12 +137,20 @@ function generatePgCreateTableDDL(table: TableSnapshot): string {
 
   if (primaryKeyColumns.length > 0 && !table.compositePrimaryKey) {
     if (primaryKeyColumns.length === 1) {
-      const pkColName = primaryKeyColumns[0];
-      columnsSql = columnsSql.map((csql) =>
-        csql.startsWith(pkColName) && !csql.includes(" PRIMARY KEY")
-          ? `${csql} PRIMARY KEY`
-          : csql
+      // Find the column definition and append PRIMARY KEY
+      const pkColNameForSearch = primaryKeyColumns[0]; // Already escaped
+      const colIndex = columnsSql.findIndex((csql) =>
+        csql.startsWith(pkColNameForSearch + " ")
       );
+      if (colIndex !== -1 && !columnsSql[colIndex].includes(" PRIMARY KEY")) {
+        columnsSql[colIndex] += " PRIMARY KEY";
+      } else if (colIndex === -1) {
+        // This case should ideally not happen if primaryKeyColumns is populated correctly
+        console.warn(
+          `Primary key column ${primaryKeyColumns[0]} not found in SQL definitions for table ${table.name}. Adding PRIMARY KEY clause separately.`
+        );
+        columnsSql.push(`PRIMARY KEY (${primaryKeyColumns.join(", ")})`);
+      }
     } else {
       columnsSql.push(`PRIMARY KEY (${primaryKeyColumns.join(", ")})`);
     }
@@ -152,21 +164,8 @@ function generatePgCreateTableDDL(table: TableSnapshot): string {
     columnsSql.push(`PRIMARY KEY (${pkCols.join(", ")})`);
   }
 
-  if (table.indexes) {
-    for (const index of table.indexes) {
-      if (index.unique && !index.name?.startsWith("pk_")) {
-        const indexName = index.name
-          ? escapeIdentifierPostgres(index.name)
-          : escapeIdentifierPostgres(
-              `uq_${table.name}_${index.columns.join("_")}`
-            );
-        const uniqueColumns = index.columns
-          .map(escapeIdentifierPostgres)
-          .join(", ");
-        columnsSql.push(`CONSTRAINT ${indexName} UNIQUE (${uniqueColumns})`);
-      }
-    }
-  }
+  // Inline unique constraints and other indexes are removed from here.
+  // They will be generated as separate CREATE INDEX or ALTER TABLE ADD CONSTRAINT statements.
   return `CREATE TABLE ${tableName} (\n  ${columnsSql.join(",\n  ")}\n);`;
 }
 
@@ -192,173 +191,232 @@ function generatePgForeignKeyConstraintDDL(
   )} (${escapeIdentifierPostgres(fk.referencedColumn)})${onDeleteAction};`;
 }
 
-function generatePgCreateTableDDLWithForeignKeys(
-  table: TableSnapshot
+function generatePgDdl(
+  diffActions: TableDiffAction[],
+  newSchemaSnapshot: SchemaSnapshot
 ): string[] {
-  const ddlStatements: string[] = [];
-  const createTableSql = generatePgCreateTableDDL(table);
-  ddlStatements.push(createTableSql);
-  for (const columnName in table.columns) {
-    const column = table.columns[columnName];
-    if (column.references) {
-      ddlStatements.push(
-        generatePgForeignKeyConstraintDDL(
-          table.name,
-          columnName,
-          column.references
-        )
-      );
-    }
-  }
-  return ddlStatements;
-}
+  let tableNameEsc: string; // Declare once here for the whole function scope
+  const createTableStatements: string[] = [];
+  const addColumnStatements: string[] = [];
+  const createIndexStatements: string[] = []; // Includes unique constraints via ADD CONSTRAINT or CREATE UNIQUE INDEX
+  const addForeignKeyStatements: string[] = [];
+  const alterColumnStatements: string[] = []; // For type, nullability, default changes
 
-function generatePgDdl(diffActions: TableDiffAction[]): string[] {
-  const ddlStatements: string[] = [];
+  const dropForeignKeyStatements: string[] = [];
+  const dropIndexStatements: string[] = []; // Includes unique constraints
+  const dropColumnStatements: string[] = [];
+  const dropTableStatements: string[] = [];
+
+  // Other alteration statements (like PK changes, though these are complex)
+  const otherAlterations: string[] = [];
+
   for (const action of diffActions) {
+    // Determine and assign tableNameEsc based on the action type before the switch
+    if (action.action === "add") {
+      tableNameEsc = escapeIdentifierPostgres(action.table.name);
+    } else {
+      // For 'remove' or 'change', action.tableName is available
+      tableNameEsc = escapeIdentifierPostgres(action.tableName);
+    }
+
     switch (action.action) {
-      case "add":
-        ddlStatements.push(
-          ...generatePgCreateTableDDLWithForeignKeys(action.table)
-        );
-        if (action.table.indexes) {
-          for (const index of action.table.indexes) {
-            if (!index.unique) {
-              const indexName = index.name
-                ? escapeIdentifierPostgres(index.name)
-                : escapeIdentifierPostgres(
-                    `idx_${action.table.name}_${index.columns.join("_")}`
-                  );
-              const columns = index.columns
-                .map(escapeIdentifierPostgres)
-                .join(", ");
-              ddlStatements.push(
+      case "add": {
+        const table = action.table;
+        // tableNameEsc is already set using table.name for the 'add' case
+        createTableStatements.push(generatePgCreateTableDDL(table));
+
+        // Collect FKs for later
+        for (const propKey in table.columns) {
+          const column = table.columns[propKey];
+          if (column.references) {
+            addForeignKeyStatements.push(
+              generatePgForeignKeyConstraintDDL(
+                table.name, // Use original table name for FK definition
+                column.name, // Use actual DB column name
+                column.references
+              )
+            );
+          }
+          // Handle column-level unique constraints (not part of PK)
+          if (column.unique && !column.primaryKey) {
+            const constraintName = escapeIdentifierPostgres(
+              `uq_${table.name}_${column.name}`
+            );
+            createIndexStatements.push(
+              // Using createIndexStatements for unique constraints too
+              `ALTER TABLE ${escapeIdentifierPostgres(
+                table.name
+              )} ADD CONSTRAINT ${constraintName} UNIQUE (${escapeIdentifierPostgres(
+                column.name
+              )});`
+            );
+          }
+        }
+
+        // Collect table-level indexes (unique and non-unique)
+        if (table.indexes) {
+          for (const index of table.indexes) {
+            const indexName = index.name
+              ? escapeIdentifierPostgres(index.name)
+              : escapeIdentifierPostgres(
+                  `${index.unique ? "uq" : "idx"}_${
+                    table.name
+                  }_${index.columns.join("_")}`
+                );
+            const columns = index.columns
+              .map(escapeIdentifierPostgres)
+              .join(", ");
+            if (index.unique) {
+              // Prefer CREATE UNIQUE INDEX over ALTER TABLE ADD CONSTRAINT for multi-column unique indexes defined in table.indexes
+              createIndexStatements.push(
+                `CREATE UNIQUE INDEX ${indexName} ON ${escapeIdentifierPostgres(
+                  table.name
+                )} (${columns});`
+              );
+            } else {
+              createIndexStatements.push(
                 `CREATE INDEX ${indexName} ON ${escapeIdentifierPostgres(
-                  action.table.name
+                  table.name
                 )} (${columns});`
               );
             }
           }
         }
         break;
+      }
       case "remove":
-        ddlStatements.push(
-          `DROP TABLE ${escapeIdentifierPostgres(action.tableName)};`
-        );
+        // tableNameEsc is correctly set before this switch from action.tableName
+        dropTableStatements.push(`DROP TABLE ${tableNameEsc};`);
+        // Note: Associated FKs and Indexes on other tables referencing/using this table
+        // should ideally be handled by their own 'remove' or 'change' diff actions.
+        // PostgreSQL's `DROP TABLE ... CASCADE` could also be an option but makes explicit DDL harder.
         break;
       case "change":
+        // tableNameEsc is correctly set before this switch from action.tableName
         if (action.columnChanges) {
           for (const colChange of action.columnChanges) {
-            const tableName = escapeIdentifierPostgres(action.tableName);
+            let currentColumnName: string;
+            const originalTableNameForChange = action.tableName; // Use action.tableName for changes
+
+            if (colChange.action === "add") {
+              currentColumnName = colChange.column.name;
+            } else {
+              currentColumnName = colChange.columnName;
+            }
+            const columnNameEsc = escapeIdentifierPostgres(currentColumnName);
+
             switch (colChange.action) {
               case "add": {
                 const column = colChange.column;
-                let colSql = `ALTER TABLE ${tableName} ADD COLUMN ${escapeIdentifierPostgres(
+                let colSql = `ALTER TABLE ${tableNameEsc} ADD COLUMN ${escapeIdentifierPostgres(
                   column.name
                 )} ${column.dialectTypes.postgres}`;
+                // Nullability and default are part of ADD COLUMN
                 if (column.notNull) colSql += " NOT NULL";
-                if (column.unique) colSql += " UNIQUE";
                 const defaultSql = formatDefaultValuePostgres(
                   column.default,
                   column.name,
                   column._hasClientDefaultFn
                 );
                 if (defaultSql) colSql += ` ${defaultSql}`;
-                ddlStatements.push(`${colSql};`);
-                if (colChange.column.references) {
-                  ddlStatements.push(
+                addColumnStatements.push(`${colSql};`);
+
+                if (column.unique && !column.primaryKey) {
+                  const constraintName = escapeIdentifierPostgres(
+                    `uq_${originalTableNameForChange}_${column.name}`
+                  );
+                  createIndexStatements.push(
+                    `ALTER TABLE ${tableNameEsc} ADD CONSTRAINT ${constraintName} UNIQUE (${escapeIdentifierPostgres(
+                      column.name
+                    )});`
+                  );
+                }
+                if (column.references) {
+                  addForeignKeyStatements.push(
                     generatePgForeignKeyConstraintDDL(
-                      action.tableName,
-                      colChange.column.name,
-                      colChange.column.references
+                      originalTableNameForChange,
+                      column.name,
+                      column.references
                     )
                   );
                 }
                 break;
               }
               case "remove":
-                ddlStatements.push(
-                  `ALTER TABLE ${tableName} DROP COLUMN ${escapeIdentifierPostgres(
-                    colChange.columnName
-                  )};`
+                dropColumnStatements.push(
+                  `ALTER TABLE ${tableNameEsc} DROP COLUMN ${columnNameEsc};`
                 );
                 break;
               case "change": {
-                const columnName = escapeIdentifierPostgres(
-                  colChange.columnName
-                );
                 const changes = colChange.changes;
                 if (changes.type || changes.dialectTypes) {
                   const newType =
                     changes.dialectTypes?.postgres || changes.type;
                   if (newType) {
-                    ddlStatements.push(
-                      `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} SET DATA TYPE ${newType};`
+                    alterColumnStatements.push(
+                      `ALTER TABLE ${tableNameEsc} ALTER COLUMN ${columnNameEsc} SET DATA TYPE ${newType};`
                     );
                   }
                 }
                 if (changes.hasOwnProperty("notNull")) {
                   if (changes.notNull) {
-                    ddlStatements.push(
-                      `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} SET NOT NULL;`
+                    alterColumnStatements.push(
+                      `ALTER TABLE ${tableNameEsc} ALTER COLUMN ${columnNameEsc} SET NOT NULL;`
                     );
                   } else {
-                    ddlStatements.push(
-                      `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} DROP NOT NULL;`
+                    alterColumnStatements.push(
+                      `ALTER TABLE ${tableNameEsc} ALTER COLUMN ${columnNameEsc} DROP NOT NULL;`
                     );
                   }
                 }
                 if (changes.hasOwnProperty("default")) {
-                  // Note: _hasClientDefaultFn might not be available on `changes.default` directly
-                  // This part might need more context if we're changing TO a client default fn
                   if (changes.default !== undefined) {
                     const defaultSql = formatDefaultValuePostgres(
                       changes.default,
-                      colChange.columnName,
-                      (colChange.changes as ColumnSnapshot)._hasClientDefaultFn // Pass from full snapshot if available
+                      currentColumnName, // Use currentColumnName which is unescaped
+                      (colChange.changes as ColumnSnapshot)._hasClientDefaultFn
                     );
-                    ddlStatements.push(
-                      `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} ${
+                    alterColumnStatements.push(
+                      `ALTER TABLE ${tableNameEsc} ALTER COLUMN ${columnNameEsc} ${
                         defaultSql ? defaultSql : "DROP DEFAULT"
                       };`
                     );
                   } else {
-                    ddlStatements.push(
-                      `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} DROP DEFAULT;`
+                    alterColumnStatements.push(
+                      `ALTER TABLE ${tableNameEsc} ALTER COLUMN ${columnNameEsc} DROP DEFAULT;`
                     );
                   }
                 }
                 if (changes.hasOwnProperty("unique")) {
+                  const constraintName = escapeIdentifierPostgres(
+                    `uq_${originalTableNameForChange}_${currentColumnName}`
+                  );
                   if (changes.unique) {
-                    const constraintName = escapeIdentifierPostgres(
-                      `uq_${action.tableName}_${colChange.columnName}`
-                    );
-                    ddlStatements.push(
-                      `ALTER TABLE ${tableName} ADD CONSTRAINT ${constraintName} UNIQUE (${columnName});`
+                    createIndexStatements.push(
+                      `ALTER TABLE ${tableNameEsc} ADD CONSTRAINT ${constraintName} UNIQUE (${columnNameEsc});`
                     );
                   } else {
-                    const constraintName = escapeIdentifierPostgres(
-                      `uq_${action.tableName}_${colChange.columnName}`
-                    );
-                    ddlStatements.push(
-                      `ALTER TABLE ${tableName} DROP CONSTRAINT ${constraintName};`
+                    dropIndexStatements.push(
+                      `ALTER TABLE ${tableNameEsc} DROP CONSTRAINT ${constraintName};`
                     );
                     console.warn(
-                      `Dropping unique constraint on ${action.tableName}.${colChange.columnName} requires knowing the constraint name. Placeholder DDL generated.`
+                      `Dropping unique constraint on ${originalTableNameForChange}.${currentColumnName}. Assumed constraint name ${constraintName}. Verify if correct.`
                     );
                   }
                 }
                 if (changes.hasOwnProperty("references")) {
                   if (changes.references) {
                     console.warn(
-                      `Changing foreign key for ${action.tableName}.${colChange.columnName}. ` +
+                      `Changing foreign key for ${originalTableNameForChange}.${currentColumnName}. ` +
                         `If an old FK existed and its name/definition changed, it should be explicitly dropped by a preceding diff action. ` +
                         `This operation will attempt to add the new/updated FK constraint.`
                     );
-                    ddlStatements.push(
+                    addForeignKeyStatements.push(
                       generatePgForeignKeyConstraintDDL(
-                        action.tableName,
-                        colChange.columnName,
+                        originalTableNameForChange,
+                        // Use the actual DB column name from the new schema snapshot
+                        newSchemaSnapshot.tables[originalTableNameForChange]
+                          .columns[currentColumnName].name,
                         changes.references as NonNullable<
                           ColumnSnapshot["references"]
                         >
@@ -366,15 +424,14 @@ function generatePgDdl(diffActions: TableDiffAction[]): string[] {
                     );
                   } else if (changes.references === null) {
                     const fkNameToRemovePlaceholder = escapeIdentifierPostgres(
-                      `fk_${action.tableName}_${colChange.columnName}_TO_BE_DROPPED`
+                      `fk_${originalTableNameForChange}_${currentColumnName}_TO_BE_DROPPED` // Standardizing to _TO_BE_DROPPED
+                    );
+                    dropForeignKeyStatements.push(
+                      `ALTER TABLE ${tableNameEsc} DROP CONSTRAINT ${fkNameToRemovePlaceholder};`
                     );
                     console.warn(
-                      `Attempting to DROP foreign key for ${action.tableName}.${colChange.columnName} because its 'references' property was set to null. ` +
-                        `The specific constraint name is required for PostgreSQL. Using placeholder name "${fkNameToRemovePlaceholder}". ` +
-                        `This DDL will likely FAIL. The schema diff process should provide the exact name of the FK constraint to drop.`
-                    );
-                    ddlStatements.push(
-                      `ALTER TABLE ${tableName} DROP CONSTRAINT ${fkNameToRemovePlaceholder};`
+                      `Attempting to DROP foreign key for ${originalTableNameForChange}.${currentColumnName}. ` +
+                        `The specific constraint name is required. Using placeholder: ${fkNameToRemovePlaceholder}. This will likely FAIL.`
                     );
                   }
                 }
@@ -385,34 +442,39 @@ function generatePgDdl(diffActions: TableDiffAction[]): string[] {
         }
         if (action.indexChanges) {
           for (const idxChange of action.indexChanges) {
-            const tableName = escapeIdentifierPostgres(action.tableName);
+            const originalTableNameForIndexChange = action.tableName;
             switch (idxChange.action) {
               case "add": {
                 const index = idxChange.index;
                 const indexName = index.name
                   ? escapeIdentifierPostgres(index.name)
                   : escapeIdentifierPostgres(
-                      `idx_${action.tableName}_${index.columns.join("_")}`
+                      `${
+                        index.unique ? "uq" : "idx"
+                      }_${originalTableNameForIndexChange}_${index.columns.join(
+                        "_"
+                      )}`
                     );
                 const columns = index.columns
                   .map(escapeIdentifierPostgres)
                   .join(", ");
                 const uniqueKeyword = index.unique ? "UNIQUE " : "";
-                ddlStatements.push(
-                  `CREATE ${uniqueKeyword}INDEX ${indexName} ON ${tableName} (${columns});`
+                createIndexStatements.push(
+                  `CREATE ${uniqueKeyword}INDEX ${indexName} ON ${tableNameEsc} (${columns});`
                 );
                 break;
               }
               case "remove":
-                ddlStatements.push(
+                dropIndexStatements.push(
                   `DROP INDEX ${escapeIdentifierPostgres(idxChange.indexName)};`
                 );
                 break;
               case "change":
                 console.warn(
-                  `Index change for "${idxChange.indexName}" on table "${action.tableName}" will be handled as DROP and ADD for PG.`
+                  // Re-adding the warning
+                  `Index change for "${idxChange.indexName}" on table "${originalTableNameForIndexChange}" will be handled as DROP and ADD for PG.`
                 );
-                ddlStatements.push(
+                dropIndexStatements.push(
                   `DROP INDEX ${escapeIdentifierPostgres(idxChange.indexName)};`
                 );
                 if (idxChange.changes && idxChange.changes.columns) {
@@ -425,12 +487,12 @@ function generatePgDdl(diffActions: TableDiffAction[]): string[] {
                   const newUniqueKeyword = idxChange.changes.unique
                     ? "UNIQUE "
                     : "";
-                  ddlStatements.push(
-                    `CREATE ${newUniqueKeyword}INDEX ${newIndexName} ON ${tableName} (${newColumns});`
+                  createIndexStatements.push(
+                    `CREATE ${newUniqueKeyword}INDEX ${newIndexName} ON ${tableNameEsc} (${newColumns});`
                   );
                 } else {
                   console.error(
-                    `Cannot regenerate index ${idxChange.indexName} on ${tableName} due to insufficient change data.`
+                    `Cannot regenerate index ${idxChange.indexName} on ${originalTableNameForIndexChange} due to insufficient change data for PG.`
                   );
                 }
                 break;
@@ -438,29 +500,29 @@ function generatePgDdl(diffActions: TableDiffAction[]): string[] {
           }
         }
         if (action.primaryKeyChange) {
-          const tableNameEsc = escapeIdentifierPostgres(action.tableName);
+          const originalTableNameForPkChange = action.tableName;
           const pkChange = action.primaryKeyChange;
           if (pkChange.action === "set") {
             const newPk = pkChange.pk;
             const newPkName = newPk.name
               ? escapeIdentifierPostgres(newPk.name)
-              : escapeIdentifierPostgres(`pk_${action.tableName}`);
+              : escapeIdentifierPostgres(`pk_${originalTableNameForPkChange}`);
             const newPkColumns = newPk.columns
               .map(escapeIdentifierPostgres)
               .join(", ");
-            ddlStatements.push(
+            otherAlterations.push(
               `ALTER TABLE ${tableNameEsc} ADD CONSTRAINT ${newPkName} PRIMARY KEY (${newPkColumns});`
             );
           } else if (pkChange.action === "remove") {
             const pkNameToRemove = pkChange.pkName
               ? escapeIdentifierPostgres(pkChange.pkName)
-              : escapeIdentifierPostgres(`pk_${action.tableName}`);
+              : escapeIdentifierPostgres(`pk_${originalTableNameForPkChange}`);
             if (!pkChange.pkName) {
               console.warn(
-                `Primary key name for DROP operation on table "${action.tableName}" for PostgreSQL was not provided. Assuming default name "${pkNameToRemove}". This might fail.`
+                `Primary key name for DROP PK on "${originalTableNameForPkChange}" not provided. Assuming default "${pkNameToRemove}".`
               );
             }
-            ddlStatements.push(
+            otherAlterations.push(
               `ALTER TABLE ${tableNameEsc} DROP CONSTRAINT ${pkNameToRemove};`
             );
           }
@@ -473,8 +535,25 @@ function generatePgDdl(diffActions: TableDiffAction[]): string[] {
         break;
     }
   }
-  return ddlStatements;
+
+  // Assemble DDL statements in the correct order
+  const finalDdlStatements: string[] = [
+    ...dropForeignKeyStatements,
+    ...dropIndexStatements,
+    ...dropColumnStatements,
+    ...dropTableStatements,
+    ...createTableStatements,
+    ...addColumnStatements,
+    ...alterColumnStatements, // Apply non-structural column changes
+    ...createIndexStatements, // Create indexes and unique constraints
+    ...addForeignKeyStatements,
+    ...otherAlterations, // Other alterations like PK changes
+  ];
+
+  return finalDdlStatements;
 }
+
+// --- Spanner DDL Generation Helpers --- (Similar changes as for PG)
 
 const spannerReservedKeywords = reservedKeywords;
 
@@ -567,8 +646,7 @@ function formatDefaultValueSpanner(
   return "";
 }
 
-function generateSpannerCreateTableDDL(table: TableSnapshot): string[] {
-  const ddlStatements: string[] = [];
+function generateSpannerJustCreateTableDDL(table: TableSnapshot): string {
   const tableName = escapeIdentifierSpanner(table.name);
   const columnsSql: string[] = [];
   const primaryKeyColumns: string[] = [];
@@ -608,41 +686,10 @@ function generateSpannerCreateTableDDL(table: TableSnapshot): string[] {
       table.interleave.parentTable
     )} ON DELETE ${table.interleave.onDelete.toUpperCase()}`;
   }
-  ddlStatements.push(createTableSql); // Removed semicolon here
-
-  for (const columnName in table.columns) {
-    const column = table.columns[columnName];
-    if (column.unique) {
-      const uniqueIndexName = escapeIdentifierSpanner(
-        `uq_${table.name}_${column.name}`
-      );
-      ddlStatements.push(
-        `CREATE UNIQUE INDEX ${uniqueIndexName} ON ${tableName} (${escapeIdentifierSpanner(
-          column.name
-        )})` // Removed semicolon here
-      );
-    }
-  }
-
-  if (table.indexes) {
-    for (const index of table.indexes) {
-      const indexName = index.name
-        ? escapeIdentifierSpanner(index.name)
-        : escapeIdentifierSpanner(
-            `${index.unique ? "uq" : "idx"}_${table.name}_${index.columns.join(
-              "_"
-            )}`
-          );
-      const columns = index.columns.map(escapeIdentifierSpanner).join(", ");
-      ddlStatements.push(
-        `CREATE ${
-          index.unique ? "UNIQUE " : ""
-        }INDEX ${indexName} ON ${tableName} (${columns})` // Removed semicolon here
-      );
-    }
-  }
-  return ddlStatements;
+  return createTableSql;
 }
+
+// Note: generateSpannerForeignKeyConstraintDDL itself is fine, the issue is what's passed to it.
 
 function generateSpannerForeignKeyConstraintDDL(
   tableName: string,
@@ -663,29 +710,9 @@ function generateSpannerForeignKeyConstraintDDL(
     columnName
   )}) REFERENCES ${escapeIdentifierSpanner(
     fk.referencedTable
-  )} (${escapeIdentifierSpanner(fk.referencedColumn)})${onDeleteAction}`; // Removed semicolon here
+  )} (${escapeIdentifierSpanner(fk.referencedColumn)})${onDeleteAction}`;
 }
 
-function generateSpannerCreateTableDDLWithForeignKeys(
-  table: TableSnapshot
-): string[] {
-  const ddlStatements = generateSpannerCreateTableDDL(table);
-  for (const columnName in table.columns) {
-    const column = table.columns[columnName];
-    if (column.references) {
-      ddlStatements.push(
-        generateSpannerForeignKeyConstraintDDL(
-          table.name,
-          columnName,
-          column.references
-        )
-      );
-    }
-  }
-  return ddlStatements;
-}
-
-// Helper to identify DDL statements that are likely "validating" or "long-running" in Spanner
 function isSpannerDdlValidating(ddl: string): boolean {
   const upperDdl = ddl.toUpperCase().trim();
   if (upperDdl.startsWith("CREATE INDEX")) return true;
@@ -700,34 +727,100 @@ function isSpannerDdlValidating(ddl: string): boolean {
     upperDdl.includes("FOREIGN KEY")
   )
     return true;
-  // CREATE TABLE is generally not long-running unless it has very complex definitions or inline indexes,
-  // but our generator creates indexes separately.
-  // DROP statements are generally not considered long-running/validating in the same way.
   return false;
 }
 
-function generateSpannerDdl(diffActions: TableDiffAction[]): string[][] {
-  const allDdlStatements: string[] = [];
+function generateSpannerDdl(
+  diffActions: TableDiffAction[],
+  newSchemaSnapshot: SchemaSnapshot
+): string[][] {
+  const createTableStatements: string[] = [];
+  const addColumnStatements: string[] = [];
+  const createIndexStatements: string[] = [];
+  const addForeignKeyStatements: string[] = [];
+  const alterColumnStatements: string[] = [];
+  const dropForeignKeyStatements: string[] = [];
+  const dropIndexStatements: string[] = [];
+  const dropColumnStatements: string[] = [];
+  const dropTableStatements: string[] = [];
+  const otherAlterations: string[] = []; // For things like interleave changes (currently unsupported)
+
   for (const action of diffActions) {
+    let currentTableNameEsc: string;
+    if (action.action === "add") {
+      currentTableNameEsc = escapeIdentifierSpanner(action.table.name);
+    } else {
+      currentTableNameEsc = escapeIdentifierSpanner(action.tableName);
+    }
+
     switch (action.action) {
-      case "add":
-        allDdlStatements.push(
-          ...generateSpannerCreateTableDDLWithForeignKeys(action.table)
-        );
+      case "add": {
+        const table = action.table;
+        createTableStatements.push(generateSpannerJustCreateTableDDL(table));
+
+        for (const propKey in table.columns) {
+          const column = table.columns[propKey];
+          if (column.unique && !column.primaryKey) {
+            const uniqueIndexName = escapeIdentifierSpanner(
+              `uq_${table.name}_${column.name}`
+            );
+            createIndexStatements.push(
+              `CREATE UNIQUE INDEX ${uniqueIndexName} ON ${currentTableNameEsc} (${escapeIdentifierSpanner(
+                column.name
+              )})`
+            );
+          }
+          if (column.references) {
+            addForeignKeyStatements.push(
+              generateSpannerForeignKeyConstraintDDL(
+                table.name,
+                column.name, // Use actual DB column name
+                column.references
+              )
+            );
+          }
+        }
+
+        if (table.indexes) {
+          for (const index of table.indexes) {
+            const indexName = index.name
+              ? escapeIdentifierSpanner(index.name)
+              : escapeIdentifierSpanner(
+                  `${index.unique ? "uq" : "idx"}_${
+                    table.name
+                  }_${index.columns.join("_")}`
+                );
+            const columns = index.columns
+              .map(escapeIdentifierSpanner)
+              .join(", ");
+            createIndexStatements.push(
+              `CREATE ${
+                index.unique ? "UNIQUE " : ""
+              }INDEX ${indexName} ON ${currentTableNameEsc} (${columns})`
+            );
+          }
+        }
         break;
+      }
       case "remove":
-        allDdlStatements.push(
-          `DROP TABLE ${escapeIdentifierSpanner(action.tableName)}` // Removed semicolon
-        );
+        dropTableStatements.push(`DROP TABLE ${currentTableNameEsc}`);
         break;
-      case "change":
+      case "change": {
+        const originalTableName = action.tableName;
         if (action.columnChanges) {
           for (const colChange of action.columnChanges) {
-            const tableName = escapeIdentifierSpanner(action.tableName);
+            let currentColumnName: string;
+            if (colChange.action === "add") {
+              currentColumnName = colChange.column.name;
+            } else {
+              currentColumnName = colChange.columnName;
+            }
+            const columnNameEsc = escapeIdentifierSpanner(currentColumnName);
+
             switch (colChange.action) {
               case "add": {
                 const column = colChange.column;
-                let colSql = `ALTER TABLE ${tableName} ADD COLUMN ${escapeIdentifierSpanner(
+                let colSql = `ALTER TABLE ${currentTableNameEsc} ADD COLUMN ${escapeIdentifierSpanner(
                   column.name
                 )} ${column.dialectTypes.spanner}`;
                 if (column.notNull) colSql += " NOT NULL";
@@ -737,91 +830,94 @@ function generateSpannerDdl(diffActions: TableDiffAction[]): string[][] {
                   column._hasClientDefaultFn
                 );
                 if (defaultSql) colSql += ` ${defaultSql}`;
-                allDdlStatements.push(colSql); // Removed semicolon
-                if (column.unique) {
-                  allDdlStatements.push(
+                addColumnStatements.push(colSql);
+                if (column.unique && !column.primaryKey) {
+                  createIndexStatements.push(
                     `CREATE UNIQUE INDEX ${escapeIdentifierSpanner(
-                      `uq_${action.tableName}_${column.name}`
-                    )} ON ${tableName} (${escapeIdentifierSpanner(
+                      `uq_${originalTableName}_${column.name}`
+                    )} ON ${currentTableNameEsc} (${escapeIdentifierSpanner(
                       column.name
-                    )})` // Removed semicolon
+                    )})`
                   );
                 }
-                if (colChange.column.references) {
-                  allDdlStatements.push(
+                if (column.references) {
+                  addForeignKeyStatements.push(
                     generateSpannerForeignKeyConstraintDDL(
-                      action.tableName,
-                      colChange.column.name,
-                      colChange.column.references
-                    ) // generateSpannerForeignKeyConstraintDDL now returns without semicolon
+                      originalTableName,
+                      column.name,
+                      column.references
+                    )
                   );
                 }
                 break;
               }
               case "remove":
-                allDdlStatements.push(
-                  `ALTER TABLE ${tableName} DROP COLUMN ${escapeIdentifierSpanner(
-                    colChange.columnName
-                  )}` // Removed semicolon
+                dropColumnStatements.push(
+                  `ALTER TABLE ${currentTableNameEsc} DROP COLUMN ${columnNameEsc}`
                 );
                 break;
               case "change": {
-                const columnName = escapeIdentifierSpanner(
-                  colChange.columnName
-                );
                 const changes = colChange.changes;
                 if (changes.type || changes.dialectTypes) {
                   const newType = changes.dialectTypes?.spanner || changes.type;
                   if (newType) {
-                    allDdlStatements.push(
-                      `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} ${newType}` // Removed semicolon
+                    alterColumnStatements.push(
+                      `ALTER TABLE ${currentTableNameEsc} ALTER COLUMN ${columnNameEsc} ${newType}`
                     );
                     console.warn(
-                      `Spanner DDL for changing column type for ${tableName}.${columnName} to ${newType} generated. Review for compatibility.`
+                      `Spanner DDL for changing column type for ${originalTableName}.${currentColumnName} to ${newType} generated. Review for compatibility.`
                     );
                   }
                 }
                 if (changes.hasOwnProperty("notNull")) {
-                  allDdlStatements.push(
-                    `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} ${
+                  alterColumnStatements.push(
+                    `ALTER TABLE ${currentTableNameEsc} ALTER COLUMN ${columnNameEsc} ${
                       changes.notNull ? "NOT NULL" : "DROP NOT NULL"
-                    }` // Removed semicolon
+                    }`
                   );
-                  if (!changes.notNull)
+                  if (!changes.notNull) {
                     console.warn(
-                      `Spanner DDL for making ${tableName}.${columnName} nullable may require re-specifying type.`
+                      `Spanner DDL for making ${originalTableName}.${currentColumnName} nullable may require re-specifying type and 'DROP NOT NULL' is not standard; typically, you just omit NOT NULL.`
                     );
+                  }
                 }
-                if (changes.hasOwnProperty("default"))
+                if (changes.hasOwnProperty("default")) {
                   console.warn(
-                    `Spanner does not support ALTER COLUMN SET DEFAULT for ${tableName}.${columnName}.`
+                    `Spanner does not support ALTER COLUMN SET DEFAULT for ${originalTableName}.${currentColumnName}. Default changes require table recreation or other strategies.`
                   );
-                if (changes.hasOwnProperty("unique"))
+                }
+                if (changes.hasOwnProperty("unique")) {
                   console.warn(
-                    `Spanner 'unique' constraint changes for ${tableName}.${columnName} handled via index diffs.`
+                    `Spanner 'unique' constraint changes for ${originalTableName}.${currentColumnName} are typically handled via separate CREATE/DROP UNIQUE INDEX operations. Ensure index diffs cover this.`
                   );
+                }
                 if (changes.hasOwnProperty("references")) {
                   if (changes.references) {
                     console.warn(
-                      `Changing FK for ${action.tableName}.${colChange.columnName}. Ensure old FK is dropped if name changed.`
+                      `Changing FK for ${originalTableName}.${currentColumnName}. Ensure old FK is dropped if name/definition changed.`
                     );
-                    allDdlStatements.push(
+                    addForeignKeyStatements.push(
                       generateSpannerForeignKeyConstraintDDL(
-                        action.tableName,
-                        colChange.columnName,
+                        originalTableName,
+                        // Use the actual DB column name from the new schema snapshot
+                        newSchemaSnapshot.tables[originalTableName].columns[
+                          currentColumnName
+                        ].name,
                         changes.references as NonNullable<
                           ColumnSnapshot["references"]
                         >
                       )
                     );
                   } else if (changes.references === null) {
-                    console.warn(
-                      `Dropping FK for ${action.tableName}.${colChange.columnName}. Constraint name needed.`
+                    const fkNameToRemovePlaceholder = escapeIdentifierSpanner(
+                      `FK_${originalTableName}_${currentColumnName}_TO_BE_DROPPED`
                     );
-                    allDdlStatements.push(
-                      `ALTER TABLE ${tableName} DROP CONSTRAINT ${escapeIdentifierSpanner(
-                        `FK_${action.tableName}_${colChange.columnName}_TO_BE_DROPPED`
-                      )}` // Removed semicolon
+                    dropForeignKeyStatements.push(
+                      `ALTER TABLE ${currentTableNameEsc} DROP CONSTRAINT ${fkNameToRemovePlaceholder}`
+                    );
+                    console.warn(
+                      `Attempting to DROP foreign key for ${originalTableName}.${currentColumnName}. ` +
+                        `The specific constraint name is required. Using placeholder: ${fkNameToRemovePlaceholder}. This will likely FAIL.`
                     );
                   }
                 }
@@ -832,37 +928,37 @@ function generateSpannerDdl(diffActions: TableDiffAction[]): string[][] {
         }
         if (action.indexChanges) {
           for (const idxChange of action.indexChanges) {
-            const tableName = escapeIdentifierSpanner(action.tableName);
+            const currentTableNameForIndex = action.tableName;
             switch (idxChange.action) {
               case "add": {
                 const index = idxChange.index;
                 const indexName = index.name
                   ? escapeIdentifierSpanner(index.name)
                   : escapeIdentifierSpanner(
-                      `${index.unique ? "uq" : "idx"}_${
-                        action.tableName
-                      }_${index.columns.join("_")}`
+                      `${
+                        index.unique ? "uq" : "idx"
+                      }_${currentTableNameForIndex}_${index.columns.join("_")}`
                     );
-                allDdlStatements.push(
+                createIndexStatements.push(
                   `CREATE ${
                     index.unique ? "UNIQUE " : ""
-                  }INDEX ${indexName} ON ${tableName} (${index.columns
-                    .map(escapeIdentifierSpanner)
-                    .join(", ")})` // Removed semicolon
+                  }INDEX ${indexName} ON ${escapeIdentifierSpanner(
+                    currentTableNameForIndex
+                  )} (${index.columns.map(escapeIdentifierSpanner).join(", ")})`
                 );
                 break;
               }
               case "remove":
-                allDdlStatements.push(
-                  `DROP INDEX ${escapeIdentifierSpanner(idxChange.indexName)}` // Removed semicolon
+                dropIndexStatements.push(
+                  `DROP INDEX ${escapeIdentifierSpanner(idxChange.indexName)}`
                 );
                 break;
               case "change":
                 console.warn(
-                  `Index change for "${idxChange.indexName}" on ${tableName} handled as DROP/ADD.`
+                  `Index change for "${idxChange.indexName}" on ${currentTableNameForIndex} handled as DROP/ADD for Spanner.`
                 );
-                allDdlStatements.push(
-                  `DROP INDEX ${escapeIdentifierSpanner(idxChange.indexName)}` // Removed semicolon
+                dropIndexStatements.push(
+                  `DROP INDEX ${escapeIdentifierSpanner(idxChange.indexName)}`
                 );
                 if (idxChange.changes && idxChange.changes.columns) {
                   const newIndexName = escapeIdentifierSpanner(
@@ -871,91 +967,94 @@ function generateSpannerDdl(diffActions: TableDiffAction[]): string[][] {
                   const newColumns = (idxChange.changes.columns as string[])
                     .map(escapeIdentifierSpanner)
                     .join(", ");
-                  allDdlStatements.push(
+                  createIndexStatements.push(
                     `CREATE ${
                       idxChange.changes.unique ? "UNIQUE " : ""
-                    }INDEX ${newIndexName} ON ${tableName} (${newColumns})` // Removed semicolon
+                    }INDEX ${newIndexName} ON ${escapeIdentifierSpanner(
+                      currentTableNameForIndex
+                    )} (${newColumns})`
                   );
                 } else {
                   console.error(
-                    `Cannot regenerate index ${idxChange.indexName} on ${tableName}.`
+                    `Cannot regenerate index ${idxChange.indexName} on ${currentTableNameForIndex} for Spanner due to insufficient change data.`
                   );
                 }
                 break;
             }
           }
         }
-        if (action.primaryKeyChange)
+        if (action.primaryKeyChange) {
           console.warn(
-            `Spanner does not support altering PKs on existing table "${action.tableName}".`
+            `Spanner does not support altering Primary Keys on existing table "${action.tableName}". This requires table recreation.`
           );
-        if (action.interleaveChange)
+        }
+        if (action.interleaveChange) {
           console.warn(
-            `Spanner does not support altering interleave for table "${action.tableName}".`
+            `Spanner does not support altering interleave for table "${action.tableName}". This requires table recreation.`
           );
+        }
         break;
+      }
     }
   }
 
+  const orderedDdlStatements: string[] = [
+    ...dropForeignKeyStatements,
+    ...dropIndexStatements,
+    ...dropColumnStatements,
+    ...dropTableStatements,
+    ...createTableStatements,
+    ...addColumnStatements,
+    ...alterColumnStatements,
+    ...createIndexStatements,
+    ...addForeignKeyStatements,
+    ...otherAlterations,
+  ];
+
   const finalBatches: string[][] = [];
   let currentBatch: string[] = [];
-  // Tracks if the current batch is designated for validating DDLs.
-  // A batch becomes "validating" if it contains at least one validating DDL.
   let currentBatchContainsValidatingDdl = false;
 
-  for (const ddl of allDdlStatements) {
+  for (const ddl of orderedDdlStatements) {
+    // Iterate over the globally ordered DDL statements
     const isCurrentDdlValidating = isSpannerDdlValidating(ddl);
 
     if (currentBatch.length === 0) {
-      // First statement in a new batch
       currentBatch.push(ddl);
       currentBatchContainsValidatingDdl = isCurrentDdlValidating;
     } else {
-      // Current batch is not empty
       if (isCurrentDdlValidating) {
         if (!currentBatchContainsValidatingDdl) {
-          // Current batch was for non-validating DDLs, but this one is validating.
-          // Flush the non-validating batch and start a new one for validating DDLs.
           finalBatches.push(currentBatch);
           currentBatch = [ddl];
           currentBatchContainsValidatingDdl = true;
         } else {
-          // Current batch is already for validating DDLs. Add if not full.
           if (currentBatch.length < SPANNER_DDL_BATCH_SIZE) {
             currentBatch.push(ddl);
           } else {
-            // Validating batch is full. Flush it and start a new one.
             finalBatches.push(currentBatch);
             currentBatch = [ddl];
-            currentBatchContainsValidatingDdl = true; // New batch starts with a validating DDL
+            currentBatchContainsValidatingDdl = true;
           }
         }
       } else {
-        // Current DDL is non-validating
         if (currentBatchContainsValidatingDdl) {
-          // Current batch was for validating DDLs, but this one is non-validating.
-          // Flush the validating batch and start a new one for non-validating DDLs.
           finalBatches.push(currentBatch);
           currentBatch = [ddl];
           currentBatchContainsValidatingDdl = false;
         } else {
-          // Current batch is for non-validating DDLs. Add to it.
-          // Non-validating DDLs can be in larger batches, but for simplicity and to align with
-          // the previous behavior of batching everything, we'll still use SPANNER_DDL_BATCH_SIZE here.
-          // This could be relaxed if a different batching strategy for non-validating DDLs is desired.
           if (currentBatch.length < SPANNER_DDL_BATCH_SIZE) {
             currentBatch.push(ddl);
           } else {
             finalBatches.push(currentBatch);
             currentBatch = [ddl];
-            currentBatchContainsValidatingDdl = false; // New batch starts with non-validating
+            currentBatchContainsValidatingDdl = false;
           }
         }
       }
     }
   }
 
-  // Push any remaining statements in currentBatch
   if (currentBatch.length > 0) {
     finalBatches.push(currentBatch);
   }
@@ -965,6 +1064,7 @@ function generateSpannerDdl(diffActions: TableDiffAction[]): string[][] {
 
 export function generateMigrationDDL(
   schemaDiff: SchemaDiff,
+  newSchemaSnapshot: SchemaSnapshot, // Added newSchemaSnapshot
   dialect: Dialect
 ): string[] | string[][] {
   // Return type updated for Spanner
@@ -974,9 +1074,9 @@ export function generateMigrationDDL(
 
   switch (dialect) {
     case "postgres":
-      return generatePgDdl(schemaDiff.tableChanges);
+      return generatePgDdl(schemaDiff.tableChanges, newSchemaSnapshot);
     case "spanner":
-      return generateSpannerDdl(schemaDiff.tableChanges); // This now returns string[][]
+      return generateSpannerDdl(schemaDiff.tableChanges, newSchemaSnapshot); // This now returns string[][]
     default:
       throw new Error(`Unsupported dialect for DDL generation: ${dialect}`);
   }
