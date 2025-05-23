@@ -7,7 +7,7 @@ A TypeScript ORM for Google Spanner & PostgreSQL, designed for Node.js and Bun. 
 
 ## Key Design Goals
 
-`spanner-orm` is engineered to deliver a seamless and powerful experience for managing data across PostgreSQL and Google Spanner. It focuses on these core requirements:
+`spanner-orm` is built to address the following key requirements for developers working with PostgreSQL and Google Spanner:
 
 - **Unified Object Model for PostgreSQL & Spanner:** Define your database schema _once_ using a Drizzle-inspired syntax. This single object model is designed to seamlessly support both PostgreSQL (including Pglite for local/embedded use) and Google Spanner. This enables consistent data modeling whether you're building for local development, enterprise deployments, or global-scale web applications.
 - **Cross-Dialect Migration Generation & Execution:** The ORM automatically produces migration files containing the precise DDL (Data Definition Language) for both PostgreSQL and Google Spanner. These migrations can be executed via the `spanner-orm-cli migrate` command or programmatically, ensuring reliable and consistent schema evolution across both database systems.
