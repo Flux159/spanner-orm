@@ -123,8 +123,8 @@ async function loadSchemaTablesMap(
     );
 
     potentialTables.forEach((table) => {
-      if (table.name) {
-        tablesMap[table.name] = table;
+      if (table._name) {
+        tablesMap[table._name] = table;
       }
     });
 
@@ -151,9 +151,9 @@ async function loadSchemaTablesMap(
             typeof item === "object" &&
             item !== null &&
             (item as { _isTable?: boolean })._isTable === true &&
-            (item as TableConfig).name
+            (item as TableConfig)._name
           ) {
-            tablesMap[(item as TableConfig).name] = item as TableConfig;
+            tablesMap[(item as TableConfig)._name] = item as TableConfig;
           }
         });
       }

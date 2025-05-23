@@ -13,6 +13,7 @@ import type {
   SQL, // SQL is defined in common.ts
   PreparedQuery, // PreparedQuery is defined in common.ts
   ColumnConfig, // For orderBy/groupBy casts
+  GetTableColumns, // Added for orderBy/groupBy
 } from "./types/common.js";
 import { QueryBuilder } from "./core/query-builder.js";
 import { shapeResults } from "./core/result-shaper.js";
@@ -97,25 +98,80 @@ export class ExecutableQuery<
   }
 
   orderBy(
-    column: SQL | keyof TPrimaryTable["columns"],
+    columnOrSql: SQL | (keyof GetTableColumns<TPrimaryTable> & string),
     direction: "ASC" | "DESC" = "ASC"
   ): ExecutableQuery<TResult, TPrimaryTable, TFields, TInclude> {
-    // QueryBuilder's orderBy expects ColumnConfig or SQL.
-    // If keyof TPrimaryTable["columns"] is passed, it needs to be resolved or QueryBuilder needs to handle it.
-    // For now, assume it's handled by SQL template or direct ColumnConfig usage.
-    this.internalQueryBuilder.orderBy(
-      column as SQL | ColumnConfig<any, any>,
-      direction
-    );
+    let fieldArg: SQL | ColumnConfig<any, any>;
+    if (typeof columnOrSql === "string") {
+      // Accessing _targetTable, which is TPrimaryTable (a TableConfig)
+      const targetTable = (this.internalQueryBuilder as any)._targetTable as
+        | TPrimaryTable
+        | undefined;
+      if (!targetTable) {
+        throw new Error(
+          "Target table not set in QueryBuilder. Call from() before orderBy()."
+        );
+      }
+      // GetTableColumns<TPrimaryTable> effectively gives us the type of the columns part of targetTable
+      const colConfig = (targetTable as GetTableColumns<TPrimaryTable>)[
+        columnOrSql as keyof GetTableColumns<TPrimaryTable>
+      ];
+
+      if (
+        !colConfig ||
+        typeof colConfig !== "object" ||
+        !("dialectTypes" in colConfig)
+      ) {
+        throw new Error(
+          `Column '${
+            columnOrSql as string
+          }' not found or is not a valid column configuration in table '${
+            targetTable._name
+          }'.`
+        );
+      }
+      fieldArg = colConfig as ColumnConfig<any, any>;
+    } else {
+      fieldArg = columnOrSql; // It's an SQL object
+    }
+    this.internalQueryBuilder.orderBy(fieldArg, direction);
     return this;
   }
 
   groupBy(
-    ...columns: (SQL | keyof TPrimaryTable["columns"])[]
+    ...columnsOrSql: (SQL | (keyof GetTableColumns<TPrimaryTable> & string))[]
   ): ExecutableQuery<TResult, TPrimaryTable, TFields, TInclude> {
-    this.internalQueryBuilder.groupBy(
-      ...(columns as (SQL | ColumnConfig<any, any>)[])
-    );
+    const fieldArgs = columnsOrSql.map((colOrSql) => {
+      if (typeof colOrSql === "string") {
+        const targetTable = (this.internalQueryBuilder as any)._targetTable as
+          | TPrimaryTable
+          | undefined;
+        if (!targetTable) {
+          throw new Error(
+            "Target table not set in QueryBuilder. Call from() before groupBy()."
+          );
+        }
+        const colConfig = (targetTable as GetTableColumns<TPrimaryTable>)[
+          colOrSql as keyof GetTableColumns<TPrimaryTable>
+        ];
+        if (
+          !colConfig ||
+          typeof colConfig !== "object" ||
+          !("dialectTypes" in colConfig)
+        ) {
+          throw new Error(
+            `Column '${
+              colOrSql as string
+            }' not found or is not a valid column configuration in table '${
+              targetTable._name
+            }'.`
+          );
+        }
+        return colConfig as ColumnConfig<any, any>;
+      }
+      return colOrSql; // It's an SQL object
+    });
+    this.internalQueryBuilder.groupBy(...fieldArgs);
     return this;
   }
 

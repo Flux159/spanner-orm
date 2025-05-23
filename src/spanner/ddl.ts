@@ -1,7 +1,17 @@
 // src/spanner/ddl.ts
 
-import type { TableConfig, ColumnConfig, SQL } from "../types/common.js"; // Added SQL import
+import type {
+  TableConfig,
+  ColumnConfig,
+  SQL,
+  TableMetadataConfig,
+} from "../types/common.js"; // Added SQL import
 import { reservedKeywords } from "./reservedKeywords.js";
+
+// Helper to check if a key is a metadata key
+function isMetadataKey(key: string): key is keyof TableMetadataConfig {
+  return key.startsWith("_");
+}
 
 // Spanner uses backticks for escaping, but often identifiers are unquoted if simple.
 // For simplicity and safety, we can choose to always backtick or only when necessary.
@@ -103,33 +113,45 @@ function formatDefaultValueSpanner(
   return "";
 }
 
-export function generateCreateTableSpanner(tableConfig: TableConfig): string {
-  const tableName = escapeIdentifierSpanner(tableConfig.name);
+export function generateCreateTableSpanner(
+  tableConfig: TableConfig<string, any>
+): string {
+  const tableName = escapeIdentifierSpanner(tableConfig._name); // Use _name
   const columnsSql: string[] = [];
   const primaryKeyColumns: string[] = [];
   const foreignKeySqls: string[] = [];
+  const actualColumns: ColumnConfig<unknown, string>[] = [];
 
-  for (const columnName in tableConfig.columns) {
-    const column = tableConfig.columns[columnName];
+  // Extract actual column configurations
+  for (const key in tableConfig) {
+    if (
+      Object.prototype.hasOwnProperty.call(tableConfig, key) &&
+      !isMetadataKey(key)
+    ) {
+      const potentialColumn = tableConfig[key] as any;
+      if (
+        potentialColumn &&
+        typeof potentialColumn === "object" &&
+        "dialectTypes" in potentialColumn
+      ) {
+        actualColumns.push(potentialColumn as ColumnConfig<unknown, string>);
+      }
+    }
+  }
+
+  for (const column of actualColumns) {
     let columnSql = escapeIdentifierSpanner(column.name);
-
     columnSql += ` ${column.dialectTypes.spanner}`; // Use Spanner specific type
 
-    // NOT NULL constraint
     if (column.notNull || column.primaryKey) {
-      // PK columns are implicitly NOT NULL in Spanner, but explicit is fine
       columnSql += " NOT NULL";
     }
 
-    // DEFAULT value
     const defaultSql = formatDefaultValueSpanner(column);
     if (defaultSql) {
       columnSql += ` ${defaultSql}`;
     }
 
-    // Spanner does not have inline UNIQUE for columns in the same way PG does.
-    // Unique constraints are via unique indexes.
-    // Primary key columns are collected and defined at the table level.
     if (column.primaryKey) {
       primaryKeyColumns.push(escapeIdentifierSpanner(column.name));
     }
@@ -141,12 +163,11 @@ export function generateCreateTableSpanner(tableConfig: TableConfig): string {
 
       if (!referencedTableName) {
         console.warn(
-          `Could not determine referenced table name for column "${column.name}" in table "${tableConfig.name}". FK constraint skipped for Spanner.`
+          `Could not determine referenced table name for column "${column.name}" in table "${tableConfig._name}". FK constraint skipped for Spanner.`
         );
       } else {
-        // Spanner FK constraint names are optional but good practice. Auto-generate one.
         const fkName = escapeIdentifierSpanner(
-          `fk_${tableConfig.name}_${column.name}_${referencedTableName}`
+          `fk_${tableConfig._name}_${column.name}_${referencedTableName}`
         );
         let fkSql = `CONSTRAINT ${fkName} FOREIGN KEY (${escapeIdentifierSpanner(
           column.name
@@ -154,19 +175,15 @@ export function generateCreateTableSpanner(tableConfig: TableConfig): string {
           referencedTableName
         )}(${escapeIdentifierSpanner(referencedColumnName)})`;
 
-        // Spanner only supports ON DELETE CASCADE and ON DELETE NO ACTION (default)
         if (column.references.onDelete?.toLowerCase() === "cascade") {
           fkSql += ` ON DELETE CASCADE`;
-        }
-        // ON DELETE NO ACTION is the default and doesn't need to be specified.
-        // Other actions like SET NULL, SET DEFAULT, RESTRICT are not directly supported by Spanner FKs.
-        else if (
+        } else if (
           column.references.onDelete &&
           column.references.onDelete.toLowerCase() !== "no action"
         ) {
           console.warn(
             `Spanner does not support ON DELETE ${column.references.onDelete.toUpperCase()} for FK on ${
-              tableConfig.name
+              tableConfig._name
             }.${column.name}. Defaulting to NO ACTION.`
           );
         }
@@ -176,32 +193,17 @@ export function generateCreateTableSpanner(tableConfig: TableConfig): string {
     columnsSql.push(columnSql);
   }
 
-  const definitionParts = [...columnsSql]; // Changed to const
-
-  if (
-    tableConfig.compositePrimaryKey &&
-    tableConfig.compositePrimaryKey.columns.length > 0
-  ) {
-    // Spanner defines PK as part of the table, not as a separate constraint line usually
-    // The primaryKeyColumns array is used below.
-    // const compositePkCols = tableConfig.compositePrimaryKey.columns.map(escapeIdentifierSpanner); // This was unused here
-  } else if (primaryKeyColumns.length > 0 && !tableConfig.compositePrimaryKey) {
-    // Handled by primaryKeyColumns below
-  }
-
-  // Add collected foreign keys as table-level constraints
-  definitionParts.push(...foreignKeySqls);
+  const definitionParts = [...columnsSql, ...foreignKeySqls];
 
   let createTableSql = `CREATE TABLE ${tableName} (\n  ${definitionParts.join(
     ",\n  "
   )}\n)`;
 
-  // Spanner PRIMARY KEY is defined outside the parentheses of column definitions
   if (
-    tableConfig.compositePrimaryKey &&
-    tableConfig.compositePrimaryKey.columns.length > 0
+    tableConfig._compositePrimaryKey &&
+    tableConfig._compositePrimaryKey.columns.length > 0
   ) {
-    const compositePkCols = tableConfig.compositePrimaryKey.columns.map(
+    const compositePkCols = tableConfig._compositePrimaryKey.columns.map(
       escapeIdentifierSpanner
     );
     createTableSql += ` PRIMARY KEY (${compositePkCols.join(", ")})`;
@@ -209,11 +211,10 @@ export function generateCreateTableSpanner(tableConfig: TableConfig): string {
     createTableSql += ` PRIMARY KEY (${primaryKeyColumns.join(", ")})`;
   }
 
-  // Spanner INTERLEAVE IN PARENT clause
-  if (tableConfig.interleave) {
+  if (tableConfig._interleave) {
     createTableSql += `,\n  INTERLEAVE IN PARENT ${escapeIdentifierSpanner(
-      tableConfig.interleave.parentTable
-    )} ON DELETE ${tableConfig.interleave.onDelete.toUpperCase()}`;
+      tableConfig._interleave.parentTable
+    )} ON DELETE ${tableConfig._interleave.onDelete.toUpperCase()}`;
   }
 
   createTableSql += ";";
