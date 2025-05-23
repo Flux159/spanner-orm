@@ -11,7 +11,10 @@ import type { DatabaseAdapter } from "./types/adapter.js";
 // import { generateCreateTableSpanner } from "./spanner/ddl.js"; // Will be handled by migration-generator
 import { generateSchemaSnapshot } from "./core/snapshot.js";
 import { generateSchemaDiff } from "./core/differ.js";
-import { generateMigrationDDL } from "./core/migration-generator.js";
+import {
+  generateMigrationDDL, // Still used by handleDdlGeneration
+  generateCombinedMigrationFileContent,
+} from "./core/migration-generator.js";
 import {
   MIGRATION_TABLE_NAME,
   getCreateMigrationTableDDL,
@@ -40,10 +43,6 @@ interface DdlOptions {
   dialect: Dialect;
   output?: string;
 }
-
-// interface MigrateCreateOptions {
-//   name: string;
-// }
 
 interface MigrateLatestOptions {
   schema: string;
@@ -80,27 +79,6 @@ function getTimestamp() {
     .replace(/[-:T.]/g, "")
     .slice(0, 14); // YYYYMMDDHHMMSS
 }
-
-const migrationFileTemplate = (dialect: Dialect): string => `
-// Migration file for ${dialect}
-// Generated at ${new Date().toISOString()}
-
-import type { MigrationExecutor, Dialect } from "spanner-orm"; // Adjust path as needed
-
-export const up: MigrationExecutor = async (executeSql, currentDialect) => {
-  if (currentDialect === "${dialect}") {
-    // UP_STATEMENTS_PLACEHOLDER
-    console.log("Applying UP migration for ${dialect}...");
-  }
-};
-
-export const down: MigrationExecutor = async (executeSql, currentDialect) => {
-  if (currentDialect === "${dialect}") {
-    // DOWN_STATEMENTS_PLACEHOLDER
-    console.log("Applying DOWN migration for ${dialect}...");
-  }
-};
-`;
 
 // Modified to return a Record for snapshot generator
 async function loadSchemaTablesMap(
@@ -218,40 +196,6 @@ async function handleDdlGeneration(options: DdlOptions) {
   }
 }
 
-function formatDdlForTemplate(
-  ddlStatements: string[] | string[][],
-  dialect: Dialect
-): string {
-  if (!ddlStatements || ddlStatements.length === 0) {
-    return "    // No DDL statements generated for this migration.";
-  }
-
-  if (dialect === "spanner" && Array.isArray(ddlStatements[0])) {
-    // It's string[][] for Spanner
-    const batches = ddlStatements as string[][];
-    let result = "";
-    batches.forEach((batch, index) => {
-      if (batches.length > 1) {
-        result += `    // --- Batch ${index + 1} ---\n`;
-      }
-      result += batch
-        .map(
-          (stmt) => `    await executeSql(\`${stmt.replace(/`/g, "\\`")}\`);`
-        )
-        .join("\n");
-      if (index < batches.length - 1) {
-        result += "\n"; // Add a newline between batches if not the last one
-      }
-    });
-    return result;
-  } else {
-    // It's string[] for PostgreSQL or Spanner (if not batched, though it should be)
-    return (ddlStatements as string[])
-      .map((stmt) => `    await executeSql(\`${stmt.replace(/`/g, "\\`")}\`);`)
-      .join("\n");
-  }
-}
-
 async function getDatabaseAdapter(): Promise<DatabaseAdapter | null> {
   const dbDialect = process.env.DB_DIALECT as Dialect | undefined;
 
@@ -331,12 +275,10 @@ async function handleMigrateCreate(
   try {
     const snapshotContent = await fs.readFile(snapshotFilePath, "utf-8");
     previousSnapshot = JSON.parse(snapshotContent) as SchemaSnapshot;
-    // Basic validation (optional, but good practice)
     if (previousSnapshot.version !== ORM_SNAPSHOT_VERSION) {
       console.warn(
         `Warning: Snapshot version mismatch. Expected ${ORM_SNAPSHOT_VERSION}, found ${previousSnapshot.version}. Proceeding with caution.`
       );
-      // Potentially force empty if versions are incompatible, or attempt migration
     }
     console.log(`Loaded previous schema snapshot from ${snapshotFilePath}`);
   } catch (error: any) {
@@ -351,55 +293,33 @@ async function handleMigrateCreate(
     }
     previousSnapshot = {
       version: ORM_SNAPSHOT_VERSION,
-      dialect: "common", // 'common' as it's a generic schema representation
+      dialect: "common",
       tables: {},
     };
   }
 
-  // Diff for UP: from previous (or empty) to current
   const upSchemaDiff = generateSchemaDiff(previousSnapshot, currentSnapshot);
-  // Diff for DOWN: from current to previous (or empty)
   const downSchemaDiff = generateSchemaDiff(currentSnapshot, previousSnapshot);
 
-  const dialects: Dialect[] = ["postgres", "spanner"];
-  let allMigrationsGeneratedSuccessfully = true;
+  const migrationFileContent = generateCombinedMigrationFileContent(
+    upSchemaDiff,
+    downSchemaDiff,
+    currentSnapshot,
+    previousSnapshot
+  );
 
-  for (const dialect of dialects) {
-    // For upDdl, newSchemaSnapshot is currentSnapshot (diff is previous -> current)
-    const upDdl = generateMigrationDDL(upSchemaDiff, currentSnapshot, dialect);
-    // For downDdl, newSchemaSnapshot is previousSnapshot (diff is current -> previous)
-    const downDdl = generateMigrationDDL(
-      downSchemaDiff,
-      previousSnapshot,
-      dialect
-    );
+  const migrationPath = path.join(MIGRATIONS_DIR, `${baseFilename}.ts`);
+  let migrationGeneratedSuccessfully = true;
 
-    const formattedUpDdl = formatDdlForTemplate(upDdl, dialect);
-    const formattedDownDdl = formatDdlForTemplate(downDdl, dialect);
-
-    let template = migrationFileTemplate(dialect);
-    template = template.replace("// UP_STATEMENTS_PLACEHOLDER", formattedUpDdl);
-    template = template.replace(
-      "// DOWN_STATEMENTS_PLACEHOLDER",
-      formattedDownDdl
-    );
-
-    const migrationPath = path.join(
-      MIGRATIONS_DIR,
-      `${baseFilename}.${dialect === "postgres" ? "pg" : dialect}.ts`
-    );
-
-    try {
-      await fs.writeFile(migrationPath, template);
-      console.log(`Created ${dialect} migration file: ${migrationPath}`);
-    } catch (error) {
-      console.error(`Error creating ${dialect} migration file:`, error);
-      allMigrationsGeneratedSuccessfully = false;
-      // Do not exit immediately, allow other dialect generation to be attempted or reported.
-    }
+  try {
+    await fs.writeFile(migrationPath, migrationFileContent);
+    console.log(`Created migration file: ${migrationPath}`);
+  } catch (error) {
+    console.error(`Error creating migration file:`, error);
+    migrationGeneratedSuccessfully = false;
   }
 
-  if (allMigrationsGeneratedSuccessfully) {
+  if (migrationGeneratedSuccessfully) {
     try {
       await fs.writeFile(
         snapshotFilePath,
@@ -413,11 +333,10 @@ async function handleMigrateCreate(
         `Error saving current schema snapshot to ${snapshotFilePath}:`,
         error
       );
-      // This is a non-fatal error for the migration creation itself, but should be logged.
     }
   } else {
     console.error(
-      "One or more migration files could not be generated. Snapshot will not be updated."
+      "Migration file could not be generated. Snapshot will not be updated."
     );
   }
 }
@@ -430,7 +349,7 @@ async function handleMigrateLatest(options: MigrateLatestOptions) {
     console.error("Failed to initialize database adapter. Exiting.");
     process.exit(1);
   }
-  const dialect = adapter.dialect; // Get dialect from the adapter
+  const dialect = adapter.dialect;
   console.log(
     `Starting 'migrate latest' for dialect: ${dialect} using schema: ${schemaPath}`
   );
@@ -439,7 +358,6 @@ async function handleMigrateLatest(options: MigrateLatestOptions) {
   const queryRowsSql = adapter.query.bind(adapter);
 
   try {
-    // Step 2: Ensure migration tracking table exists.
     console.log(
       `Ensuring migration tracking table '${MIGRATION_TABLE_NAME}' exists...`
     );
@@ -452,7 +370,7 @@ async function handleMigrateLatest(options: MigrateLatestOptions) {
           (dialect === "spanner" &&
             error.message &&
             error.message.includes("AlreadyExists")) ||
-          (dialect === "postgres" && // Covers pg and pglite
+          (dialect === "postgres" &&
             error.message &&
             error.message.includes("already exists"))
         ) {
@@ -466,7 +384,6 @@ async function handleMigrateLatest(options: MigrateLatestOptions) {
     }
     console.log("Migration tracking table check complete.");
 
-    // Step 3: Get already applied migrations.
     const appliedMigrationNames = await getAppliedMigrationNames(
       queryRowsSql,
       dialect
@@ -476,22 +393,26 @@ async function handleMigrateLatest(options: MigrateLatestOptions) {
       appliedMigrationNames.length > 0 ? appliedMigrationNames : "None"
     );
 
-    // Step 4: Read all migration file names from MIGRATIONS_DIR.
     await ensureMigrationsDirExists();
     const allMigrationFiles = await fs.readdir(MIGRATIONS_DIR);
-    const dialectSuffix = `.${dialect === "postgres" ? "pg" : dialect}.ts`;
+    const migrationFileSuffix = ".ts";
 
     const pendingMigrations = allMigrationFiles
       .filter(
         (file) =>
-          file.endsWith(dialectSuffix) &&
-          !appliedMigrationNames.includes(file.replace(dialectSuffix, ""))
+          file.endsWith(migrationFileSuffix) &&
+          !file.endsWith(".pg.ts") && // Exclude old pg-specific format
+          !file.endsWith(".spanner.ts") && // Exclude old spanner-specific format
+          !appliedMigrationNames.includes(
+            file.replace(migrationFileSuffix, "")
+          ) &&
+          file !== SNAPSHOT_FILENAME // Exclude snapshot file
       )
       .sort();
 
     if (pendingMigrations.length === 0) {
       console.log("No pending migrations to apply.");
-      return; // Early exit if no pending migrations
+      return;
     }
 
     console.log(
@@ -499,9 +420,8 @@ async function handleMigrateLatest(options: MigrateLatestOptions) {
       pendingMigrations
     );
 
-    // Step 5: Execute pending migrations.
     for (const migrationFile of pendingMigrations) {
-      const migrationName = migrationFile.replace(dialectSuffix, "");
+      const migrationName = migrationFile.replace(migrationFileSuffix, "");
       console.log(`Applying migration: ${migrationFile}...`);
       const migrationPath = path.join(
         process.cwd(),
@@ -510,24 +430,25 @@ async function handleMigrateLatest(options: MigrateLatestOptions) {
       );
 
       try {
-        const migrationModule = (await import(migrationPath)) as {
-          up: MigrationExecutor;
-        };
-        if (typeof migrationModule.up !== "function") {
+        const migrationModule = (await import(migrationPath)) as Record<
+          string,
+          MigrationExecutor
+        >;
+
+        const upFunctionName =
+          dialect === "postgres" ? "migratePostgresUp" : "migrateSpannerUp";
+        const upFunction: MigrationExecutor | undefined =
+          migrationModule[upFunctionName];
+
+        if (typeof upFunction !== "function") {
           throw new Error(
-            `Migration file ${migrationFile} does not export an 'up' function.`
+            `Migration file ${migrationFile} does not export a suitable '${upFunctionName}' function for dialect ${dialect}.`
           );
         }
-
-        // Transaction handling can be complex and adapter-specific.
-        // For simplicity, we'll assume individual statements are atomic or migrations handle their own transactions.
-        // if (adapter.beginTransaction) await adapter.beginTransaction();
-        await migrationModule.up(executeCmdSql, dialect);
+        await upFunction(executeCmdSql, dialect);
         await recordMigrationApplied(executeCmdSql, migrationName, dialect);
-        // if (adapter.commitTransaction) await adapter.commitTransaction();
         console.log(`Successfully applied migration: ${migrationFile}`);
       } catch (error) {
-        // if (adapter.rollbackTransaction) await adapter.rollbackTransaction();
         console.error(`Failed to apply migration ${migrationFile}:`, error);
         console.error("Migration process halted due to error.");
         process.exit(1);
@@ -573,15 +494,14 @@ async function handleMigrateDown(options: MigrateDownOptions) {
       console.log(
         "No migrations have been applied for this dialect. Nothing to revert."
       );
-      return; // Early exit
+      return;
     }
 
     const lastMigrationName =
       appliedMigrationNames[appliedMigrationNames.length - 1];
-    // No need to check !lastMigrationName as length > 0 is confirmed
 
-    const dialectSuffix = `.${dialect === "postgres" ? "pg" : dialect}.ts`;
-    const migrationFile = `${lastMigrationName}${dialectSuffix}`;
+    const migrationFileSuffix = ".ts";
+    const migrationFile = `${lastMigrationName}${migrationFileSuffix}`;
     console.log(`Attempting to revert migration: ${migrationFile}...`);
 
     const migrationPath = path.join(
@@ -601,22 +521,25 @@ async function handleMigrateDown(options: MigrateDownOptions) {
     }
 
     try {
-      const migrationModule = (await import(migrationPath)) as {
-        down: MigrationExecutor;
-      };
-      if (typeof migrationModule.down !== "function") {
+      const migrationModule = (await import(migrationPath)) as Record<
+        string,
+        MigrationExecutor
+      >;
+      const downFunctionName =
+        dialect === "postgres" ? "migratePostgresDown" : "migrateSpannerDown";
+      const downFunction: MigrationExecutor | undefined =
+        migrationModule[downFunctionName];
+
+      if (typeof downFunction !== "function") {
         throw new Error(
-          `Migration file ${migrationFile} does not export a 'down' function.`
+          `Migration file ${migrationFile} does not export a suitable '${downFunctionName}' function for dialect ${dialect}.`
         );
       }
 
-      // if (adapter.beginTransaction) await adapter.beginTransaction();
-      await migrationModule.down(executeCmdSql, dialect);
+      await downFunction(executeCmdSql, dialect);
       await recordMigrationReverted(executeCmdSql, lastMigrationName, dialect);
-      // if (adapter.commitTransaction) await adapter.commitTransaction();
       console.log(`Successfully reverted migration: ${migrationFile}`);
     } catch (error) {
-      // if (adapter.rollbackTransaction) await adapter.rollbackTransaction();
       console.error(`Failed to revert migration ${migrationFile}:`, error);
       console.error("Migration down process halted due to error.");
       process.exit(1);
@@ -661,7 +584,7 @@ const migrateCommand = program
 migrateCommand
   .command("create <name>")
   .description(
-    "Create new migration files (one for each dialect), populating with DDL based on schema changes. The <name> should be descriptive, e.g., 'add-users-table'."
+    "Create a new migration file (e.g., YYYYMMDDHHMMSS-name.ts) with dialect-specific up/down functions (migratePostgresUp, migrateSpannerUp, etc.), populating with DDL based on schema changes. The <name> should be descriptive, e.g., 'add-users-table'."
   )
   .requiredOption(
     // Added schema option
