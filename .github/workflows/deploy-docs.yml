@@ -1,0 +1,59 @@
+name: Deploy Docs to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main # Or your default branch
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # pages: write
+      # id-token: write
+    concurrency:
+      group: "pages"
+      cancel-in-progress: false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true # Fetch Hugo themes (if stored as submodules)
+
+      - name: Setup Hugo
+        uses: peaceiris/actions-hugo@v3 # Uses current v3
+        with:
+          hugo-version: "latest" # Or specify a version like '0.127.0'
+          # extended: true # Uncomment if your theme needs the extended Hugo version
+
+      - name: Setup Node.js (for bun)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20" # Or your preferred Node.js version
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2 # Uses current v2
+        # with:
+        #   bun-version: "latest" # Optional: specify Bun version
+
+      - name: Install dependencies (including hugo-bin for local script consistency)
+        run: bun install
+
+      - name: Build Hugo site
+        run: bun run docs:build # Uses the script from package.json. Output will be in 'website/public' by default with Hextra or as specified in the script.
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          # Path to the directory containing the built Hugo site
+          # Hextra theme by default builds to 'website/public'
+          # If your docs:build script outputs to 'website/public_docs', change this path
+          path: ./website/public
+
+      # - name: Deploy to GitHub Pages
+      #   id: deployment
+      #   uses: actions/deploy-pages@v4

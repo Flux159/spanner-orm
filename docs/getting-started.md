@@ -79,10 +79,10 @@ export const users = table("users", {
 // Common timestamp fields
 export const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true })
-    .default(sql\`CURRENT_TIMESTAMP\`) // Use backticks for sql template literal
+    .default(sql`CURRENT_TIMESTAMP`) // Use backticks for sql template literal
     .notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
-    .default(sql\`CURRENT_TIMESTAMP\`) // Use backticks for sql template literal
+    .default(sql`CURRENT_TIMESTAMP`) // Use backticks for sql template literal
     .notNull(),
 };
 
