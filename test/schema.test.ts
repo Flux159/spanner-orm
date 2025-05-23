@@ -38,7 +38,7 @@ describe("Schema Builder", () => {
       })
     );
 
-    expect(users.name).toBe("users");
+    expect(users.tableName).toBe("users");
 
     // Check id column
     expect(users.columns.id.name).toBe("id");
@@ -98,16 +98,16 @@ describe("Schema Builder", () => {
     expect(posts.columns.authorId.dialectTypes.spanner).toBe("STRING(MAX)");
 
     // Check indexes
-    expect(users.indexes).toBeDefined();
-    expect(users.indexes?.length).toBe(2);
-    if (users.indexes) {
-      expect(users.indexes[0].name).toBe("idx_age");
-      expect(users.indexes[0].columns).toEqual(["age"]);
-      expect(users.indexes[0].unique).toBe(false);
+    expect(users.tableIndexes).toBeDefined();
+    expect(users.tableIndexes?.length).toBe(2);
+    if (users.tableIndexes) {
+      expect(users.tableIndexes[0].name).toBe("idx_age");
+      expect(users.tableIndexes[0].columns).toEqual(["age"]);
+      expect(users.tableIndexes[0].unique).toBe(false);
 
-      expect(users.indexes[1].name).toBe("uq_api_key");
-      expect(users.indexes[1].columns).toEqual(["api_key"]);
-      expect(users.indexes[1].unique).toBe(true);
+      expect(users.tableIndexes[1].name).toBe("uq_api_key");
+      expect(users.tableIndexes[1].columns).toEqual(["api_key"]);
+      expect(users.tableIndexes[1].unique).toBe(true);
     }
 
     // Test type inference (compile-time check, but good to have a placeholder)
@@ -129,9 +129,9 @@ describe("Schema Builder", () => {
     const simpleTable = table("simple", {
       name: text("name").notNull(),
     });
-    expect(simpleTable.name).toBe("simple");
+    expect(simpleTable.tableName).toBe("simple");
     expect(simpleTable.columns.name.notNull).toBe(true);
-    expect(simpleTable.indexes).toBeUndefined();
+    expect(simpleTable.tableIndexes).toBeUndefined();
   });
 
   it("should correctly build a varchar without length for Spanner (STRING(MAX))", () => {
@@ -262,7 +262,7 @@ describe("Schema Builder", () => {
       (_t) => ({
         primaryKey: { columns: ["parentId", "childId"] },
         interleave: {
-          parentTable: parentTable.name, // or just "parent_table"
+          parentTable: parentTable.tableName, // or just "parent_table"
           onDelete: "cascade",
         },
       })

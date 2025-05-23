@@ -1,198 +1,83 @@
-This website was created with [Docusaurus](https://docusaurus.io/).
+# Hextra Starter Template
 
-# What's In This Document
+[![Deploy Hugo site to Pages](https://github.com/imfing/hextra-starter-template/actions/workflows/pages.yaml/badge.svg)](https://github.com/imfing/hextra-starter-template/actions/workflows/pages.yaml)
+[![Netlify Status](https://api.netlify.com/api/v1/badges/6e83fd88-5ffe-4808-9689-c0f3b100bfe3/deploy-status)](https://app.netlify.com/sites/hextra-starter-template/deploys)
+![Vercel Deployment Status](https://img.shields.io/github/deployments/imfing/hextra-starter-template/production?logo=vercel&logoColor=white&label=vercel&labelColor=black&link=https%3A%2F%2Fhextra-starter-template.vercel.app%2F)
 
-- [Get Started in 5 Minutes](#get-started-in-5-minutes)
-- [Directory Structure](#directory-structure)
-- [Editing Content](#editing-content)
-- [Adding Content](#adding-content)
-- [Full Documentation](#full-documentation)
 
-# Get Started in 5 Minutes
+🐣 Minimal template for getting started with [Hextra](https://github.com/imfing/hextra)
 
-1. Make sure all the dependencies for the website are installed:
+![hextra-template](https://github.com/imfing/hextra-starter-template/assets/5097752/c403b9a9-a76c-47a6-8466-513d772ef0b7)
 
-```sh
-# Install dependencies
-$ yarn
+[🌐 Demo ↗](https://imfing.github.io/hextra-starter-template/)
+
+## Quick Start
+
+Use this template to create your own repository:
+
+<img src="https://docs.github.com/assets/cb-77734/mw-1440/images/help/repository/use-this-template-button.webp" width=400 />
+
+You can also quickly start developing using the following online development environment:
+
+- [GitHub Codespaces](https://github.com/codespaces) 
+    
+    [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/imfing/hextra-starter-template)
+
+    Create a new codespace and follow the [Local Development](#local-development) to launch the preview
+
+- [Gitpod](https://gitpod.io)
+
+    [![Open in Gitpod](https://gitpod.io/button/open-in-gitpod.svg)](https://gitpod.io/#https://github.com/imfing/hextra-starter-template)
+
+
+## Deployment
+
+### GitHub Pages
+
+A GitHub Actions workflow is provided in [`.github/workflows/pages.yaml`](./.github/workflows/pages.yaml) to [publish to GitHub Pages](https://github.blog/changelog/2022-07-27-github-pages-custom-github-actions-workflows-beta/) for free. 
+
+For details, see [Publishing with a custom GitHub Actions workflow](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site#publishing-with-a-custom-github-actions-workflow).
+
+Note: in the settings, make sure to set the Pages deployment source to **GitHub Actions**:
+
+<img src="https://github.com/imfing/hextra-starter-template/assets/5097752/99676430-884e-42ab-b901-f6534a0d6eee" width=600 />
+
+[Run the workflow manually](https://docs.github.com/en/actions/using-workflows/manually-running-a-workflow) if it's not triggered automatically.
+
+### Netlify
+
+[![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/imfing/hextra-starter-template)
+
+### Vercel
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fimfing%2Fhextra-starter-template&env=HUGO_VERSION)
+
+Override the configuration:
+
+<img src="https://github.com/imfing/hextra-starter-template/assets/5097752/e2e3cecd-c884-47ec-b064-14f896fee08d" width=600 />
+
+## Local Development
+
+Pre-requisites: [Hugo](https://gohugo.io/getting-started/installing/), [Go](https://golang.org/doc/install) and [Git](https://git-scm.com)
+
+```shell
+# Clone the repo
+git clone https://github.com/imfing/hextra-starter-template.git
+
+# Change directory
+cd hextra-starter-template
+
+# Start the server
+hugo mod tidy
+hugo server --logLevel debug --disableFastRender -p 1313
 ```
 
-2. Run your dev server:
+### Update theme
 
-```sh
-# Start the site
-$ yarn start
+```shell
+hugo mod get -u
+hugo mod tidy
 ```
 
-## Directory Structure
+See [Update modules](https://gohugo.io/hugo-modules/use-modules/#update-modules) for more details.
 
-Your project file structure should look something like this
-
-```
-my-docusaurus/
-  docs/
-    doc-1.md
-    doc-2.md
-    doc-3.md
-  website/
-    blog/
-      2016-3-11-oldest-post.md
-      2017-10-24-newest-post.md
-    core/
-    node_modules/
-    pages/
-    static/
-      css/
-      img/
-    package.json
-    sidebars.json
-    siteConfig.js
-```
-
-# Editing Content
-
-## Editing an existing docs page
-
-Edit docs by navigating to `docs/` and editing the corresponding document:
-
-`docs/doc-to-be-edited.md`
-
-```markdown
----
-id: page-needs-edit
-title: This Doc Needs To Be Edited
----
-
-Edit me...
-```
-
-For more information about docs, click [here](https://docusaurus.io/docs/en/navigation)
-
-## Editing an existing blog post
-
-Edit blog posts by navigating to `website/blog` and editing the corresponding post:
-
-`website/blog/post-to-be-edited.md`
-
-```markdown
----
-id: post-needs-edit
-title: This Blog Post Needs To Be Edited
----
-
-Edit me...
-```
-
-For more information about blog posts, click [here](https://docusaurus.io/docs/en/adding-blog)
-
-# Adding Content
-
-## Adding a new docs page to an existing sidebar
-
-1. Create the doc as a new markdown file in `/docs`, example `docs/newly-created-doc.md`:
-
-```md
----
-id: newly-created-doc
-title: This Doc Needs To Be Edited
----
-
-My new content here..
-```
-
-1. Refer to that doc's ID in an existing sidebar in `website/sidebars.json`:
-
-```javascript
-// Add newly-created-doc to the Getting Started category of docs
-{
-  "docs": {
-    "Getting Started": [
-      "quick-start",
-      "newly-created-doc" // new doc here
-    ],
-    ...
-  },
-  ...
-}
-```
-
-For more information about adding new docs, click [here](https://docusaurus.io/docs/en/navigation)
-
-## Adding a new blog post
-
-1. Make sure there is a header link to your blog in `website/siteConfig.js`:
-
-`website/siteConfig.js`
-
-```javascript
-headerLinks: [
-    ...
-    { blog: true, label: 'Blog' },
-    ...
-]
-```
-
-2. Create the blog post with the format `YYYY-MM-DD-My-Blog-Post-Title.md` in `website/blog`:
-
-`website/blog/2018-05-21-New-Blog-Post.md`
-
-```markdown
----
-author: Frank Li
-authorURL: https://twitter.com/foobarbaz
-authorFBID: 503283835
-title: New Blog Post
----
-
-Lorem Ipsum...
-```
-
-For more information about blog posts, click [here](https://docusaurus.io/docs/en/adding-blog)
-
-## Adding items to your site's top navigation bar
-
-1. Add links to docs, custom pages or external links by editing the headerLinks field of `website/siteConfig.js`:
-
-`website/siteConfig.js`
-
-```javascript
-{
-  headerLinks: [
-    ...
-    /* you can add docs */
-    { doc: 'my-examples', label: 'Examples' },
-    /* you can add custom pages */
-    { page: 'help', label: 'Help' },
-    /* you can add external links */
-    { href: 'https://github.com/facebook/docusaurus', label: 'GitHub' },
-    ...
-  ],
-  ...
-}
-```
-
-For more information about the navigation bar, click [here](https://docusaurus.io/docs/en/navigation)
-
-## Adding custom pages
-
-1. Docusaurus uses React components to build pages. The components are saved as .js files in `website/pages/en`:
-1. If you want your page to show up in your navigation header, you will need to update `website/siteConfig.js` to add to the `headerLinks` element:
-
-`website/siteConfig.js`
-
-```javascript
-{
-  headerLinks: [
-    ...
-    { page: 'my-new-custom-page', label: 'My New Custom Page' },
-    ...
-  ],
-  ...
-}
-```
-
-For more information about custom pages, click [here](https://docusaurus.io/docs/en/custom-pages).
-
-# Full Documentation
-
-Full documentation can be found on the [website](https://docusaurus.io/).

@@ -117,7 +117,7 @@ describe("generateSchemaSnapshot", () => {
 
     // --- Test Users Table ---
     const usersTable = snapshot.tables.users;
-    expect(usersTable.name).toBe("users");
+    expect(usersTable.tableName).toBe("users"); // Changed from .name
     expect(Object.keys(usersTable.columns).length).toBe(7);
 
     // id column
@@ -170,7 +170,7 @@ describe("generateSchemaSnapshot", () => {
 
     // --- Test PostsCorrected Table ---
     const postsTable = snapshot.tables.posts_corrected;
-    expect(postsTable.name).toBe("posts_corrected");
+    expect(postsTable.tableName).toBe("posts_corrected"); // Changed from .name
     expect(Object.keys(postsTable.columns).length).toBe(7); // postId, secondaryId, authorId, title, content, publishedAt, views
 
     // authorId column (FK)
@@ -196,14 +196,14 @@ describe("generateSchemaSnapshot", () => {
     });
 
     // Indexes for posts_corrected
-    expect(postsTable.indexes).toBeDefined();
-    expect(postsTable.indexes?.length).toBe(2);
-    expect(postsTable.indexes).toContainEqual({
+    expect(postsTable.tableIndexes).toBeDefined(); // Changed from .indexes
+    expect(postsTable.tableIndexes?.length).toBe(2);
+    expect(postsTable.tableIndexes).toContainEqual({
       name: "idx_posts_corrected_author",
       columns: ["author_id"],
       unique: false,
     });
-    expect(postsTable.indexes).toContainEqual({
+    expect(postsTable.tableIndexes).toContainEqual({
       name: "uidx_posts_corrected_title",
       columns: ["title"],
       unique: true,
@@ -219,7 +219,7 @@ describe("generateSchemaSnapshot", () => {
 
     // --- Test Comments Table ---
     const commentsTable = snapshot.tables.comments;
-    expect(commentsTable.name).toBe("comments");
+    expect(commentsTable.tableName).toBe("comments"); // Changed from .name
     expect(Object.keys(commentsTable.columns).length).toBe(4); // commentId, postId, commenterId, text_content
 
     // commentId (PK)

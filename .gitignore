@@ -139,3 +139,5 @@ website/build
 
 spanner-orm-migrations
 spannerorgpglite.db
+mock-pg-url-latest.db
+mock-pg-url-down.db

@@ -257,14 +257,14 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
 
     const finalAliasMap = new Map<string, string>();
     this._tableAliases.forEach((alias, tableConfig) => {
-      finalAliasMap.set(tableConfig.name, alias);
+      finalAliasMap.set(tableConfig.tableName, alias);
     });
     if (
       this._targetTable &&
       this._targetTableAlias &&
-      !finalAliasMap.has(this._targetTable.name)
+      !finalAliasMap.has(this._targetTable.tableName)
     ) {
-      finalAliasMap.set(this._targetTable.name, this._targetTableAlias);
+      finalAliasMap.set(this._targetTable.tableName, this._targetTableAlias);
     }
 
     let sqlString: string;
@@ -362,7 +362,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           const colConfig = col as ColumnConfig<any, any>;
           if (colConfig.references) {
             const referencedCol = colConfig.references.referencesFn();
-            if (referencedCol._tableName === this._targetTable.name) {
+            if (referencedCol._tableName === this._targetTable.tableName) {
               foreignKeyColumn = colConfig;
               referencedColumnInParent = referencedCol;
               break;
@@ -372,13 +372,13 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
 
         if (!foreignKeyColumn || !referencedColumnInParent) {
           console.warn(
-            `Warning: Could not determine foreign key relationship between "${this._targetTable.name}" and "${relationName}".`
+            `Warning: Could not determine foreign key relationship between "${this._targetTable.tableName}" and "${relationName}".`
           );
           continue;
         }
 
         const relatedTableAlias = this.generateTableAlias(relatedTableConfig);
-        aliasMap.set(relatedTableConfig.name, relatedTableAlias);
+        aliasMap.set(relatedTableConfig.tableName, relatedTableAlias);
 
         const onCondition = sql`${foreignKeyColumn} = ${referencedColumnInParent}`;
 
@@ -512,18 +512,18 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       selectClause = `SELECT "${this._targetTableAlias}".*`;
     }
 
-    let fromClause = `FROM "${this._targetTable.name}" AS "${this._targetTableAlias}"`;
+    let fromClause = `FROM "${this._targetTable.tableName}" AS "${this._targetTableAlias}"`;
     if (allJoins.length > 0) {
       const joinStrings = allJoins.map((join) => {
-        const joinTableAlias = aliasMap.get(join.targetTable.name);
+        const joinTableAlias = aliasMap.get(join.targetTable.tableName);
         if (!joinTableAlias)
           throw new Error(
             `Alias not found for join table: ${
-              join.targetTable.name
+              join.targetTable.tableName
             }. Alias map: ${JSON.stringify(Array.from(aliasMap.entries()))}`
           );
         return `${join.type} JOIN "${
-          join.targetTable.name
+          join.targetTable.tableName
         }" AS "${joinTableAlias}" ON ${join.onCondition.toSqlString(
           "postgres",
           paramIndexState,
@@ -599,7 +599,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           const colConfig = col as ColumnConfig<any, any>;
           if (colConfig.references) {
             const referencedCol = colConfig.references.referencesFn();
-            if (referencedCol._tableName === this._targetTable.name) {
+            if (referencedCol._tableName === this._targetTable.tableName) {
               foreignKeyColumn = colConfig;
               referencedColumnInParent = referencedCol;
               break;
@@ -609,13 +609,13 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
 
         if (!foreignKeyColumn || !referencedColumnInParent) {
           console.warn(
-            `Warning: Spanner - Could not determine foreign key relationship between "${this._targetTable.name}" and "${relationName}".`
+            `Warning: Spanner - Could not determine foreign key relationship between "${this._targetTable.tableName}" and "${relationName}".`
           );
           continue;
         }
 
         const relatedTableAlias = this.generateTableAlias(relatedTableConfig);
-        aliasMap.set(relatedTableConfig.name, relatedTableAlias);
+        aliasMap.set(relatedTableConfig.tableName, relatedTableAlias);
 
         const onCondition = sql`${foreignKeyColumn} = ${referencedColumnInParent}`;
         includeJoins.push({
@@ -748,16 +748,16 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       selectClause = `SELECT \`${this._targetTableAlias}\`.*`;
     }
 
-    let fromClause = `FROM \`${this._targetTable.name}\` AS \`${this._targetTableAlias}\``;
+    let fromClause = `FROM \`${this._targetTable.tableName}\` AS \`${this._targetTableAlias}\``;
     if (allJoins.length > 0) {
       const joinStrings = allJoins.map((join) => {
-        const joinTableAlias = aliasMap.get(join.targetTable.name);
+        const joinTableAlias = aliasMap.get(join.targetTable.tableName);
         if (!joinTableAlias)
           throw new Error(
-            `Alias not found for join table: ${join.targetTable.name}`
+            `Alias not found for join table: ${join.targetTable.tableName}`
           );
         return `${join.type} JOIN \`${
-          join.targetTable.name
+          join.targetTable.tableName
         }\` AS \`${joinTableAlias}\` ON ${join.onCondition.toSqlString(
           "spanner",
           paramIndexState,
@@ -872,7 +872,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       })
       .join(", ");
 
-    return `INSERT INTO "${this._targetTable.name}" (${columns}) VALUES ${valuePlaceholders}`;
+    return `INSERT INTO "${this._targetTable.tableName}" (${columns}) VALUES ${valuePlaceholders}`;
   }
 
   private buildInsertSpannerSQL(
@@ -945,7 +945,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           .join(", ")})`;
       })
       .join(", ");
-    return `INSERT INTO \`${this._targetTable.name}\` (${columns}) VALUES ${valuePlaceholders}`;
+    return `INSERT INTO \`${this._targetTable.tableName}\` (${columns}) VALUES ${valuePlaceholders}`;
   }
 
   private buildUpdatePgSQL(
@@ -973,7 +973,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       paramIndexState,
       aliasMap
     );
-    return `UPDATE "${this._targetTable.name}" SET ${setParts} ${whereClause}`.trim();
+    return `UPDATE "${this._targetTable.tableName}" SET ${setParts} ${whereClause}`.trim();
   }
 
   private buildUpdateSpannerSQL(
@@ -1000,7 +1000,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       paramIndexState,
       aliasMap
     );
-    return `UPDATE \`${this._targetTable.name}\` SET ${setParts} ${whereClause}`.trim();
+    return `UPDATE \`${this._targetTable.tableName}\` SET ${setParts} ${whereClause}`.trim();
   }
 
   private buildDeletePgSQL(
@@ -1013,7 +1013,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       paramIndexState,
       aliasMap
     );
-    return `DELETE FROM "${this._targetTable.name}" ${whereClause}`.trim();
+    return `DELETE FROM "${this._targetTable.tableName}" ${whereClause}`.trim();
   }
 
   private buildDeleteSpannerSQL(
@@ -1026,7 +1026,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       paramIndexState,
       aliasMap
     );
-    return `DELETE FROM \`${this._targetTable.name}\` ${whereClause}`.trim();
+    return `DELETE FROM \`${this._targetTable.tableName}\` ${whereClause}`.trim();
   }
 
   private buildWhereClause(
@@ -1293,7 +1293,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       const colConfig = col as ColumnConfig<any, any>;
       if (colConfig.references) {
         const referencedPkColumn = colConfig.references.referencesFn();
-        if (referencedPkColumn._tableName === this._targetTable.name) {
+        if (referencedPkColumn._tableName === this._targetTable.tableName) {
           fkColumn = colConfig; // FK in child table (relatedTableConfig)
           pkColumn = referencedPkColumn; // PK in parent table (_targetTable)
           joinTable = relatedTableConfig;
@@ -1309,7 +1309,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
         const colConfig = col as ColumnConfig<any, any>;
         if (colConfig.references) {
           const referencedPkColumn = colConfig.references.referencesFn();
-          if (referencedPkColumn._tableName === relatedTableConfig.name) {
+          if (referencedPkColumn._tableName === relatedTableConfig.tableName) {
             fkColumn = colConfig; // FK in child table (_targetTable)
             pkColumn = referencedPkColumn; // PK in parent table (relatedTableConfig)
             joinTable = relatedTableConfig; // Still joining TO the relatedTableConfig
@@ -1325,7 +1325,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     }
 
     throw new Error(
-      `Could not automatically determine relationship between ${this._targetTable.name} and ${relationName}. Please use explicit join with ON condition.`
+      `Could not automatically determine relationship between ${this._targetTable.tableName} and ${relationName}. Please use explicit join with ON condition.`
     );
   }
 

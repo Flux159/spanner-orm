@@ -25,10 +25,10 @@ const postsTable = table("posts", {
 // Manually add _tableName to column configs for these test tables
 // In a real scenario, the table() function does this.
 Object.values(usersTable.columns).forEach(
-  (col) => (col._tableName = usersTable.name)
+  (col) => (col._tableName = usersTable.tableName) // Changed to tableName
 );
 Object.values(postsTable.columns).forEach(
-  (col) => (col._tableName = postsTable.name)
+  (col) => (col._tableName = postsTable.tableName) // Changed to tableName
 );
 
 describe("shapeResults", () => {
@@ -60,7 +60,7 @@ describe("shapeResults", () => {
     }; // postsTable is arbitrary here as it won't be used
     expect(shapeResults(rawData, noPkTable, includeClause)).toEqual(rawData);
     expect(consoleWarnSpy).toHaveBeenCalledWith(
-      `Warning: Cannot shape results for table ${noPkTable.name} as it has no defined primary key. Returning raw data.`
+      `Warning: Cannot shape results for table ${noPkTable.tableName} as it has no defined primary key. Returning raw data.` // Changed to tableName
     );
   });
 
@@ -231,16 +231,16 @@ describe("shapeResults", () => {
       description: text("description"),
     });
     Object.values(tasksTable.columns).forEach(
-      (col) => (col._tableName = tasksTable.name)
+      (col) => (col._tableName = tasksTable.tableName) // Changed to tableName
     );
 
     const subTasksTable = table("sub_tasks", {
       sub_id: integer("sub_id").primaryKey(),
-      task_id: text("task_id").references(() => tasksTable.columns.task_uuid),
+      task_id: text("task_id").references(() => tasksTable.task_uuid), // Direct access
       name: text("name"),
     });
     Object.values(subTasksTable.columns).forEach(
-      (col) => (col._tableName = subTasksTable.name)
+      (col) => (col._tableName = subTasksTable.tableName) // Changed to tableName
     );
 
     const rawData = [

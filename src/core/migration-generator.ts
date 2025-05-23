@@ -21,10 +21,106 @@ import type {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   ColumnConfig, // Added for formatDefaultValuePostgres
   SchemaSnapshot, // Added for FK generation
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  MigrationExecutor, // Added for the new migration file template, used in template string
 } from "../types/common.js";
 import { reservedKeywords } from "../spanner/reservedKeywords.js";
 
 const SPANNER_DDL_BATCH_SIZE = 5; // Configurable batch size
+
+const newMigrationFileTemplate = `
+// Generated at {{generationTimestamp}}
+
+import type { MigrationExecutor } from "spanner-orm"; // Adjust path if your types are elsewhere
+
+// --- PostgreSQL Migrations ---
+
+export const migratePostgresUp: MigrationExecutor = async (executeSql, currentDialect) => {
+  if (currentDialect !== "postgres") {
+    console.warn("Attempted to run PostgreSQL UP migration with incorrect dialect:", currentDialect);
+    // It's up to the CLI to call the correct function, but this is a safeguard.
+    // Depending on strictness, you might throw an error or simply return.
+    return;
+  }
+  console.log("Applying UP migration for PostgreSQL...");
+  // PG_UP_STATEMENTS_PLACEHOLDER
+};
+
+export const migratePostgresDown: MigrationExecutor = async (executeSql, currentDialect) => {
+  if (currentDialect !== "postgres") {
+    console.warn("Attempted to run PostgreSQL DOWN migration with incorrect dialect:", currentDialect);
+    return;
+  }
+  console.log("Applying DOWN migration for PostgreSQL...");
+  // PG_DOWN_STATEMENTS_PLACEHOLDER
+};
+
+// --- Spanner Migrations ---
+
+export const migrateSpannerUp: MigrationExecutor = async (executeSql, currentDialect) => {
+  if (currentDialect !== "spanner") {
+    console.warn("Attempted to run Spanner UP migration with incorrect dialect:", currentDialect);
+    return;
+  }
+  console.log("Applying UP migration for Spanner...");
+  // SPANNER_UP_STATEMENTS_PLACEHOLDER
+};
+
+export const migrateSpannerDown: MigrationExecutor = async (executeSql, currentDialect) => {
+  if (currentDialect !== "spanner") {
+    console.warn("Attempted to run Spanner DOWN migration with incorrect dialect:", currentDialect);
+    return;
+  }
+  console.log("Applying DOWN migration for Spanner...");
+  // SPANNER_DOWN_STATEMENTS_PLACEHOLDER
+};
+`;
+
+// Helper function to format DDL statements for inclusion in the migration file template.
+function formatDdlStatementsForTemplate(
+  ddlStatements: string[] | string[][],
+  dialect: Dialect // Dialect here is to know if it's Spanner and might be string[][]
+): string {
+  if (!ddlStatements || ddlStatements.length === 0) {
+    return "    // No DDL statements generated for this migration step.";
+  }
+
+  let formattedString = "";
+
+  if (
+    dialect === "spanner" &&
+    Array.isArray(ddlStatements) &&
+    ddlStatements.length > 0 &&
+    Array.isArray(ddlStatements[0])
+  ) {
+    // Spanner DDL is string[][] (batches)
+    const batches = ddlStatements as string[][];
+    batches.forEach((batch, batchIndex) => {
+      if (batch.length === 0) return;
+      if (batches.length > 1) {
+        formattedString += `  // --- Batch ${batchIndex + 1} ---\n`;
+      }
+      formattedString += batch
+        .map((stmt) => `  await executeSql(\`${stmt.replace(/`/g, "\\`")}\`);`)
+        .join("\n");
+      if (
+        batchIndex < batches.length - 1 &&
+        batches[batchIndex + 1].length > 0
+      ) {
+        formattedString += "\n"; // Add a newline between batches if not the last one and next batch is not empty
+      }
+    });
+  } else {
+    // PostgreSQL DDL is string[]
+    const statements = ddlStatements as string[];
+    formattedString = statements
+      .map((stmt) => `  await executeSql(\`${stmt.replace(/`/g, "\\`")}\`);`)
+      .join("\n");
+  }
+  return formattedString.trim().length > 0
+    ? formattedString
+    : "    // No DDL statements generated for this migration step.";
+}
 
 // --- PostgreSQL DDL Generation Helpers ---
 function escapeIdentifierPostgres(name: string): string {
@@ -105,7 +201,7 @@ function formatDefaultValuePostgres(
 }
 
 function generatePgCreateTableDDL(table: TableSnapshot): string {
-  const tableName = escapeIdentifierPostgres(table.name);
+  const tableName = escapeIdentifierPostgres(table.tableName);
   // eslint-disable-next-line prefer-const
   let columnsSql: string[] = [];
   const primaryKeyColumns: string[] = [];
@@ -147,7 +243,7 @@ function generatePgCreateTableDDL(table: TableSnapshot): string {
       } else if (colIndex === -1) {
         // This case should ideally not happen if primaryKeyColumns is populated correctly
         console.warn(
-          `Primary key column ${primaryKeyColumns[0]} not found in SQL definitions for table ${table.name}. Adding PRIMARY KEY clause separately.`
+          `Primary key column ${primaryKeyColumns[0]} not found in SQL definitions for table ${table.tableName}. Adding PRIMARY KEY clause separately.`
         );
         columnsSql.push(`PRIMARY KEY (${primaryKeyColumns.join(", ")})`);
       }
@@ -213,7 +309,7 @@ function generatePgDdl(
   for (const action of diffActions) {
     // Determine and assign tableNameEsc based on the action type before the switch
     if (action.action === "add") {
-      tableNameEsc = escapeIdentifierPostgres(action.table.name);
+      tableNameEsc = escapeIdentifierPostgres(action.table.tableName);
     } else {
       // For 'remove' or 'change', action.tableName is available
       tableNameEsc = escapeIdentifierPostgres(action.tableName);
@@ -231,7 +327,7 @@ function generatePgDdl(
           if (column.references) {
             addForeignKeyStatements.push(
               generatePgForeignKeyConstraintDDL(
-                table.name, // Use original table name for FK definition
+                table.tableName, // Use original table name for FK definition
                 column.name, // Use actual DB column name
                 column.references
               )
@@ -240,12 +336,12 @@ function generatePgDdl(
           // Handle column-level unique constraints (not part of PK)
           if (column.unique && !column.primaryKey) {
             const constraintName = escapeIdentifierPostgres(
-              `uq_${table.name}_${column.name}`
+              `uq_${table.tableName}_${column.name}`
             );
             createIndexStatements.push(
               // Using createIndexStatements for unique constraints too
               `ALTER TABLE ${escapeIdentifierPostgres(
-                table.name
+                table.tableName
               )} ADD CONSTRAINT ${constraintName} UNIQUE (${escapeIdentifierPostgres(
                 column.name
               )});`
@@ -254,13 +350,13 @@ function generatePgDdl(
         }
 
         // Collect table-level indexes (unique and non-unique)
-        if (table.indexes) {
-          for (const index of table.indexes) {
+        if (table.tableIndexes) {
+          for (const index of table.tableIndexes) {
             const indexName = index.name
               ? escapeIdentifierPostgres(index.name)
               : escapeIdentifierPostgres(
                   `${index.unique ? "uq" : "idx"}_${
-                    table.name
+                    table.tableName
                   }_${index.columns.join("_")}`
                 );
             const columns = index.columns
@@ -270,13 +366,13 @@ function generatePgDdl(
               // Prefer CREATE UNIQUE INDEX over ALTER TABLE ADD CONSTRAINT for multi-column unique indexes defined in table.indexes
               createIndexStatements.push(
                 `CREATE UNIQUE INDEX ${indexName} ON ${escapeIdentifierPostgres(
-                  table.name
+                  table.tableName
                 )} (${columns});`
               );
             } else {
               createIndexStatements.push(
                 `CREATE INDEX ${indexName} ON ${escapeIdentifierPostgres(
-                  table.name
+                  table.tableName
                 )} (${columns});`
               );
             }
@@ -647,7 +743,7 @@ function formatDefaultValueSpanner(
 }
 
 function generateSpannerJustCreateTableDDL(table: TableSnapshot): string {
-  const tableName = escapeIdentifierSpanner(table.name);
+  const tableName = escapeIdentifierSpanner(table.tableName);
   const columnsSql: string[] = [];
   const primaryKeyColumns: string[] = [];
 
@@ -748,7 +844,7 @@ function generateSpannerDdl(
   for (const action of diffActions) {
     let currentTableNameEsc: string;
     if (action.action === "add") {
-      currentTableNameEsc = escapeIdentifierSpanner(action.table.name);
+      currentTableNameEsc = escapeIdentifierSpanner(action.table.tableName);
     } else {
       currentTableNameEsc = escapeIdentifierSpanner(action.tableName);
     }
@@ -762,7 +858,7 @@ function generateSpannerDdl(
           const column = table.columns[propKey];
           if (column.unique && !column.primaryKey) {
             const uniqueIndexName = escapeIdentifierSpanner(
-              `uq_${table.name}_${column.name}`
+              `uq_${table.tableName}_${column.name}`
             );
             createIndexStatements.push(
               `CREATE UNIQUE INDEX ${uniqueIndexName} ON ${currentTableNameEsc} (${escapeIdentifierSpanner(
@@ -773,7 +869,7 @@ function generateSpannerDdl(
           if (column.references) {
             addForeignKeyStatements.push(
               generateSpannerForeignKeyConstraintDDL(
-                table.name,
+                table.tableName,
                 column.name, // Use actual DB column name
                 column.references
               )
@@ -781,13 +877,13 @@ function generateSpannerDdl(
           }
         }
 
-        if (table.indexes) {
-          for (const index of table.indexes) {
+        if (table.tableIndexes) {
+          for (const index of table.tableIndexes) {
             const indexName = index.name
               ? escapeIdentifierSpanner(index.name)
               : escapeIdentifierSpanner(
                   `${index.unique ? "uq" : "idx"}_${
-                    table.name
+                    table.tableName
                   }_${index.columns.join("_")}`
                 );
             const columns = index.columns
@@ -1080,4 +1176,69 @@ export function generateMigrationDDL(
     default:
       throw new Error(`Unsupported dialect for DDL generation: ${dialect}`);
   }
+}
+
+export function generateCombinedMigrationFileContent(
+  upSchemaDiff: SchemaDiff,
+  downSchemaDiff: SchemaDiff,
+  currentSchemaSnapshot: SchemaSnapshot, // For "up" DDL (target state)
+  previousSchemaSnapshot: SchemaSnapshot // For "down" DDL (target state after revert)
+): string {
+  // Generate DDL for Postgres
+  const pgUpDdl = generateMigrationDDL(
+    upSchemaDiff,
+    currentSchemaSnapshot,
+    "postgres"
+  );
+  const pgDownDdl = generateMigrationDDL(
+    downSchemaDiff,
+    previousSchemaSnapshot,
+    "postgres"
+  );
+
+  // Generate DDL for Spanner
+  const spannerUpDdl = generateMigrationDDL(
+    upSchemaDiff,
+    currentSchemaSnapshot,
+    "spanner"
+  );
+  const spannerDownDdl = generateMigrationDDL(
+    downSchemaDiff,
+    previousSchemaSnapshot,
+    "spanner"
+  );
+
+  // Format DDL for template
+  const formattedPgUp = formatDdlStatementsForTemplate(pgUpDdl, "postgres");
+  const formattedPgDown = formatDdlStatementsForTemplate(pgDownDdl, "postgres");
+  const formattedSpannerUp = formatDdlStatementsForTemplate(
+    spannerUpDdl,
+    "spanner"
+  );
+  const formattedSpannerDown = formatDdlStatementsForTemplate(
+    spannerDownDdl,
+    "spanner"
+  );
+
+  // Populate the template
+  let content = newMigrationFileTemplate;
+  content = content.replace(
+    "{{generationTimestamp}}",
+    new Date().toISOString()
+  );
+  content = content.replace("// PG_UP_STATEMENTS_PLACEHOLDER", formattedPgUp);
+  content = content.replace(
+    "// PG_DOWN_STATEMENTS_PLACEHOLDER",
+    formattedPgDown
+  );
+  content = content.replace(
+    "// SPANNER_UP_STATEMENTS_PLACEHOLDER",
+    formattedSpannerUp
+  );
+  content = content.replace(
+    "// SPANNER_DOWN_STATEMENTS_PLACEHOLDER",
+    formattedSpannerDown
+  );
+
+  return content;
 }
