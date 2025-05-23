@@ -1,7 +1,0 @@
-{
-  "docs": {
-    "Introduction": ["getting-started"],
-    "API Reference": ["api-overview"],
-    "Guides": ["guides-overview"]
-  }
-}
