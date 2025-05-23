@@ -86,9 +86,10 @@ function formatDefaultValuePostgres(
     columnDefault !== null &&
     (columnDefault as { function?: string }).function === "[FUNCTION_DEFAULT]"
   ) {
-    console.warn(
-      `Function default for column "${columnName}" cannot be directly represented in DDL. Use sql\`...\` or a literal value.`
-    );
+    // TODO: See if we want to warn here - it's kinda annoying if user already knows its going to be client side $defaultFn
+    // console.warn(
+    //   `Function default for column "${columnName}" cannot be directly represented in DDL. Use sql\`...\` or a literal value.`
+    // );
     return "";
   }
 
