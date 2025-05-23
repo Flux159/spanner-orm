@@ -65,7 +65,7 @@ describe("generateSchemaDiff", () => {
   it("should detect no changes for identical snapshots", () => {
     const snapshot1 = createBaseSnapshot({
       users: {
-        name: "users",
+        tableName: "users", // Changed from name
         columns: { id: sampleColumn("id", "varchar", { primaryKey: true }) },
       },
     });
@@ -77,7 +77,7 @@ describe("generateSchemaDiff", () => {
     const snapshot1 = createBaseSnapshot();
     const snapshot2 = createBaseSnapshot({
       users: {
-        name: "users",
+        tableName: "users", // Changed from name
         columns: { id: sampleColumn("id", "varchar", { primaryKey: true }) },
       },
     });
@@ -90,7 +90,7 @@ describe("generateSchemaDiff", () => {
   it("should detect removed table", () => {
     const snapshot1 = createBaseSnapshot({
       users: {
-        name: "users",
+        tableName: "users", // Changed from name
         columns: { id: sampleColumn("id", "varchar", { primaryKey: true }) },
       },
     });
@@ -104,11 +104,11 @@ describe("generateSchemaDiff", () => {
   describe("Table Changes", () => {
     it("should detect added column", () => {
       const snapshot1 = createBaseSnapshot({
-        users: { name: "users", columns: { id: sampleColumn("id") } },
+        users: { tableName: "users", columns: { id: sampleColumn("id") } }, // Changed from name
       });
       const snapshot2 = createBaseSnapshot({
         users: {
-          name: "users",
+          tableName: "users", // Changed from name
           columns: {
             id: sampleColumn("id"),
             email: sampleColumn("email", "varchar"),
@@ -128,7 +128,7 @@ describe("generateSchemaDiff", () => {
     it("should detect removed column", () => {
       const snapshot1 = createBaseSnapshot({
         users: {
-          name: "users",
+          tableName: "users", // Changed from name
           columns: {
             id: sampleColumn("id"),
             email: sampleColumn("email", "varchar"),
@@ -136,7 +136,7 @@ describe("generateSchemaDiff", () => {
         },
       });
       const snapshot2 = createBaseSnapshot({
-        users: { name: "users", columns: { id: sampleColumn("id") } },
+        users: { tableName: "users", columns: { id: sampleColumn("id") } }, // Changed from name
       });
       const diff = generateSchemaDiff(snapshot1, snapshot2);
       expect(diff.tableChanges.length).toBe(1);
@@ -151,13 +151,13 @@ describe("generateSchemaDiff", () => {
     it("should detect changed column type", () => {
       const snapshot1 = createBaseSnapshot({
         users: {
-          name: "users",
+          tableName: "users", // Changed from name
           columns: { id: sampleColumn("id", "integer") },
         },
       });
       const snapshot2 = createBaseSnapshot({
         users: {
-          name: "users",
+          tableName: "users", // Changed from name
           columns: { id: sampleColumn("id", "varchar") },
         },
       });
@@ -180,7 +180,7 @@ describe("generateSchemaDiff", () => {
     it("should detect changed column notNull constraint", () => {
       const snapshot1 = createBaseSnapshot({
         users: {
-          name: "users",
+          tableName: "users", // Changed from name
           columns: {
             email: sampleColumn("email", "varchar", { notNull: false }),
           },
@@ -188,7 +188,7 @@ describe("generateSchemaDiff", () => {
       });
       const snapshot2 = createBaseSnapshot({
         users: {
-          name: "users",
+          tableName: "users", // Changed from name
           columns: {
             email: sampleColumn("email", "varchar", { notNull: true }),
           },
@@ -209,14 +209,17 @@ describe("generateSchemaDiff", () => {
 
     it("should detect added index", () => {
       const snapshot1 = createBaseSnapshot({
-        users: { name: "users", columns: { email: sampleColumn("email") } },
+        users: {
+          tableName: "users",
+          columns: { email: sampleColumn("email") },
+        }, // Changed from name
       });
       const newIndex = sampleIndex(["email"], "users_email_idx");
       const snapshot2 = createBaseSnapshot({
         users: {
-          name: "users",
+          tableName: "users", // Changed from name
           columns: { email: sampleColumn("email") },
-          indexes: [newIndex],
+          tableIndexes: [newIndex], // Changed from indexes
         },
       });
       const diff = generateSchemaDiff(snapshot1, snapshot2);
@@ -232,13 +235,16 @@ describe("generateSchemaDiff", () => {
       const oldIndex = sampleIndex(["email"], "users_email_idx");
       const snapshot1 = createBaseSnapshot({
         users: {
-          name: "users",
+          tableName: "users", // Changed from name
           columns: { email: sampleColumn("email") },
-          indexes: [oldIndex],
+          tableIndexes: [oldIndex], // Changed from indexes
         },
       });
       const snapshot2 = createBaseSnapshot({
-        users: { name: "users", columns: { email: sampleColumn("email") } },
+        users: {
+          tableName: "users",
+          columns: { email: sampleColumn("email") },
+        }, // Changed from name
       });
       const diff = generateSchemaDiff(snapshot1, snapshot2);
       expect(diff.tableChanges.length).toBe(1);
@@ -252,16 +258,16 @@ describe("generateSchemaDiff", () => {
     it("should detect changed index (e.g. unique status)", () => {
       const snapshot1 = createBaseSnapshot({
         users: {
-          name: "users",
+          tableName: "users", // Changed from name
           columns: { email: sampleColumn("email") },
-          indexes: [sampleIndex(["email"], "users_email_idx", false)],
+          tableIndexes: [sampleIndex(["email"], "users_email_idx", false)], // Changed from indexes
         },
       });
       const snapshot2 = createBaseSnapshot({
         users: {
-          name: "users",
+          tableName: "users", // Changed from name
           columns: { email: sampleColumn("email") },
-          indexes: [sampleIndex(["email"], "users_email_idx", true)],
+          tableIndexes: [sampleIndex(["email"], "users_email_idx", true)], // Changed from indexes
         },
       });
       const diff = generateSchemaDiff(snapshot1, snapshot2);
@@ -280,7 +286,7 @@ describe("generateSchemaDiff", () => {
     it("should detect set composite primary key", () => {
       const snapshot1 = createBaseSnapshot({
         orders: {
-          name: "orders",
+          tableName: "orders", // Changed from name
           columns: {
             orderId: sampleColumn("orderId"),
             itemId: sampleColumn("itemId"),
@@ -290,7 +296,7 @@ describe("generateSchemaDiff", () => {
       const newPk = samplePK(["orderId", "itemId"], "orders_pk");
       const snapshot2 = createBaseSnapshot({
         orders: {
-          name: "orders",
+          tableName: "orders", // Changed from name
           columns: {
             orderId: sampleColumn("orderId"),
             itemId: sampleColumn("itemId"),
@@ -312,7 +318,7 @@ describe("generateSchemaDiff", () => {
       const oldPk = samplePK(["orderId", "itemId"], "orders_pk");
       const snapshot1 = createBaseSnapshot({
         orders: {
-          name: "orders",
+          tableName: "orders", // Changed from name
           columns: {
             orderId: sampleColumn("orderId"),
             itemId: sampleColumn("itemId"),
@@ -322,7 +328,7 @@ describe("generateSchemaDiff", () => {
       });
       const snapshot2 = createBaseSnapshot({
         orders: {
-          name: "orders",
+          tableName: "orders", // Changed from name
           columns: {
             orderId: sampleColumn("orderId"),
             itemId: sampleColumn("itemId"),
@@ -342,14 +348,14 @@ describe("generateSchemaDiff", () => {
     it("should detect set interleave", () => {
       const snapshot1 = createBaseSnapshot({
         orderDetails: {
-          name: "orderDetails",
+          tableName: "orderDetails", // Changed from name
           columns: { detailId: sampleColumn("detailId") },
         },
       });
       const newInterleave = sampleInterleave("orders");
       const snapshot2 = createBaseSnapshot({
         orderDetails: {
-          name: "orderDetails",
+          tableName: "orderDetails", // Changed from name
           columns: { detailId: sampleColumn("detailId") },
           interleave: newInterleave,
         },
@@ -368,14 +374,14 @@ describe("generateSchemaDiff", () => {
       const oldInterleave = sampleInterleave("orders");
       const snapshot1 = createBaseSnapshot({
         orderDetails: {
-          name: "orderDetails",
+          tableName: "orderDetails", // Changed from name
           columns: { detailId: sampleColumn("detailId") },
           interleave: oldInterleave,
         },
       });
       const snapshot2 = createBaseSnapshot({
         orderDetails: {
-          name: "orderDetails",
+          tableName: "orderDetails", // Changed from name
           columns: { detailId: sampleColumn("detailId") },
         },
       });
