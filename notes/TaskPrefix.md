@@ -98,3 +98,5 @@ We have a strategy in our README to approach this project.
 CHANGE FROM HERE DEPENDING ON NEXT TASK IN CLINE:
 
 We are finishing up Phase 5. We also have a file in notes/GoogleSQLSpanner.md that you should read. You are continuing work from another AI agent, here is what they said to continue with:
+
+We are finishing up the project and doing bugfixes & polish before release & an announcement. This is the current bugfix we are implementing:
