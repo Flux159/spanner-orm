@@ -13,11 +13,12 @@ import type {
 import { sql } from "../types/common.js"; // Import the sql tagged template literal
 
 // Global registry for table configurations
-const tableRegistry = new Map<string, TableConfig<any, any>>();
+const tableRegistry = new Map<string, TableConfig<string, any>>(); // Updated to be more specific for the key
 
 export function getTableConfig(
   tableName: string
-): TableConfig<any, any> | undefined {
+): TableConfig<string, any> | undefined {
+  // Updated return type
   return tableRegistry.get(tableName);
 }
 
@@ -253,36 +254,38 @@ export function table<
   >
 >(
   name: TTableName,
-  columns: TColumns,
+  columnBuilders: TColumns, // Renamed from columns to columnBuilders for clarity
   extra?: (table: TableBuilderColumns<TColumns>) => {
     indexes?: IndexConfig[];
     primaryKey?: CompositePrimaryKeyConfig;
-    interleave?: TableConfig<any, any>["interleave"]; // Spanner specific
+    interleave?: TableConfig<any, any>["_interleave"]; // Spanner specific, points to metadata
   }
 ): TableConfig<TTableName, TableBuilderColumns<TColumns>> {
-  const builtColumnsArray = Object.entries(columns).map(([key, builder]) => {
-    const colConfig = builder.build();
-    colConfig._tableName = name; // Assign table name to column config
-    return [key, colConfig];
-  });
+  const builtColumnsArray = Object.entries(columnBuilders).map(
+    ([key, builder]) => {
+      const colConfig = builder.build();
+      colConfig._tableName = name; // Assign table name to column config
+      return [key, colConfig];
+    }
+  );
 
   const builtColumns = Object.fromEntries(
     builtColumnsArray
   ) as TableBuilderColumns<TColumns>;
 
-  const tableConfig: TableConfig<TTableName, TableBuilderColumns<TColumns>> = {
-    name,
-    columns: builtColumns,
-    _isTable: true, // Added marker for CLI detection
-  };
+  // Create metadata object
+  const metadata: import("../types/common.js").TableMetadataConfig<TTableName> =
+    {
+      _name: name,
+      _isTable: true,
+    };
 
   if (extra) {
-    const extraConfig = extra(builtColumns);
+    const extraConfig = extra(builtColumns); // Pass builtColumns to extra
     if (extraConfig.indexes) {
-      tableConfig.indexes = extraConfig.indexes;
+      metadata._indexes = extraConfig.indexes;
     }
     if (extraConfig.primaryKey) {
-      // Ensure no individual column is also marked as primaryKey if a composite one is defined
       const individualPks = Object.values(builtColumns).filter(
         (c) => c.primaryKey
       );
@@ -293,15 +296,20 @@ export function table<
             .join(", ")}).`
         );
       }
-      tableConfig.compositePrimaryKey = extraConfig.primaryKey;
+      metadata._compositePrimaryKey = extraConfig.primaryKey;
     }
     if (extraConfig.interleave) {
-      tableConfig.interleave = extraConfig.interleave;
+      metadata._interleave = extraConfig.interleave;
     }
-    // Handle other extra configurations here
   }
 
-  tableRegistry.set(name, tableConfig); // Register the table
+  // Combine columns and metadata
+  const tableConfig = {
+    ...builtColumns,
+    ...metadata,
+  } as TableConfig<TTableName, TableBuilderColumns<TColumns>>;
+
+  tableRegistry.set(name, tableConfig); // Register the table using its name
   return tableConfig;
 }
 

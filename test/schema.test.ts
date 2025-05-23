@@ -38,52 +38,52 @@ describe("Schema Builder", () => {
       })
     );
 
-    expect(users.name).toBe("users");
+    expect(users._name).toBe("users");
 
     // Check id column
-    expect(users.columns.id.name).toBe("id");
-    expect(users.columns.id.type).toBe("varchar");
-    expect(users.columns.id.dialectTypes.postgres).toBe("VARCHAR(36)");
-    expect(users.columns.id.dialectTypes.spanner).toBe("STRING(36)");
-    expect(users.columns.id.primaryKey).toBe(true);
+    expect(users.id.name).toBe("id");
+    expect(users.id.type).toBe("varchar");
+    expect(users.id.dialectTypes.postgres).toBe("VARCHAR(36)");
+    expect(users.id.dialectTypes.spanner).toBe("STRING(36)");
+    expect(users.id.primaryKey).toBe(true);
 
     // Check email column
-    expect(users.columns.email.name).toBe("email");
-    expect(users.columns.email.type).toBe("text");
-    expect(users.columns.email.dialectTypes.postgres).toBe("TEXT");
-    expect(users.columns.email.dialectTypes.spanner).toBe("STRING(MAX)"); // Text maps to STRING(MAX) for Spanner
-    expect(users.columns.email.notNull).toBe(true);
-    expect(users.columns.email.unique).toBe(true);
+    expect(users.email.name).toBe("email");
+    expect(users.email.type).toBe("text");
+    expect(users.email.dialectTypes.postgres).toBe("TEXT");
+    expect(users.email.dialectTypes.spanner).toBe("STRING(MAX)"); // Text maps to STRING(MAX) for Spanner
+    expect(users.email.notNull).toBe(true);
+    expect(users.email.unique).toBe(true);
 
     // Check age column
-    expect(users.columns.age.name).toBe("age");
-    expect(users.columns.age.type).toBe("integer");
-    expect(users.columns.age.dialectTypes.postgres).toBe("INTEGER");
-    expect(users.columns.age.dialectTypes.spanner).toBe("INT64");
-    expect(users.columns.age.default).toBe(0);
+    expect(users.age.name).toBe("age");
+    expect(users.age.type).toBe("integer");
+    expect(users.age.dialectTypes.postgres).toBe("INTEGER");
+    expect(users.age.dialectTypes.spanner).toBe("INT64");
+    expect(users.age.default).toBe(0);
 
     // Check isAdmin column
-    expect(users.columns.isAdmin.name).toBe("is_admin");
-    expect(users.columns.isAdmin.type).toBe("boolean");
-    expect(users.columns.isAdmin.dialectTypes.postgres).toBe("BOOLEAN");
-    expect(users.columns.isAdmin.dialectTypes.spanner).toBe("BOOL");
-    expect(users.columns.isAdmin.default).toBe(false);
+    expect(users.isAdmin.name).toBe("is_admin");
+    expect(users.isAdmin.type).toBe("boolean");
+    expect(users.isAdmin.dialectTypes.postgres).toBe("BOOLEAN");
+    expect(users.isAdmin.dialectTypes.spanner).toBe("BOOL");
+    expect(users.isAdmin.default).toBe(false);
 
     // Check settings column
-    expect(users.columns.settings.name).toBe("settings");
-    expect(users.columns.settings.type).toBe("jsonb");
-    expect(users.columns.settings.dialectTypes.postgres).toBe("JSONB");
-    expect(users.columns.settings.dialectTypes.spanner).toBe("JSON");
+    expect(users.settings.name).toBe("settings");
+    expect(users.settings.type).toBe("jsonb");
+    expect(users.settings.dialectTypes.postgres).toBe("JSONB");
+    expect(users.settings.dialectTypes.spanner).toBe("JSON");
 
     // Check lastLogin column
-    expect(users.columns.lastLogin.name).toBe("last_login");
-    expect(users.columns.lastLogin.type).toBe("timestamp");
-    expect(users.columns.lastLogin.dialectTypes.postgres).toBe(
+    expect(users.lastLogin.name).toBe("last_login");
+    expect(users.lastLogin.type).toBe("timestamp");
+    expect(users.lastLogin.dialectTypes.postgres).toBe(
       "TIMESTAMP WITH TIME ZONE"
     );
-    expect(users.columns.lastLogin.dialectTypes.spanner).toBe("TIMESTAMP");
+    expect(users.lastLogin.dialectTypes.spanner).toBe("TIMESTAMP");
     // Check that it's an SQL object and its SQL string is correct
-    const lastLoginDefault = users.columns.lastLogin.default as any; // Cast to any to access _isSQL
+    const lastLoginDefault = users.lastLogin.default as any; // Cast to any to access _isSQL
     expect(lastLoginDefault).toBeDefined();
     expect(lastLoginDefault._isSQL).toBe(true);
     expect(lastLoginDefault.toSqlString("postgres")).toBe("CURRENT_TIMESTAMP");
@@ -94,20 +94,20 @@ describe("Schema Builder", () => {
       content: text("content"),
       authorId: varchar("author_id").notNull(), // No length
     });
-    expect(posts.columns.authorId.dialectTypes.postgres).toBe("VARCHAR");
-    expect(posts.columns.authorId.dialectTypes.spanner).toBe("STRING(MAX)");
+    expect(posts.authorId.dialectTypes.postgres).toBe("VARCHAR");
+    expect(posts.authorId.dialectTypes.spanner).toBe("STRING(MAX)");
 
     // Check indexes
-    expect(users.indexes).toBeDefined();
-    expect(users.indexes?.length).toBe(2);
-    if (users.indexes) {
-      expect(users.indexes[0].name).toBe("idx_age");
-      expect(users.indexes[0].columns).toEqual(["age"]);
-      expect(users.indexes[0].unique).toBe(false);
+    expect(users._indexes).toBeDefined();
+    expect(users._indexes?.length).toBe(2);
+    if (users._indexes) {
+      expect(users._indexes[0].name).toBe("idx_age");
+      expect(users._indexes[0].columns).toEqual(["age"]);
+      expect(users._indexes[0].unique).toBe(false);
 
-      expect(users.indexes[1].name).toBe("uq_api_key");
-      expect(users.indexes[1].columns).toEqual(["api_key"]);
-      expect(users.indexes[1].unique).toBe(true);
+      expect(users._indexes[1].name).toBe("uq_api_key");
+      expect(users._indexes[1].columns).toEqual(["api_key"]);
+      expect(users._indexes[1].unique).toBe(true);
     }
 
     // Test type inference (compile-time check, but good to have a placeholder)
@@ -129,19 +129,17 @@ describe("Schema Builder", () => {
     const simpleTable = table("simple", {
       name: text("name").notNull(),
     });
-    expect(simpleTable.name).toBe("simple");
-    expect(simpleTable.columns.name.notNull).toBe(true);
-    expect(simpleTable.indexes).toBeUndefined();
+    expect(simpleTable._name).toBe("simple");
+    expect(simpleTable.name.notNull).toBe(true); // Accessing column 'name' directly
+    expect(simpleTable._indexes).toBeUndefined();
   });
 
   it("should correctly build a varchar without length for Spanner (STRING(MAX))", () => {
     const comments = table("comments", {
       commentText: varchar("comment_text"), // No length specified
     });
-    expect(comments.columns.commentText.dialectTypes.postgres).toBe("VARCHAR"); // PG default
-    expect(comments.columns.commentText.dialectTypes.spanner).toBe(
-      "STRING(MAX)"
-    );
+    expect(comments.commentText.dialectTypes.postgres).toBe("VARCHAR"); // PG default
+    expect(comments.commentText.dialectTypes.spanner).toBe("STRING(MAX)");
   });
 
   it("should allow .$defaultFn for dynamic defaults", () => {
@@ -152,7 +150,7 @@ describe("Schema Builder", () => {
       createdAt: timestamp("created_at").$defaultFn(() => new Date()),
     });
 
-    const idDefault = items.columns.id.default;
+    const idDefault = items.id.default;
     expect(typeof idDefault).toBe("function");
     if (typeof idDefault === "function") {
       // Vitest doesn't easily allow mocking crypto.randomUUID here without more setup
@@ -162,7 +160,7 @@ describe("Schema Builder", () => {
       expect(uuid.length).toBe(36); // Standard UUID length
     }
 
-    const createdAtDefault = items.columns.createdAt.default;
+    const createdAtDefault = items.createdAt.default;
     expect(typeof createdAtDefault).toBe("function");
     if (typeof createdAtDefault === "function") {
       expect(createdAtDefault()).toBeInstanceOf(Date);
@@ -178,33 +176,32 @@ describe("Schema Builder", () => {
     const books = table("books", {
       id: integer("id").primaryKey(),
       title: text("title").notNull(),
-      authorId: integer("author_id").references(() => authors.columns.id, {
+      authorId: integer("author_id").references(() => authors.id, {
+        // Changed authors.columns.id to authors.id
         onDelete: "cascade",
       }),
-      coAuthorId: integer("co_author_id").references(() => authors.columns.id, {
+      coAuthorId: integer("co_author_id").references(() => authors.id, {
+        // Changed authors.columns.id to authors.id
         onDelete: "set null",
       }),
     });
 
-    expect(books.columns.authorId.references).toBeDefined();
-    expect(books.columns.authorId.references?.onDelete).toBe("cascade");
+    expect(books.authorId.references).toBeDefined();
+    expect(books.authorId.references?.onDelete).toBe("cascade");
     // Check that the referencesFn points to the correct column config
     // This is a bit tricky to test directly without invoking it in a context where _tableName is set
     // But we can check if the function exists
-    expect(typeof books.columns.authorId.references?.referencesFn).toBe(
-      "function"
-    );
+    expect(typeof books.authorId.references?.referencesFn).toBe("function");
 
     // To properly test referencesFn, we'd need to simulate table building or inspect DDL generation
     // For now, we assume if the function is set and onDelete is correct, it's wired up.
     // A more robust test would be in DDL generation tests.
-    const referencedAuthorColumn =
-      books.columns.authorId.references?.referencesFn();
+    const referencedAuthorColumn = books.authorId.references?.referencesFn();
     expect(referencedAuthorColumn?.name).toBe("id");
     // referencedAuthorColumn._tableName would be 'authors' after DDL processing
 
-    expect(books.columns.coAuthorId.references).toBeDefined();
-    expect(books.columns.coAuthorId.references?.onDelete).toBe("set null");
+    expect(books.coAuthorId.references).toBeDefined();
+    expect(books.coAuthorId.references?.onDelete).toBe("set null");
   });
 
   it("should define composite primary keys", () => {
@@ -220,14 +217,14 @@ describe("Schema Builder", () => {
       })
     );
 
-    expect(orderItems.compositePrimaryKey).toBeDefined();
-    expect(orderItems.compositePrimaryKey?.columns).toEqual([
+    expect(orderItems._compositePrimaryKey).toBeDefined();
+    expect(orderItems._compositePrimaryKey?.columns).toEqual([
       "orderId",
       "productId",
     ]);
     // Ensure individual columns are not marked as PK
-    expect(orderItems.columns.orderId.primaryKey).toBeUndefined();
-    expect(orderItems.columns.productId.primaryKey).toBeUndefined();
+    expect(orderItems.orderId.primaryKey).toBeUndefined();
+    expect(orderItems.productId.primaryKey).toBeUndefined();
   });
 
   it("should throw an error if both composite and individual primary keys are defined", () => {
@@ -262,14 +259,14 @@ describe("Schema Builder", () => {
       (_t) => ({
         primaryKey: { columns: ["parentId", "childId"] },
         interleave: {
-          parentTable: parentTable.name, // or just "parent_table"
+          parentTable: parentTable._name, // or just "parent_table"
           onDelete: "cascade",
         },
       })
     );
 
-    expect(childTable.interleave).toBeDefined();
-    expect(childTable.interleave?.parentTable).toBe("parent_table");
-    expect(childTable.interleave?.onDelete).toBe("cascade");
+    expect(childTable._interleave).toBeDefined();
+    expect(childTable._interleave?.parentTable).toBe("parent_table");
+    expect(childTable._interleave?.onDelete).toBe("cascade");
   });
 });

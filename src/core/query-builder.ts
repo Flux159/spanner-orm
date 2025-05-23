@@ -8,6 +8,8 @@ import type {
   IncludeClause, // Old type, kept for include() method parameter for now
   EnhancedIncludeClause, // New type
   PreparedQuery,
+  TableColumns,
+  TableMetadataConfig,
 } from "../types/common.js";
 import { sql } from "../types/common.js";
 import { getTableConfig } from "./schema.js";
@@ -20,7 +22,7 @@ export type WhereCondition = SQL | string;
 export type JoinType = "INNER" | "LEFT" | "RIGHT" | "FULL";
 export interface JoinClause {
   type: JoinType;
-  targetTable: TableConfig<any, any>;
+  targetTable: TableConfig<string, TableColumns>; // More specific
   alias?: string;
   onCondition: SQL;
 }
@@ -31,19 +33,22 @@ export interface OrderClause {
 }
 export type GroupByField = ColumnConfig<any, any> | SQL;
 type OperationType = "select" | "insert" | "update" | "delete";
-type InsertData<TTable extends TableConfig<any, any>> =
+
+type InsertData<TTable extends TableConfig<string, TableColumns>> =
   | Partial<InferModelType<TTable>>
   | Partial<InferModelType<TTable>>[];
-type UpdateData<TTable extends TableConfig<any, any>> = {
+
+type UpdateData<TTable extends TableConfig<string, TableColumns>> = {
   [K in keyof InferModelType<TTable>]?: InferModelType<TTable>[K] | SQL;
 };
 
-export class QueryBuilder<TTable extends TableConfig<any, any>> {
+export class QueryBuilder<TTable extends TableConfig<string, TableColumns>> {
   private _operationType?: OperationType;
   private _targetTable?: TTable;
   private _targetTableAlias?: string;
 
-  private _tableAliases: Map<TableConfig<any, any>, string> = new Map();
+  private _tableAliases: Map<TableConfig<string, TableColumns>, string> =
+    new Map();
   private _aliasCounter: number = 0;
 
   private _selectedFields?: SelectFields;
@@ -55,11 +60,15 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
   private _insertValues?: InsertData<TTable>;
   private _updateSetValues?: UpdateData<TTable>;
   private _conditions: WhereCondition[] = [];
-  private _includeClause?: EnhancedIncludeClause; // Changed to EnhancedIncludeClause
+  private _includeClause?: EnhancedIncludeClause;
 
   constructor() {}
 
-  private generateTableAlias(table: TableConfig<any, any>): string {
+  private _isMetadataKey(key: string): key is keyof TableMetadataConfig {
+    return key.startsWith("_");
+  }
+
+  private generateTableAlias(table: TableConfig<string, TableColumns>): string {
     if (!this._tableAliases.has(table)) {
       this._aliasCounter++;
       const newAlias = `t${this._aliasCounter}`;
@@ -217,8 +226,6 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
         );
         continue;
       }
-      // The relationOptions (boolean | {select?: Record<string, boolean>})
-      // is compatible with TypedIncludeRelationOptions
       currentEnhancedInclude[relationName] = {
         relationTable: relatedTable,
         options: relationOptions as EnhancedIncludeClause[string]["options"],
@@ -228,11 +235,6 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     return this;
   }
 
-  /**
-   * Prepares the query for execution, returning an object with SQL, parameters, and metadata.
-   * @param dialect The SQL dialect.
-   * @returns A PreparedQuery object.
-   */
   prepare(
     dialect: Dialect
   ): PreparedQuery<TTable, EnhancedIncludeClause | undefined> {
@@ -257,14 +259,14 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
 
     const finalAliasMap = new Map<string, string>();
     this._tableAliases.forEach((alias, tableConfig) => {
-      finalAliasMap.set(tableConfig.name, alias);
+      finalAliasMap.set(tableConfig._name, alias);
     });
     if (
       this._targetTable &&
       this._targetTableAlias &&
-      !finalAliasMap.has(this._targetTable.name)
+      !finalAliasMap.has(this._targetTable._name)
     ) {
-      finalAliasMap.set(this._targetTable.name, this._targetTableAlias);
+      finalAliasMap.set(this._targetTable._name, this._targetTableAlias);
     }
 
     let sqlString: string;
@@ -277,14 +279,13 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     }
 
     if (!this._operationType) {
-      // Should have been caught earlier, but as a safeguard
       throw new Error("Operation type is undefined during prepare.");
     }
     return {
       sql: sqlString,
       parameters: this.getBoundParameters(dialect),
       dialect: dialect,
-      action: this._operationType, // Add the action here
+      action: this._operationType,
       includeClause:
         this._operationType === "select" ? this._includeClause : undefined,
       primaryTable:
@@ -292,7 +293,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       fields:
         this._operationType === "select"
           ? (this._selectedFields as any)
-          : undefined, // Add selected fields
+          : undefined,
     };
   }
 
@@ -343,12 +344,10 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       for (const [relationName, enhancedIncludeEntry] of Object.entries(
         this._includeClause
       )) {
-        // const relatedTableConfig = getTableConfig(relationName); // Now directly available
         const relatedTableConfig = enhancedIncludeEntry.relationTable;
-        const includeOptions = enhancedIncludeEntry.options; // This is the boolean or {select?: ...}
+        const includeOptions = enhancedIncludeEntry.options;
 
         if (!relatedTableConfig) {
-          // Should not happen if include() worked correctly
           console.warn(
             `Warning: Could not find table config for relation "${relationName}" to include.`
           );
@@ -358,27 +357,43 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
         let foreignKeyColumn: ColumnConfig<any, any> | undefined;
         let referencedColumnInParent: ColumnConfig<any, any> | undefined;
 
-        for (const col of Object.values(relatedTableConfig.columns)) {
-          const colConfig = col as ColumnConfig<any, any>;
-          if (colConfig.references) {
-            const referencedCol = colConfig.references.referencesFn();
-            if (referencedCol._tableName === this._targetTable.name) {
-              foreignKeyColumn = colConfig;
-              referencedColumnInParent = referencedCol;
-              break;
+        for (const key in relatedTableConfig) {
+          if (
+            Object.prototype.hasOwnProperty.call(relatedTableConfig, key) &&
+            !this._isMetadataKey(key)
+          ) {
+            const colConfig = (relatedTableConfig as any)[key] as ColumnConfig<
+              any,
+              any
+            >;
+            if (
+              colConfig &&
+              typeof colConfig === "object" &&
+              colConfig.references &&
+              "dialectTypes" in colConfig
+            ) {
+              const referencedCol = colConfig.references.referencesFn();
+              if (
+                this._targetTable &&
+                referencedCol._tableName === this._targetTable._name
+              ) {
+                foreignKeyColumn = colConfig;
+                referencedColumnInParent = referencedCol;
+                break;
+              }
             }
           }
         }
 
         if (!foreignKeyColumn || !referencedColumnInParent) {
           console.warn(
-            `Warning: Could not determine foreign key relationship between "${this._targetTable.name}" and "${relationName}".`
+            `Warning: Could not determine foreign key relationship between "${this._targetTable?._name}" and "${relationName}".`
           );
           continue;
         }
 
         const relatedTableAlias = this.generateTableAlias(relatedTableConfig);
-        aliasMap.set(relatedTableConfig.name, relatedTableAlias);
+        aliasMap.set(relatedTableConfig._name, relatedTableAlias);
 
         const onCondition = sql`${foreignKeyColumn} = ${referencedColumnInParent}`;
 
@@ -397,27 +412,40 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           includeOptions === true ||
           (typeof includeOptions === "object" && !includeOptions.select);
 
-        for (const [relatedColKey, relatedColConfigUntyped] of Object.entries(
-          relatedTableConfig.columns
-        )) {
-          const relatedColConfig = relatedColConfigUntyped as ColumnConfig<
-            any,
-            any
-          >;
+        for (const relatedColKey in relatedTableConfig) {
           if (
-            selectAllRelated ||
-            (relationOpts.select && relationOpts.select[relatedColKey])
+            Object.prototype.hasOwnProperty.call(
+              relatedTableConfig,
+              relatedColKey
+            ) &&
+            !this._isMetadataKey(relatedColKey)
           ) {
-            const actualColumnName = relatedColConfig.name;
-            const selectAlias = `${relationName}__${actualColumnName}`;
-            selectedFieldsFromIncludes[selectAlias] = relatedColConfig;
+            const relatedColConfig = (relatedTableConfig as any)[
+              relatedColKey
+            ] as ColumnConfig<any, any>;
+            if (
+              relatedColConfig &&
+              typeof relatedColConfig === "object" &&
+              "dialectTypes" in relatedColConfig
+            ) {
+              if (
+                selectAllRelated ||
+                (relationOpts.select &&
+                  (relationOpts.select as Record<string, boolean>)[
+                    relatedColKey
+                  ])
+              ) {
+                const actualColumnName = relatedColConfig.name;
+                const selectAlias = `${relationName}__${actualColumnName}`;
+                selectedFieldsFromIncludes[selectAlias] = relatedColConfig;
+              }
+            }
           }
         }
       }
     }
 
     const allJoins = [...originalJoins, ...includeJoins];
-
     let selectClause = "";
     const explicitUserSelectedFields = { ...(this._selectedFields || {}) };
     const allSelectedParts: string[] = [];
@@ -512,18 +540,18 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       selectClause = `SELECT "${this._targetTableAlias}".*`;
     }
 
-    let fromClause = `FROM "${this._targetTable.name}" AS "${this._targetTableAlias}"`;
+    let fromClause = `FROM "${this._targetTable._name}" AS "${this._targetTableAlias}"`;
     if (allJoins.length > 0) {
       const joinStrings = allJoins.map((join) => {
-        const joinTableAlias = aliasMap.get(join.targetTable.name);
+        const joinTableAlias = aliasMap.get(join.targetTable._name);
         if (!joinTableAlias)
           throw new Error(
             `Alias not found for join table: ${
-              join.targetTable.name
+              join.targetTable._name
             }. Alias map: ${JSON.stringify(Array.from(aliasMap.entries()))}`
           );
         return `${join.type} JOIN "${
-          join.targetTable.name
+          join.targetTable._name
         }" AS "${joinTableAlias}" ON ${join.onCondition.toSqlString(
           "postgres",
           paramIndexState,
@@ -580,12 +608,10 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       for (const [relationName, enhancedIncludeEntry] of Object.entries(
         this._includeClause
       )) {
-        // const relatedTableConfig = getTableConfig(relationName); // Now directly available
         const relatedTableConfig = enhancedIncludeEntry.relationTable;
-        const includeOptions = enhancedIncludeEntry.options; // This is the boolean or {select?: ...}
+        const includeOptions = enhancedIncludeEntry.options;
 
         if (!relatedTableConfig) {
-          // Should not happen if include() worked correctly
           console.warn(
             `Warning: Spanner - Could not find table config for relation "${relationName}" to include.`
           );
@@ -595,27 +621,43 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
         let foreignKeyColumn: ColumnConfig<any, any> | undefined;
         let referencedColumnInParent: ColumnConfig<any, any> | undefined;
 
-        for (const col of Object.values(relatedTableConfig.columns)) {
-          const colConfig = col as ColumnConfig<any, any>;
-          if (colConfig.references) {
-            const referencedCol = colConfig.references.referencesFn();
-            if (referencedCol._tableName === this._targetTable.name) {
-              foreignKeyColumn = colConfig;
-              referencedColumnInParent = referencedCol;
-              break;
+        for (const key in relatedTableConfig) {
+          if (
+            Object.prototype.hasOwnProperty.call(relatedTableConfig, key) &&
+            !this._isMetadataKey(key)
+          ) {
+            const colConfig = (relatedTableConfig as any)[key] as ColumnConfig<
+              any,
+              any
+            >;
+            if (
+              colConfig &&
+              typeof colConfig === "object" &&
+              colConfig.references &&
+              "dialectTypes" in colConfig
+            ) {
+              const referencedCol = colConfig.references.referencesFn();
+              if (
+                this._targetTable &&
+                referencedCol._tableName === this._targetTable._name
+              ) {
+                foreignKeyColumn = colConfig;
+                referencedColumnInParent = referencedCol;
+                break;
+              }
             }
           }
         }
 
         if (!foreignKeyColumn || !referencedColumnInParent) {
           console.warn(
-            `Warning: Spanner - Could not determine foreign key relationship between "${this._targetTable.name}" and "${relationName}".`
+            `Warning: Spanner - Could not determine foreign key relationship between "${this._targetTable?._name}" and "${relationName}".`
           );
           continue;
         }
 
         const relatedTableAlias = this.generateTableAlias(relatedTableConfig);
-        aliasMap.set(relatedTableConfig.name, relatedTableAlias);
+        aliasMap.set(relatedTableConfig._name, relatedTableAlias);
 
         const onCondition = sql`${foreignKeyColumn} = ${referencedColumnInParent}`;
         includeJoins.push({
@@ -633,20 +675,34 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           includeOptions === true ||
           (typeof includeOptions === "object" && !includeOptions.select);
 
-        for (const [relatedColKey, relatedColConfigUntyped] of Object.entries(
-          relatedTableConfig.columns
-        )) {
-          const relatedColConfig = relatedColConfigUntyped as ColumnConfig<
-            any,
-            any
-          >;
+        for (const relatedColKey in relatedTableConfig) {
           if (
-            selectAllRelated ||
-            (relationOpts.select && relationOpts.select[relatedColKey])
+            Object.prototype.hasOwnProperty.call(
+              relatedTableConfig,
+              relatedColKey
+            ) &&
+            !this._isMetadataKey(relatedColKey)
           ) {
-            const actualColumnName = relatedColConfig.name;
-            const selectAlias = `${relationName}__${actualColumnName}`;
-            selectedFieldsFromIncludes[selectAlias] = relatedColConfig;
+            const relatedColConfig = (relatedTableConfig as any)[
+              relatedColKey
+            ] as ColumnConfig<any, any>;
+            if (
+              relatedColConfig &&
+              typeof relatedColConfig === "object" &&
+              "dialectTypes" in relatedColConfig
+            ) {
+              if (
+                selectAllRelated ||
+                (relationOpts.select &&
+                  (relationOpts.select as Record<string, boolean>)[
+                    relatedColKey
+                  ])
+              ) {
+                const actualColumnName = relatedColConfig.name;
+                const selectAlias = `${relationName}__${actualColumnName}`;
+                selectedFieldsFromIncludes[selectAlias] = relatedColConfig;
+              }
+            }
           }
         }
       }
@@ -748,16 +804,16 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       selectClause = `SELECT \`${this._targetTableAlias}\`.*`;
     }
 
-    let fromClause = `FROM \`${this._targetTable.name}\` AS \`${this._targetTableAlias}\``;
+    let fromClause = `FROM \`${this._targetTable._name}\` AS \`${this._targetTableAlias}\``;
     if (allJoins.length > 0) {
       const joinStrings = allJoins.map((join) => {
-        const joinTableAlias = aliasMap.get(join.targetTable.name);
+        const joinTableAlias = aliasMap.get(join.targetTable._name);
         if (!joinTableAlias)
           throw new Error(
-            `Alias not found for join table: ${join.targetTable.name}`
+            `Alias not found for join table: ${join.targetTable._name}`
           );
         return `${join.type} JOIN \`${
-          join.targetTable.name
+          join.targetTable._name
         }\` AS \`${joinTableAlias}\` ON ${join.onCondition.toSqlString(
           "spanner",
           paramIndexState,
@@ -818,22 +874,37 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     }
 
     for (const record of processedInsertData) {
-      for (const [columnName, columnConfigUnk] of Object.entries(
-        this._targetTable.columns
-      )) {
-        const columnConfig = columnConfigUnk as ColumnConfig<any, any>;
-        if (record[columnName as keyof typeof record] === undefined) {
-          if (typeof columnConfig.default === "function") {
-            const defaultValue = (columnConfig.default as () => any)();
-            (record as Record<string, any>)[columnName] = defaultValue;
-          } else if (
-            columnConfig.default !== undefined &&
-            typeof columnConfig.default === "object" &&
-            (columnConfig.default as SQL)._isSQL
+      for (const key in this._targetTable) {
+        if (
+          Object.prototype.hasOwnProperty.call(this._targetTable, key) &&
+          !this._isMetadataKey(key)
+        ) {
+          const columnConfig = (this._targetTable as any)[key] as ColumnConfig<
+            any,
+            any
+          >;
+          if (
+            columnConfig &&
+            typeof columnConfig === "object" &&
+            "dialectTypes" in columnConfig
           ) {
-            (record as Record<string, any>)[columnName] = columnConfig.default;
-          } else if (columnConfig.default !== undefined) {
-            (record as Record<string, any>)[columnName] = columnConfig.default;
+            const columnName = columnConfig.name;
+            if (record[columnName as keyof typeof record] === undefined) {
+              if (typeof columnConfig.default === "function") {
+                const defaultValue = (columnConfig.default as () => any)();
+                (record as Record<string, any>)[columnName] = defaultValue;
+              } else if (
+                columnConfig.default !== undefined &&
+                typeof columnConfig.default === "object" &&
+                (columnConfig.default as SQL)._isSQL
+              ) {
+                (record as Record<string, any>)[columnName] =
+                  columnConfig.default;
+              } else if (columnConfig.default !== undefined) {
+                (record as Record<string, any>)[columnName] =
+                  columnConfig.default;
+              }
+            }
           }
         }
       }
@@ -872,7 +943,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       })
       .join(", ");
 
-    return `INSERT INTO "${this._targetTable.name}" (${columns}) VALUES ${valuePlaceholders}`;
+    return `INSERT INTO "${this._targetTable._name}" (${columns}) VALUES ${valuePlaceholders}`;
   }
 
   private buildInsertSpannerSQL(
@@ -892,23 +963,38 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       throw new Error("No values provided for INSERT.");
 
     for (const record of processedInsertData) {
-      for (const [columnName, columnConfigUnk] of Object.entries(
-        this._targetTable.columns
-      )) {
-        const columnConfig = columnConfigUnk as ColumnConfig<any, any>;
-        if (record[columnName as keyof typeof record] === undefined) {
-          if (typeof columnConfig.default === "function") {
-            (record as Record<string, any>)[columnName] = (
-              columnConfig.default as () => any
-            )();
-          } else if (
-            columnConfig.default !== undefined &&
-            typeof columnConfig.default === "object" &&
-            (columnConfig.default as SQL)._isSQL
+      for (const key in this._targetTable) {
+        if (
+          Object.prototype.hasOwnProperty.call(this._targetTable, key) &&
+          !this._isMetadataKey(key)
+        ) {
+          const columnConfig = (this._targetTable as any)[key] as ColumnConfig<
+            any,
+            any
+          >;
+          if (
+            columnConfig &&
+            typeof columnConfig === "object" &&
+            "dialectTypes" in columnConfig
           ) {
-            (record as Record<string, any>)[columnName] = columnConfig.default;
-          } else if (columnConfig.default !== undefined) {
-            (record as Record<string, any>)[columnName] = columnConfig.default;
+            const columnName = columnConfig.name;
+            if (record[columnName as keyof typeof record] === undefined) {
+              if (typeof columnConfig.default === "function") {
+                (record as Record<string, any>)[columnName] = (
+                  columnConfig.default as () => any
+                )();
+              } else if (
+                columnConfig.default !== undefined &&
+                typeof columnConfig.default === "object" &&
+                (columnConfig.default as SQL)._isSQL
+              ) {
+                (record as Record<string, any>)[columnName] =
+                  columnConfig.default;
+              } else if (columnConfig.default !== undefined) {
+                (record as Record<string, any>)[columnName] =
+                  columnConfig.default;
+              }
+            }
           }
         }
       }
@@ -945,7 +1031,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           .join(", ")})`;
       })
       .join(", ");
-    return `INSERT INTO \`${this._targetTable.name}\` (${columns}) VALUES ${valuePlaceholders}`;
+    return `INSERT INTO \`${this._targetTable._name}\` (${columns}) VALUES ${valuePlaceholders}`;
   }
 
   private buildUpdatePgSQL(
@@ -973,7 +1059,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       paramIndexState,
       aliasMap
     );
-    return `UPDATE "${this._targetTable.name}" SET ${setParts} ${whereClause}`.trim();
+    return `UPDATE "${this._targetTable._name}" SET ${setParts} ${whereClause}`.trim();
   }
 
   private buildUpdateSpannerSQL(
@@ -1000,7 +1086,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       paramIndexState,
       aliasMap
     );
-    return `UPDATE \`${this._targetTable.name}\` SET ${setParts} ${whereClause}`.trim();
+    return `UPDATE \`${this._targetTable._name}\` SET ${setParts} ${whereClause}`.trim();
   }
 
   private buildDeletePgSQL(
@@ -1013,7 +1099,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       paramIndexState,
       aliasMap
     );
-    return `DELETE FROM "${this._targetTable.name}" ${whereClause}`.trim();
+    return `DELETE FROM "${this._targetTable._name}" ${whereClause}`.trim();
   }
 
   private buildDeleteSpannerSQL(
@@ -1026,7 +1112,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       paramIndexState,
       aliasMap
     );
-    return `DELETE FROM \`${this._targetTable.name}\` ${whereClause}`.trim();
+    return `DELETE FROM \`${this._targetTable._name}\` ${whereClause}`.trim();
   }
 
   private buildWhereClause(
@@ -1123,16 +1209,11 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
   getBoundParameters(dialect: Dialect): unknown[] {
     const allParams: unknown[] = [];
     if (this._operationType === "select" && this._selectedFields) {
-      // Parameters from explicitly selected SQL fields
       Object.values(this._selectedFields).forEach((field) => {
         if (typeof field === "object" && field !== null && "_isSQL" in field) {
           allParams.push(...(field as SQL).getValues(dialect));
         }
       });
-      // Parameters from included fields (though typically columns, could be SQL in future)
-      // For now, selectedFieldsFromIncludes in buildSelect methods only adds ColumnConfig,
-      // so no parameters from there yet. If SQL objects were allowed in include.select,
-      // they would need to be processed here or their params collected during buildSelect.
     }
     if (
       this._operationType === "insert" &&
@@ -1148,25 +1229,37 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
         processedInsertDataForParams = [{ ...this._insertValues }];
       }
       for (const record of processedInsertDataForParams) {
-        for (const [columnName, columnConfigUnk] of Object.entries(
-          this._targetTable.columns
-        )) {
-          const columnConfig = columnConfigUnk as ColumnConfig<any, any>;
-          if (record[columnName as keyof typeof record] === undefined) {
-            if (typeof columnConfig.default === "function") {
-              (record as Record<string, any>)[columnName] = (
-                columnConfig.default as () => any
-              )();
-            } else if (
-              columnConfig.default !== undefined &&
-              typeof columnConfig.default === "object" &&
-              (columnConfig.default as SQL)._isSQL
+        for (const key in this._targetTable) {
+          if (
+            Object.prototype.hasOwnProperty.call(this._targetTable, key) &&
+            !this._isMetadataKey(key)
+          ) {
+            const columnConfig = (this._targetTable as any)[
+              key
+            ] as ColumnConfig<any, any>;
+            if (
+              columnConfig &&
+              typeof columnConfig === "object" &&
+              "dialectTypes" in columnConfig
             ) {
-              (record as Record<string, any>)[columnName] =
-                columnConfig.default;
-            } else if (columnConfig.default !== undefined) {
-              (record as Record<string, any>)[columnName] =
-                columnConfig.default;
+              const columnName = columnConfig.name;
+              if (record[columnName as keyof typeof record] === undefined) {
+                if (typeof columnConfig.default === "function") {
+                  (record as Record<string, any>)[columnName] = (
+                    columnConfig.default as () => any
+                  )();
+                } else if (
+                  columnConfig.default !== undefined &&
+                  typeof columnConfig.default === "object" &&
+                  (columnConfig.default as SQL)._isSQL
+                ) {
+                  (record as Record<string, any>)[columnName] =
+                    columnConfig.default;
+                } else if (columnConfig.default !== undefined) {
+                  (record as Record<string, any>)[columnName] =
+                    columnConfig.default;
+                }
+              }
             }
           }
         }
@@ -1215,7 +1308,6 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       }
     }
     if (this._joins) {
-      // Includes joins from .include()
       for (const join of this._joins) {
         allParams.push(...join.onCondition.getValues(dialect));
       }
@@ -1247,7 +1339,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
 
   private addJoin(
     type: JoinType,
-    table: TableConfig<any, any>,
+    table: TableConfig<string, TableColumns>, // More specific
     onCondition: SQL
   ): this {
     if (this._operationType !== "select") {
@@ -1258,11 +1350,13 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     return this;
   }
 
-  innerJoin(table: TableConfig<any, any>, onCondition: SQL): this {
+  innerJoin(table: TableConfig<string, TableColumns>, onCondition: SQL): this {
+    // More specific
     return this.addJoin("INNER", table, onCondition);
   }
 
-  leftJoin(table: TableConfig<any, any>, onCondition: SQL): this {
+  leftJoin(table: TableConfig<string, TableColumns>, onCondition: SQL): this {
+    // More specific
     return this.addJoin("LEFT", table, onCondition);
   }
 
@@ -1285,35 +1379,60 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
 
     let fkColumn: ColumnConfig<any, any> | undefined;
     let pkColumn: ColumnConfig<any, any> | undefined;
-    let joinTable = relatedTableConfig; // The table we are joining TO
+    let joinTable = relatedTableConfig;
 
-    // Scenario 1: Current _targetTable is PARENT, relatedTableConfig is CHILD (e.g. users.joinRelation('posts'))
-    // We look for an FK in relatedTableConfig (child) that points to _targetTable (parent)
-    for (const col of Object.values(relatedTableConfig.columns)) {
-      const colConfig = col as ColumnConfig<any, any>;
-      if (colConfig.references) {
-        const referencedPkColumn = colConfig.references.referencesFn();
-        if (referencedPkColumn._tableName === this._targetTable.name) {
-          fkColumn = colConfig; // FK in child table (relatedTableConfig)
-          pkColumn = referencedPkColumn; // PK in parent table (_targetTable)
-          joinTable = relatedTableConfig;
-          break;
+    for (const key in relatedTableConfig) {
+      if (
+        Object.prototype.hasOwnProperty.call(relatedTableConfig, key) &&
+        !this._isMetadataKey(key)
+      ) {
+        const colConfig = (relatedTableConfig as any)[key] as ColumnConfig<
+          any,
+          any
+        >;
+        if (
+          colConfig &&
+          typeof colConfig === "object" &&
+          colConfig.references &&
+          "dialectTypes" in colConfig
+        ) {
+          const referencedPkColumn = colConfig.references.referencesFn();
+          if (
+            this._targetTable &&
+            referencedPkColumn._tableName === this._targetTable._name
+          ) {
+            fkColumn = colConfig;
+            pkColumn = referencedPkColumn;
+            joinTable = relatedTableConfig;
+            break;
+          }
         }
       }
     }
 
-    // Scenario 2: Current _targetTable is CHILD, relatedTableConfig is PARENT (e.g. posts.joinRelation('user'))
-    // We look for an FK in _targetTable (child) that points to relatedTableConfig (parent)
     if (!fkColumn) {
-      for (const col of Object.values(this._targetTable.columns)) {
-        const colConfig = col as ColumnConfig<any, any>;
-        if (colConfig.references) {
-          const referencedPkColumn = colConfig.references.referencesFn();
-          if (referencedPkColumn._tableName === relatedTableConfig.name) {
-            fkColumn = colConfig; // FK in child table (_targetTable)
-            pkColumn = referencedPkColumn; // PK in parent table (relatedTableConfig)
-            joinTable = relatedTableConfig; // Still joining TO the relatedTableConfig
-            break;
+      for (const key in this._targetTable) {
+        if (
+          Object.prototype.hasOwnProperty.call(this._targetTable, key) &&
+          !this._isMetadataKey(key)
+        ) {
+          const colConfig = (this._targetTable as any)[key] as ColumnConfig<
+            any,
+            any
+          >;
+          if (
+            colConfig &&
+            typeof colConfig === "object" &&
+            colConfig.references &&
+            "dialectTypes" in colConfig
+          ) {
+            const referencedPkColumn = colConfig.references.referencesFn();
+            if (referencedPkColumn._tableName === relatedTableConfig._name) {
+              fkColumn = colConfig;
+              pkColumn = referencedPkColumn;
+              joinTable = relatedTableConfig;
+              break;
+            }
           }
         }
       }
@@ -1325,7 +1444,9 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     }
 
     throw new Error(
-      `Could not automatically determine relationship between ${this._targetTable.name} and ${relationName}. Please use explicit join with ON condition.`
+      `Could not automatically determine relationship between ${
+        this._targetTable!._name
+      } and ${relationName}. Please use explicit join with ON condition.`
     );
   }
 

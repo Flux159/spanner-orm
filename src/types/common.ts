@@ -49,20 +49,30 @@ export interface CompositePrimaryKeyConfig {
 
 export type TableColumns = Record<string, ColumnConfig<unknown, string>>;
 
-export interface TableConfig<
-  TName extends string = string,
-  TColumns extends TableColumns = TableColumns
-> {
-  name: TName;
-  columns: TColumns;
-  indexes?: IndexConfig[];
-  compositePrimaryKey?: CompositePrimaryKeyConfig;
-  interleave?: {
+// New interface for table metadata
+export interface TableMetadataConfig<TName extends string = string> {
+  _name: TName;
+  _indexes?: IndexConfig[];
+  _compositePrimaryKey?: CompositePrimaryKeyConfig;
+  _interleave?: {
     parentTable: string; // Name of the parent table
     onDelete: "cascade" | "no action";
   };
-  _isTable?: boolean; // Added for CLI detection
+  _isTable: true; // Marker for CLI detection and internal type guards
+  // Add any other non-column table properties here, prefixed with _
 }
+
+// Redefined TableConfig as an intersection type
+export type TableConfig<
+  TName extends string = string,
+  TColumns extends TableColumns = TableColumns
+> = TColumns & TableMetadataConfig<TName>;
+
+// Utility type to extract only the column properties from a TableConfig
+export type GetTableColumns<T extends TableConfig<any, any>> = Omit<
+  T,
+  keyof TableMetadataConfig
+>;
 
 // Utility type to infer the TS type from a ColumnConfig
 export type InferColumnType<C extends ColumnConfig<unknown, string>> =
@@ -72,13 +82,18 @@ export type InferColumnType<C extends ColumnConfig<unknown, string>> =
       : (C extends ColumnConfig<infer T, string> ? T : never) | null
     : NonNullable<C extends ColumnConfig<infer T, string> ? T : never>;
 
-// Utility type to infer the TS type for a whole table
+// Utility type to infer the TS type for a whole table, using GetTableColumns
 export type InferModelType<T extends TableConfig<string, TableColumns>> = {
-  [K in keyof T["columns"]]: InferColumnType<T["columns"][K]>;
+  [K in keyof GetTableColumns<T>]: GetTableColumns<T>[K] extends ColumnConfig<
+    unknown,
+    string
+  >
+    ? InferColumnType<GetTableColumns<T>[K]>
+    : never; // Should not happen if TColumns is correctly formed
 };
 
 // Type for selecting specific fields, used by QueryBuilder and OrmClient
-export type SelectFields<TTable extends TableConfig<any, any>> =
+export type SelectFields<TTable extends TableConfig<string, TableColumns>> =
   | Partial<Record<keyof InferModelType<TTable>, boolean>>
   | { [columnAlias: string]: SQL | ColumnConfig<any, any> | true } // Allow SQL expressions or column configs for aliasing
   | undefined;
@@ -98,7 +113,7 @@ export type IncludeClause = Record<string, IncludeRelationOptions>;
 
 // Infers the type of a model based on a TableConfig, optionally picking specific columns.
 export type InferSelectedModelType<
-  TTable extends TableConfig<any, any>,
+  TTable extends TableConfig<string, TableColumns>,
   TSelect extends
     | Partial<Record<keyof InferModelType<TTable>, boolean>>
     | undefined
@@ -108,7 +123,7 @@ export type InferSelectedModelType<
 
 // Options for including a related table, generic on the related table's config.
 export type TypedIncludeRelationOptions<
-  TRelatedTable extends TableConfig<any, any>
+  TRelatedTable extends TableConfig<string, TableColumns>
 > =
   | boolean
   | {
@@ -119,7 +134,7 @@ export type TypedIncludeRelationOptions<
 
 // An entry in the enhanced include clause, specifying the related table and options.
 export interface EnhancedIncludeClauseEntry<
-  TRelatedTable extends TableConfig<any, any>
+  TRelatedTable extends TableConfig<string, TableColumns>
 > {
   relationTable: TRelatedTable;
   options: TypedIncludeRelationOptions<TRelatedTable>;
@@ -129,12 +144,12 @@ export interface EnhancedIncludeClauseEntry<
 // The enhanced include clause, mapping relation names to their typed entries.
 export type EnhancedIncludeClause = Record<
   string,
-  EnhancedIncludeClauseEntry<TableConfig<any, any>>
+  EnhancedIncludeClauseEntry<TableConfig<string, TableColumns>> // Updated constraint
 >;
 
 // Infers the model type for a single included relation based on EnhancedIncludeClauseEntry
 export type InferIncludedRelationModel<
-  TEntry extends EnhancedIncludeClauseEntry<TableConfig<any, any>>
+  TEntry extends EnhancedIncludeClauseEntry<TableConfig<string, TableColumns>> // Updated constraint
 > = TEntry["options"] extends { select: infer TSelect }
   ? TSelect extends Partial<
       Record<keyof InferModelType<TEntry["relationTable"]>, boolean>
@@ -147,7 +162,7 @@ export type InferIncludedRelationModel<
 // TPrimaryTable: The main table being queried.
 // TInclude: The EnhancedIncludeClause describing what relations to include.
 export type ShapedResultItem<
-  TPrimaryTable extends TableConfig<any, any>,
+  TPrimaryTable extends TableConfig<string, TableColumns>,
   TInclude extends EnhancedIncludeClause | undefined
 > = InferModelType<TPrimaryTable> &
   (TInclude extends EnhancedIncludeClause
@@ -343,16 +358,19 @@ export function sql(strings: TemplateStringsArray, ...values: unknown[]): SQL {
             result += identifier + strings[i + 1];
           } else if (
             // Check if it IS a TableConfig object
-            "name" in value &&
-            typeof (value as any).name === "string" &&
-            "columns" in value && // Check for 'columns' to differentiate from ColumnConfig
-            typeof (value as any).columns === "object" &&
-            "_isTable" in value &&
-            (value as any)._isTable === true
+            // Check if it IS a TableConfig object
+            "_name" in value && // Check for _name, which is part of TableMetadataConfig
+            typeof (value as any)._name === "string" && // Changed val to value
+            "_isTable" in value && // _isTable is also part of TableMetadataConfig
+            (value as any)._isTable === true && // Changed val to value
+            // No longer checking for "columns" at this level, as they are spread
+            // Ensure it's not a ColumnConfig by checking for absence of 'dialectTypes' or presence of '_name'
+            // This helps differentiate if a column name happens to be '_name' or '_isTable'
+            !("dialectTypes" in value) // A column config would have dialectTypes
           ) {
             // It's a TableConfig, interpolate its name as an identifier
-            const tableConfig = value as TableConfig<any, any>;
-            const originalTableName = tableConfig.name;
+            const tableConfig = value as TableConfig<string, TableColumns>; // Use the more specific type
+            const originalTableName = tableConfig._name; // Access _name
             // Table names themselves are not typically aliased in the aliasMap in the same way
             // columns are qualified by aliases. The aliasMap is for `OriginalName -> QueryAlias`.
             // When a TableConfig is used directly like `FROM ${myTable}`, we use its actual name.
@@ -498,7 +516,7 @@ export type MigrationExecutor = (
 
 // --- Prepared Query Type ---
 export interface PreparedQuery<
-  TPrimaryTable extends TableConfig<any, any>,
+  TPrimaryTable extends TableConfig<string, TableColumns>,
   TInclude extends EnhancedIncludeClause | undefined = undefined
 > {
   sql: string;

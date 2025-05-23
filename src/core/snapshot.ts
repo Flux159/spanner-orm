@@ -93,14 +93,27 @@ function transformTable(
   allTableConfigs: Record<string, TableConfig<string, TableColumns>>
 ): TableSnapshot {
   const columns: Record<string, ColumnSnapshot> = {};
-  for (const columnName in tableConfig.columns) {
-    columns[columnName] = transformColumn(
-      tableConfig.columns[columnName],
-      allTableConfigs
-    );
+  for (const key in tableConfig) {
+    if (Object.prototype.hasOwnProperty.call(tableConfig, key)) {
+      // Filter out metadata properties and ensure it's a column config
+      if (
+        !key.startsWith("_") &&
+        typeof tableConfig[key as keyof typeof tableConfig] === "object" &&
+        tableConfig[key as keyof typeof tableConfig] !== null &&
+        "dialectTypes" in tableConfig[key as keyof typeof tableConfig] // A good indicator of a ColumnConfig
+      ) {
+        const columnConfig = tableConfig[
+          key as keyof typeof tableConfig
+        ] as ColumnConfig<any, any>;
+        columns[columnConfig.name] = transformColumn(
+          columnConfig,
+          allTableConfigs
+        );
+      }
+    }
   }
 
-  const indexes: IndexSnapshot[] = (tableConfig.indexes || []).map(
+  const indexes: IndexSnapshot[] = (tableConfig._indexes || []).map(
     (idx): IndexSnapshot => ({
       name: idx.name,
       columns: idx.columns,
@@ -109,23 +122,23 @@ function transformTable(
   );
 
   let compositePrimaryKey: CompositePrimaryKeySnapshot | undefined;
-  if (tableConfig.compositePrimaryKey) {
+  if (tableConfig._compositePrimaryKey) {
     compositePrimaryKey = {
-      name: tableConfig.compositePrimaryKey.name,
-      columns: tableConfig.compositePrimaryKey.columns,
+      name: tableConfig._compositePrimaryKey.name,
+      columns: tableConfig._compositePrimaryKey.columns,
     };
   }
 
   let interleave: InterleaveSnapshot | undefined;
-  if (tableConfig.interleave) {
+  if (tableConfig._interleave) {
     interleave = {
-      parentTable: tableConfig.interleave.parentTable,
-      onDelete: tableConfig.interleave.onDelete,
+      parentTable: tableConfig._interleave.parentTable,
+      onDelete: tableConfig._interleave.onDelete,
     };
   }
 
   return {
-    name: tableConfig.name,
+    name: tableConfig._name,
     columns,
     indexes: indexes.length > 0 ? indexes : undefined,
     compositePrimaryKey,
