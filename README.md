@@ -216,19 +216,18 @@ The CLI also provides tools to manage your database schema migrations. Migration
 
 **1. Create a new migration:**
 
-This command generates a pair of timestamped migration files (one for PostgreSQL, one for Spanner) with `up` and `down` function templates.
+This command generates a single timestamped migration file (e.g., `YYYYMMDDHHMMSS-add-posts-table.ts`) containing dialect-specific `up` and `down` functions (e.g., `migratePostgresUp`, `migrateSpannerUp`, `migratePostgresDown`, `migrateSpannerDown`).
 
 ```bash
-# Example: Create migration files for adding a 'posts' table
+# Example: Create a migration file for adding a 'posts' table
 # This requires your schema file (e.g., dist/schema.js) to be built and specified.
 npx spanner-orm-cli migrate create add-posts-table --schema ./dist/schema.js
 
-# This will create files like:
-# ./spanner-orm-migrations/YYYYMMDDHHMMSS-add-posts-table.pg.ts
-# ./spanner-orm-migrations/YYYYMMDDHHMMSS-add-posts-table.spanner.ts
+# This will create a file like:
+# ./spanner-orm-migrations/YYYYMMDDHHMMSS-add-posts-table.ts
 ```
 
-There will also be a latest.snapshot.json file created keeping track of the current state of your schema for new migrations in the future.
+This single file will contain the necessary DDL for both PostgreSQL and Spanner, organized into their respective functions. A `latest.snapshot.json` file is also created/updated to track the current schema state for future migrations.
 
 **2. Apply pending migrations:**
 
