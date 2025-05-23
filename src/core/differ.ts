@@ -42,7 +42,26 @@ function compareColumns(
   if (!isEqual(col1.dialectTypes, col2.dialectTypes))
     changes.dialectTypes = col2.dialectTypes;
   if (col1.notNull !== col2.notNull) changes.notNull = col2.notNull;
-  if (!isEqual(col1.default, col2.default)) changes.default = col2.default;
+
+  // Special handling for default values to avoid unnecessary diffs for SQL objects
+  let defaultsAreEffectivelyEqual = false;
+  if (
+    typeof col1.default === "object" &&
+    col1.default !== null &&
+    (col1.default as any)._isSQL === true &&
+    typeof col2.default === "object" &&
+    col2.default !== null &&
+    (col2.default as any)._isSQL === true
+  ) {
+    // Both are SQL objects (one from snapshot placeholder, one from new schema).
+    // Consider them functionally equivalent if both are marked _isSQL.
+    defaultsAreEffectivelyEqual = true;
+  }
+
+  if (!defaultsAreEffectivelyEqual && !isEqual(col1.default, col2.default)) {
+    changes.default = col2.default;
+  }
+
   if (col1.primaryKey !== col2.primaryKey) changes.primaryKey = col2.primaryKey;
   if (col1.unique !== col2.unique) changes.unique = col2.unique;
   if (!isEqual(col1.references, col2.references))
