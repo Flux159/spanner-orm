@@ -5,6 +5,8 @@ A TypeScript ORM for Google Spanner & PostgreSQL, designed for Node.js and Bun. 
 > [!NOTE]
 > spanner-orm was almost entirely written by prompting Gemini 2.5 Pro via Cline. See notes/ProjectRoadmap.md, TaskPrefix.md and the other notes to understand how.
 
+Read the published docs [here](https://flux159.github.io/spanner-orm) to get started.
+
 ## Key Requirements & Design Goals
 
 `spanner-orm` is built to address the following key requirements for developers working with PostgreSQL and Google Spanner:
@@ -427,7 +429,3 @@ async function runQueryBuilderExamples(adapter) {
 ```
 
 These examples illustrate how to perform common database operations. The actual execution would depend on your specific database adapter setup.
-
----
-
-_This project is under active development._
