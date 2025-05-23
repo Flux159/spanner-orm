@@ -1,6 +1,8 @@
 // src/pglite/adapter.ts
 
-import { PGlite } from "@electric-sql/pglite";
+// Import PGlite type for type checking, actual import will be dynamic
+type PGliteType = import("@electric-sql/pglite").PGlite;
+
 import type {
   DatabaseAdapter,
   QueryResultRow as AdapterQueryResultRow,
@@ -20,27 +22,35 @@ export interface PgliteConnectionOptions extends ConnectionOptions {
 
 export class PgliteAdapter implements DatabaseAdapter {
   readonly dialect = "postgres"; // Treat PGlite as PostgreSQL for ORM dialect purposes
-  private pglite: PGlite;
+  private pglite!: PGliteType; // Definite assignment in constructor via this.ready
   private ready: Promise<void>;
   private isConnected: boolean = false;
+  private PGliteClass?: typeof import("@electric-sql/pglite").PGlite;
 
   constructor(options?: PgliteConnectionOptions | string) {
     const dataDir = typeof options === "string" ? options : options?.dataDir;
-    this.pglite = new PGlite(dataDir);
-    // PGlite's constructor is synchronous. `ready` can be a resolved promise.
+    this.ready = this.initializePglite(dataDir);
+  }
+
+  private async initializePglite(dataDir?: string): Promise<void> {
+    if (!this.PGliteClass) {
+      const pgliteModule = await import("@electric-sql/pglite");
+      this.PGliteClass = pgliteModule.PGlite;
+    }
+    this.pglite = new this.PGliteClass(dataDir);
+    // PGlite's constructor is synchronous.
     // Some PGlite operations might be async internally if they load extensions,
-    // but the basic instance should be usable.
-    this.ready = Promise.resolve();
+    // but the basic instance should be usable after this.
   }
 
   async connect(): Promise<void> {
+    await this.ready; // Ensure PGlite is initialized
     if (this.isConnected) {
       console.log("PGlite adapter already connected/initialized.");
       return;
     }
-    await this.ready; // Ensure any initial setup promise resolves
     // PGlite doesn't have an explicit connect method like a remote DB.
-    // Being instantiated is considered 'connected' for basic operations.
+    // Being instantiated (after await this.ready) is considered 'connected' for basic operations.
     // We can do a simple query to confirm it's working.
     try {
       await this.pglite.query("SELECT 1;");

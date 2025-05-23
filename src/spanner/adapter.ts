@@ -1,11 +1,17 @@
 // src/spanner/adapter.ts
 
-import {
-  Spanner,
-  Database,
-  Transaction,
-  Instance,
+// Import types directly
+import type {
+  Database as SpannerDatabase,
+  Transaction as SpannerNativeTransaction,
+  Instance as SpannerInstance,
 } from "@google-cloud/spanner";
+
+// Type for the Spanner class constructor
+type SpannerClientClassType = typeof import("@google-cloud/spanner").Spanner;
+// Type for Spanner instance
+type SpannerClientInstanceType = import("@google-cloud/spanner").Spanner;
+
 import type {
   DatabaseAdapter,
   QueryResultRow as AdapterQueryResultRow,
@@ -27,11 +33,13 @@ export interface SpannerConnectionOptions extends ConnectionOptions {
 
 export class SpannerAdapter implements DatabaseAdapter {
   readonly dialect = "spanner";
-  private spannerClient?: Spanner;
-  private instance?: Instance;
-  private db?: Database;
+  private spannerClient?: SpannerClientInstanceType;
+  private instance?: SpannerInstance;
+  private db?: SpannerDatabase;
   private options: SpannerConnectionOptions;
   private isConnected: boolean = false;
+  private ready: Promise<void>;
+  private SpannerClientClass?: SpannerClientClassType;
 
   constructor(options: SpannerConnectionOptions) {
     if (!options.projectId || !options.instanceId || !options.databaseId) {
@@ -40,15 +48,30 @@ export class SpannerAdapter implements DatabaseAdapter {
       );
     }
     this.options = options;
+    this.ready = this.initializeSpannerClient();
+  }
+
+  private async initializeSpannerClient(): Promise<void> {
+    if (!this.SpannerClientClass) {
+      const spannerModule = await import("@google-cloud/spanner");
+      this.SpannerClientClass = spannerModule.Spanner;
+    }
   }
 
   async connect(): Promise<void> {
+    await this.ready; // Ensure Spanner class is loaded
     if (this.isConnected) {
       console.log("Spanner adapter already connected.");
       return;
     }
+    if (!this.SpannerClientClass) {
+      // Should not happen if await this.ready worked
+      throw new Error("Spanner client class not loaded.");
+    }
     try {
-      this.spannerClient = new Spanner({ projectId: this.options.projectId });
+      this.spannerClient = new this.SpannerClientClass({
+        projectId: this.options.projectId,
+      });
       this.instance = this.spannerClient.instance(this.options.instanceId);
       this.db = this.instance.database(this.options.databaseId);
       // Perform a simple query to verify connection and authentication
@@ -65,6 +88,7 @@ export class SpannerAdapter implements DatabaseAdapter {
   }
 
   async disconnect(): Promise<void> {
+    // No need to await this.ready for disconnect, if spannerClient exists, try to close it.
     if (!this.isConnected || !this.spannerClient) {
       console.log("Spanner adapter already disconnected or not connected.");
       return;
@@ -82,7 +106,8 @@ export class SpannerAdapter implements DatabaseAdapter {
     }
   }
 
-  private ensureConnected(): Database {
+  private ensureConnected(): SpannerDatabase {
+    // this.ready should have been awaited by the calling public method or connect()
     if (!this.isConnected || !this.db) {
       throw new Error(
         "Spanner adapter is not connected. Call connect() first."
@@ -95,12 +120,12 @@ export class SpannerAdapter implements DatabaseAdapter {
     sql: string,
     params?: Record<string, any>
   ): Promise<number | AffectedRows> {
-    const db = this.ensureConnected();
+    const db = this.ensureConnected(); // Relies on connect() having awaited this.ready
     try {
       // Spanner's runUpdate returns an array where the first element is the affected row count.
       // The result of runTransactionAsync is the result of its callback.
       const rowCount = await db.runTransactionAsync(
-        async (transaction: Transaction) => {
+        async (transaction: SpannerNativeTransaction) => {
           const [count] = await transaction.runUpdate({ sql, params });
           // No explicit commit needed here, runTransactionAsync handles it.
           return count;
@@ -117,7 +142,7 @@ export class SpannerAdapter implements DatabaseAdapter {
     sql: string,
     params?: Record<string, any>
   ): Promise<TResult[]> {
-    const db = this.ensureConnected();
+    const db = this.ensureConnected(); // Relies on connect() having awaited this.ready
     try {
       const [rows] = await db.run({
         sql,
@@ -134,6 +159,7 @@ export class SpannerAdapter implements DatabaseAdapter {
   async queryPrepared<TTable extends TableConfig<any, any>>(
     preparedQuery: PreparedQuery<TTable>
   ): Promise<any[]> {
+    // ensureConnected will be called by this.query
     try {
       const spannerParams: Record<string, any> = {};
       if (preparedQuery.parameters) {
@@ -165,7 +191,7 @@ export class SpannerAdapter implements DatabaseAdapter {
   }
 
   async beginTransaction(): Promise<OrmTransaction> {
-    const db = this.ensureConnected();
+    const db = this.ensureConnected(); // Relies on connect() having awaited this.ready
     // Spanner's transactions are typically managed via runTransactionAsync.
     // To return a Transaction object, we'd need to get a transaction object
     // from Spanner and wrap its methods. This is complex because Spanner
@@ -244,35 +270,37 @@ export class SpannerAdapter implements DatabaseAdapter {
   async transaction<T>(
     callback: (txAdapter: OrmTransaction) => Promise<T>
   ): Promise<T> {
-    const db = this.ensureConnected();
+    const db = this.ensureConnected(); // Relies on connect() having awaited this.ready
     // Use Spanner's recommended runTransactionAsync pattern
-    return db.runTransactionAsync(async (gcpTransaction: Transaction) => {
-      const txExecutor: OrmTransaction = {
-        execute: async (cmdSql, cmdParams) => {
-          const [rowCount] = await gcpTransaction.runUpdate({
-            sql: cmdSql,
-            params: cmdParams as Record<string, any> | undefined,
-          });
-          return { count: rowCount };
-        },
-        query: async (querySql, queryParams) => {
-          const [rows] = await gcpTransaction.run({
-            sql: querySql,
-            params: queryParams as Record<string, any> | undefined,
-            json: true,
-          });
-          return rows as any[];
-        },
-        commit: async () => {
-          // Commit is handled by runTransactionAsync itself. This is a no-op.
-          return Promise.resolve();
-        },
-        rollback: async () => {
-          // Rollback is handled by runTransactionAsync if the callback throws. This is a no-op.
-          return Promise.resolve();
-        },
-      };
-      return callback(txExecutor);
-    });
+    return db.runTransactionAsync(
+      async (gcpTransaction: SpannerNativeTransaction) => {
+        const txExecutor: OrmTransaction = {
+          execute: async (cmdSql, cmdParams) => {
+            const [rowCount] = await gcpTransaction.runUpdate({
+              sql: cmdSql,
+              params: cmdParams as Record<string, any> | undefined,
+            });
+            return { count: rowCount };
+          },
+          query: async (querySql, queryParams) => {
+            const [rows] = await gcpTransaction.run({
+              sql: querySql,
+              params: queryParams as Record<string, any> | undefined,
+              json: true,
+            });
+            return rows as any[];
+          },
+          commit: async () => {
+            // Commit is handled by runTransactionAsync itself. This is a no-op.
+            return Promise.resolve();
+          },
+          rollback: async () => {
+            // Rollback is handled by runTransactionAsync if the callback throws. This is a no-op.
+            return Promise.resolve();
+          },
+        };
+        return callback(txExecutor);
+      }
+    );
   }
 }
