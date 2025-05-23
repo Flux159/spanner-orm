@@ -1,12 +1,18 @@
 // src/pg/adapter.ts
 
-import {
-  Pool,
+// Import types directly
+import type {
   QueryResult,
   PoolConfig,
   PoolClient,
   QueryResultRow as PgQueryResultRow,
 } from "pg";
+
+// Type for the Pool class constructor
+type PgPoolType = typeof import("pg").Pool;
+// Type for Pool instance
+type PgPoolInstance = import("pg").Pool;
+
 import type {
   DatabaseAdapter,
   QueryResultRow as AdapterQueryResultRow,
@@ -36,18 +42,32 @@ export type PgConnectionOptions = PoolConfig | string | ConnectionOptions;
 
 export class PostgresAdapter implements DatabaseAdapter {
   readonly dialect = "postgres";
-  private pool: Pool;
+  private pool!: PgPoolInstance; // Definite assignment in constructor via this.ready
   private isConnected: boolean = false;
+  private ready: Promise<void>;
+  private PgPoolClass?: PgPoolType;
 
   constructor(config: PgConnectionOptions) {
+    this.ready = this.initializePgPool(config);
+  }
+
+  private async initializePgPool(config: PgConnectionOptions): Promise<void> {
+    if (!this.PgPoolClass) {
+      const pgModule = await import("pg");
+      this.PgPoolClass = pgModule.Pool;
+    }
+
     if (typeof config === "string") {
-      this.pool = new Pool({ connectionString: config });
+      this.pool = new this.PgPoolClass({ connectionString: config });
     } else {
-      this.pool = new Pool(config as PoolConfig);
+      // Ensure config is treated as PoolConfig, not ConnectionOptions if it's an object
+      const poolConfig: PoolConfig = config as PoolConfig;
+      this.pool = new this.PgPoolClass(poolConfig);
     }
   }
 
   async connect(): Promise<void> {
+    await this.ready;
     if (this.isConnected) {
       console.log("PostgreSQL adapter already connected.");
       return;
@@ -64,6 +84,7 @@ export class PostgresAdapter implements DatabaseAdapter {
   }
 
   async disconnect(): Promise<void> {
+    await this.ready;
     if (!this.isConnected) {
       console.log("PostgreSQL adapter already disconnected.");
       return;
@@ -82,6 +103,7 @@ export class PostgresAdapter implements DatabaseAdapter {
     sql: string,
     params?: unknown[]
   ): Promise<number | AffectedRows> {
+    await this.ready;
     try {
       const result = await this.pool.query(sql, params);
       return { count: result.rowCount ?? 0 };
@@ -95,6 +117,7 @@ export class PostgresAdapter implements DatabaseAdapter {
     sql: string,
     params?: unknown[]
   ): Promise<TResult[]> {
+    await this.ready;
     try {
       const result: QueryResult<TResult & PgQueryResultRow> =
         await this.pool.query<TResult & PgQueryResultRow>(sql, params);
@@ -108,6 +131,7 @@ export class PostgresAdapter implements DatabaseAdapter {
   async queryPrepared<TTable extends TableConfig<any, any>>(
     preparedQuery: PreparedQuery<TTable>
   ): Promise<any[]> {
+    await this.ready;
     try {
       const rawResults = await this.query<AdapterQueryResultRow>( // Use the existing query method
         preparedQuery.sql,
@@ -129,6 +153,7 @@ export class PostgresAdapter implements DatabaseAdapter {
   }
 
   async beginTransaction(): Promise<Transaction> {
+    await this.ready;
     const client: PoolClient = await this.pool.connect();
     await client.query("BEGIN");
 
@@ -173,6 +198,7 @@ export class PostgresAdapter implements DatabaseAdapter {
   async transaction<T>(
     callback: (tx: Transaction) => Promise<T> // Callback now receives a Transaction object
   ): Promise<T> {
+    await this.ready; // Ensure pool is initialized before starting a transaction
     const tx = await this.beginTransaction(); // This already connects and starts
     try {
       const result = await callback(tx);

@@ -5,17 +5,18 @@ A TypeScript ORM for Google Spanner & PostgreSQL, designed for Node.js and Bun. 
 > [!NOTE]
 > spanner-orm was almost entirely written by prompting Gemini 2.5 Pro via Cline. See notes/ProjectRoadmap.md, TaskPrefix.md and the other notes to understand how.
 
-## Key Design Goals
+## Key Requirements & Design Goals
 
 `spanner-orm` is built to address the following key requirements for developers working with PostgreSQL and Google Spanner:
 
-- **Unified Object Model for PostgreSQL & Spanner:** Define your database schema _once_ using a Drizzle-inspired syntax. This single object model is designed to seamlessly support both PostgreSQL (including Pglite for local/embedded use) and Google Spanner. This enables consistent data modeling whether you're building for local development, enterprise deployments, or global-scale web applications.
-- **Cross-Dialect Migration Generation & Execution:** The ORM automatically produces migration files containing the precise DDL (Data Definition Language) for both PostgreSQL and Google Spanner. These migrations can be executed via the `spanner-orm-cli migrate` command or programmatically, ensuring reliable and consistent schema evolution across both database systems.
-- **Flexible Querying: Query Builder & Raw SQL:** Construct type-safe queries using an intuitive fluent API (via the `db` client object) or the underlying `QueryBuilder` for more complex scenarios. When direct control is needed or for features not yet abstracted, you can seamlessly fall back to writing raw SQL using the `sql` template literal tag, with results still being typed if possible.
-- **Dialect-Specific SQL Generation:**
-  - **Google Spanner:** Leverages Google SQL, ensuring that generated DDL and DML (Data Manipulation Language) are optimized for Spanner's unique architecture and capabilities.
-  - **PostgreSQL/Pglite:** Produces standard, highly compatible SQL suitable for PostgreSQL and Pglite. This allows developers to use Pglite for local development or embedded applications, PostgreSQL for traditional server-based deployments, and Google Spanner for applications requiring web-scale, global distribution, all managed from a single, consistent codebase.
-- **Composable Schemas (Drizzle-Inspired):** Easily create and reuse schema components (e.g., common fields like `id`, `timestamps`, or base entity structures like `ownableResource`), promoting DRY (Don't Repeat Yourself) principles and leading to more maintainable and understandable data models, similar to patterns found in Drizzle ORM.
+- **Single Object Model for PostgreSQL & Spanner:** Supports both PostgreSQL & Google Spanner with a single, Drizzle-inspired object model. Define your schema once and use it across both database systems.
+- **Cross-Dialect Migrations:** Produces migrations for both PostgreSQL & Spanner. These migrations can be run via the `spanner-orm-cli migrate` command or programmatically.
+- **Flexible Querying:** Build queries with a type-safe query builder or fall back to raw SQL using the `sql` template literal tag when needed.
+- **Dialect-Aware SQL:**
+  - **Spanner:** Supports Google SQL as the dialect for Spanner.
+  - **PostgreSQL/PGLite:** Uses almost equivalent SQL for PostgreSQL & PGLite.
+  - This allows users to leverage PostgreSQL for non-Spanner deployments, PGLite for local development or embedded applications, and Spanner for global-scale web apps, all from a unified codebase.
+- **Composable Schemas (Drizzle-Inspired):** Easily create and reuse schema components (e.g., common fields like `id`, `timestamps`, or base entity structures like `ownableResource`), promoting DRY (Don't Repeat Yourself) principles and leading to more maintainable and understandable data models.
 
 ## Core Features
 
@@ -92,6 +93,26 @@ Or using Bun:
 
 ```
 bun install spanner-orm
+```
+
+Additionally, `spanner-orm` relies on peer dependencies for the specific database clients. You'll need to install the ones corresponding to the databases you intend to use:
+
+- For **PostgreSQL**: `pg`
+- For **Google Cloud Spanner**: `@google-cloud/spanner`
+- For **PGLite** (optional, for local/embedded use): `@electric-sql/pglite`
+
+You can install them like so:
+
+Using NPM:
+
+```bash
+npm install pg @google-cloud/spanner @electric-sql/pglite # Install all, or pick the ones you need
+```
+
+Or using Bun:
+
+```bash
+bun add pg @google-cloud/spanner @electric-sql/pglite # Install all, or pick the ones you need
 ```
 
 2.  **Define your schema (Drizzle-Inspired):** Create a `schema.ts` (or similar) file. `spanner-orm` allows you to define your data model in a way that's familiar to Drizzle ORM users, emphasizing composability and type safety.
