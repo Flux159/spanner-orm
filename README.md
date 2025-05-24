@@ -205,6 +205,23 @@ bun add pg @google-cloud/spanner @electric-sql/pglite # Install all, or pick the
       })
     );
 
+    // Example with composite primary keys
+    export const myTableWithCompositePk = table(
+      "my_table",
+      {
+        partOne: text("part_one").notNull(),
+        partTwo: integer("part_two").notNull(),
+        data: text("data"),
+      },
+      (t) => ({
+        // 't' provides access to the defined columns like t.partOne, t.partTwo
+        primaryKey: {
+          columns: [t.partOne.name, t.partTwo.name], // Use .name to get the actual column name string
+          name: "my_table_pk", // Optional constraint name
+        },
+      })
+    );
+
     // You can then use these definitions to generate DDL or build queries.
     ```
 
@@ -512,3 +529,52 @@ async function runQueryBuilderExamples(adapter) {
 
 // runQueryBuilderExamples(adapter).catch(console.error);
 ```
+
+### Managing Migrations Programmatically
+
+In addition to the CLI, you can run migrations directly from your code using the `OrmClient` instance. This is useful for scenarios like automated deployments, programmatic setup, or embedding migration logic within your application.
+
+The `OrmClient` (typically instantiated as `db`) provides the following methods:
+
+- `db.migrateLatest(options?: { migrationsPath?: string }): Promise<void>`: Applies all pending "up" migrations.
+- `db.migrateDown(options?: { migrationsPath?: string }): Promise<void>`: Reverts the last applied migration.
+
+The optional `migrationsPath` parameter allows you to specify the directory where your migration files are stored. If omitted, it defaults to `./spanner-orm-migrations`.
+
+**Example:**
+
+```typescript
+import { OrmClient, PgliteAdapter } from "spanner-orm";
+import { PGlite } from "@electric-sql/pglite";
+
+async function runProgrammaticMigrations() {
+  // 1. Initialize your adapter and OrmClient
+  const pglite = new PGlite(); // Or your preferred adapter (PostgresAdapter, SpannerAdapter)
+  const adapter = new PgliteAdapter(pglite);
+  await adapter.connect(); // Ensure the adapter is connected
+
+  const db = new OrmClient(adapter, "postgres"); // Or "spanner"
+
+  try {
+    // 2. Apply all pending migrations
+    console.log("Applying latest migrations programmatically...");
+    await db.migrateLatest(); // Uses default migrations path "./spanner-orm-migrations"
+    // Or specify a custom path:
+    // await db.migrateLatest({ migrationsPath: "./my-custom-migrations-folder" });
+    console.log("Latest migrations applied.");
+
+    // 3. Optionally, revert the last migration
+    // console.log("Reverting last migration programmatically...");
+    // await db.migrateDown();
+    // console.log("Last migration reverted.");
+  } catch (error) {
+    console.error("Error during programmatic migration:", error);
+  } finally {
+    await adapter.disconnect();
+  }
+}
+
+// runProgrammaticMigrations().catch(console.error);
+```
+
+This approach gives you fine-grained control over when and how migrations are executed within your application's lifecycle.
