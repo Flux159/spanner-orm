@@ -19,6 +19,7 @@ Read the published docs [here](https://flux159.github.io/spanner-orm) to get sta
   - **PostgreSQL/PGLite:** Uses almost equivalent SQL for PostgreSQL & PGLite.
   - This allows users to leverage PostgreSQL for non-Spanner deployments, PGLite for local development or embedded applications, and Spanner for global-scale web apps, all from a unified codebase.
 - **Composable Schemas (Drizzle-Inspired):** Easily create and reuse schema components (e.g., common fields like `id`, `timestamps`, or base entity structures like `ownableResource`), promoting DRY (Don't Repeat Yourself) principles and leading to more maintainable and understandable data models.
+- **Rich Query Conditions:** Provides a comprehensive set of SQL condition functions (`eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `and`, `or`, `not`, etc.) for building expressive `WHERE` clauses in the query builder.
 
 ## Core Features
 
@@ -278,7 +279,7 @@ async function runFluentExamples(db: OrmClient) {
     .from(users)
     .where(
       sql`${users.createdAt} > ${new Date(Date.now() - 24 * 60 * 60 * 1000)}`
-    )
+    ) // Using raw sql for date comparison
     .orderBy(users.createdAt, "DESC")
     .limit(10);
   console.log("Recent Users:", recentUsers);
@@ -352,6 +353,96 @@ async function runFluentExamples(db: OrmClient) {
 // 1. Set up your adapter and db instance as shown above.
 // 2. Ensure your schema (users, posts tables) is defined and migrations are run.
 // runFluentExamples(db).catch(console.error);
+```
+
+### Using Condition Functions in `where` Clauses
+
+`spanner-orm` provides a rich set of functions to build expressive `WHERE` clauses, similar to Drizzle ORM. These functions can be imported from `spanner-orm` (or directly from `spanner-orm/core/functions` if you prefer more granular imports).
+
+```typescript
+import {
+  OrmClient,
+  sql,
+  users,
+  posts,
+  eq,
+  ne,
+  gt,
+  gte,
+  lt,
+  lte,
+  and,
+  or,
+  not,
+} from "spanner-orm";
+// Assuming 'db' is an initialized OrmClient instance
+// Assuming 'users' and 'posts' tables are defined
+
+async function runConditionExamples(db: OrmClient) {
+  // Example 1: Equal to (eq)
+  const alice = await db.select().from(users).where(eq(users.name, "Alice"));
+  console.log("Alice:", alice);
+
+  // Example 2: Not equal to (ne)
+  const notAlice = await db.select().from(users).where(ne(users.name, "Alice"));
+  console.log("Not Alice:", notAlice);
+
+  // Example 3: Greater than (gt)
+  // Assuming 'posts' has a 'viewCount' column
+  // const popularPosts = await db.select().from(posts).where(gt(posts.viewCount, 1000));
+  // console.log("Popular Posts:", popularPosts);
+
+  // Example 4: Greater than or equal to (gte)
+  // const postsGte100 = await db.select().from(posts).where(gte(posts.viewCount, 100));
+  // console.log("Posts with >= 100 views:", postsGte100);
+
+  // Example 5: Less than (lt)
+  // const unpopularPosts = await db.select().from(posts).where(lt(posts.viewCount, 10));
+  // console.log("Unpopular Posts:", unpopularPosts);
+
+  // Example 6: Less than or equal to (lte)
+  // const postsLte10 = await db.select().from(posts).where(lte(posts.viewCount, 10));
+  // console.log("Posts with <= 10 views:", postsLte10);
+
+  // Example 7: AND operator
+  const specificUser = await db
+    .select()
+    .from(users)
+    .where(and(eq(users.name, "Bob"), eq(users.email, "bob@example.com")));
+  console.log("Specific User (Bob):", specificUser);
+
+  // Example 8: OR operator
+  const usersAliceOrBob = await db
+    .select()
+    .from(users)
+    .where(or(eq(users.name, "Alice"), eq(users.name, "Bob")));
+  console.log("Users Alice or Bob:", usersAliceOrBob);
+
+  // Example 9: NOT operator
+  const usersNotCarol = await db
+    .select()
+    .from(users)
+    .where(not(eq(users.name, "Carol")));
+  console.log("Users not Carol:", usersNotCarol);
+
+  // Example 10: Complex combination
+  const complexQuery = await db
+    .select()
+    .from(users)
+    .where(
+      and(
+        eq(users.status, "active"), // Assuming a 'status' column
+        or(gt(users.age, 30), eq(users.department, "Sales")), // Assuming 'age' and 'department'
+        not(eq(users.country, "US")) // Assuming 'country'
+      )
+    );
+  console.log("Complex Query Users:", complexQuery);
+}
+
+// To run these examples:
+// 1. Ensure your schema has the relevant tables (users, posts) and columns (name, email, viewCount, status, age, department, country).
+// 2. Initialize and pass your `db` (OrmClient) instance.
+// runConditionExamples(db).catch(console.error);
 ```
 
 ## Advanced

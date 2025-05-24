@@ -1,4 +1,4 @@
-import { SQL, Dialect, sql } from "../types/common.js";
+import { SQL, Dialect, sql, FunctionArg } from "../types/common.js";
 import { ColumnConfig } from "../types/common.js";
 
 // Helper to escape RE2 special characters
@@ -153,6 +153,197 @@ export function lower(value: ColumnConfig<any, any> | string | SQL): SQL {
         throw new Error(`Invalid argument type for lower(): ${typeof value}`);
       }
       return `LOWER(${internalValueStr})`;
+    },
+  };
+}
+
+// --- Condition Functions ---
+
+/**
+ * Represents an equality comparison (lhs = rhs).
+ * @param left The left-hand side of the comparison (column, value, or SQL).
+ * @param right The right-hand side of the comparison (column, value, or SQL).
+ */
+export function eq(left: FunctionArg, right: FunctionArg): SQL {
+  return sql`${left} = ${right}`;
+}
+
+/**
+ * Represents a non-equality comparison (lhs <> rhs).
+ * @param left The left-hand side of the comparison (column, value, or SQL).
+ * @param right The right-hand side of the comparison (column, value, or SQL).
+ */
+export function ne(left: FunctionArg, right: FunctionArg): SQL {
+  return sql`${left} <> ${right}`;
+}
+
+/**
+ * Represents a "greater than" comparison (lhs > rhs).
+ * @param left The left-hand side of the comparison (column, value, or SQL).
+ * @param right The right-hand side of the comparison (column, value, or SQL).
+ */
+export function gt(left: FunctionArg, right: FunctionArg): SQL {
+  return sql`${left} > ${right}`;
+}
+
+/**
+ * Represents a "greater than or equal to" comparison (lhs >= rhs).
+ * @param left The left-hand side of the comparison (column, value, or SQL).
+ * @param right The right-hand side of the comparison (column, value, or SQL).
+ */
+export function gte(left: FunctionArg, right: FunctionArg): SQL {
+  return sql`${left} >= ${right}`;
+}
+
+/**
+ * Represents a "less than" comparison (lhs < rhs).
+ * @param left The left-hand side of the comparison (column, value, or SQL).
+ * @param right The right-hand side of the comparison (column, value, or SQL).
+ */
+export function lt(left: FunctionArg, right: FunctionArg): SQL {
+  return sql`${left} < ${right}`;
+}
+
+/**
+ * Represents a "less than or equal to" comparison (lhs <= rhs).
+ * @param left The left-hand side of the comparison (column, value, or SQL).
+ * @param right The right-hand side of the comparison (column, value, or SQL).
+ */
+export function lte(left: FunctionArg, right: FunctionArg): SQL {
+  return sql`${left} <= ${right}`;
+}
+
+/**
+ * Combines multiple SQL conditions with an AND operator.
+ * Undefined conditions are filtered out.
+ * @param conditions An array of SQL conditions.
+ */
+export function and(...conditions: (SQL | undefined)[]): SQL | undefined {
+  const filteredConditions = conditions.filter(
+    (c): c is SQL => c !== undefined
+  );
+  if (filteredConditions.length === 0) {
+    return undefined;
+  }
+  if (filteredConditions.length === 1) {
+    return filteredConditions[0];
+  }
+
+  // To ensure correct precedence, wrap each condition in parentheses if it's complex,
+  // but the `sql` template literal should handle parameters correctly.
+  // For joining, we construct the string manually to intersperse 'AND'.
+  // The `sql` tag will then process the whole thing.
+  // Example: sql`(${cond1}) AND (${cond2}) AND (${cond3})`
+  // We need to build the template strings array and values array for the sql tag.
+
+  const queryParts: string[] = ["("];
+  const values: unknown[] = [];
+
+  filteredConditions.forEach((condition, index) => {
+    queryParts.push(""); // Placeholder for the condition
+    values.push(condition);
+    if (index < filteredConditions.length - 1) {
+      queryParts.push(") AND (");
+    } else {
+      queryParts.push(")");
+    }
+  });
+
+  // The TemplateStringsArray needs one more element than the values array.
+  // If queryParts is ["(", "", ") AND (", "", ")"], strings should be ["(", ") AND (", ")"]
+  // This manual construction is a bit tricky. Let's simplify.
+  // Drizzle's approach is `sql.join(conditions, sql` and `)` - we can emulate this.
+
+  if (filteredConditions.length === 0) return undefined;
+  if (filteredConditions.length === 1) return filteredConditions[0];
+
+  // Create a new SQL object that joins the conditions
+  return {
+    _isSQL: true,
+    getValues: (dialect: Dialect): unknown[] => {
+      const allValues: unknown[] = [];
+      filteredConditions.forEach((cond) => {
+        allValues.push(...cond.getValues(dialect));
+      });
+      return allValues;
+    },
+    toSqlString: (
+      dialect: Dialect,
+      currentParamIndex?: { value: number },
+      aliasMap?: Map<string, string>
+    ): string => {
+      return filteredConditions
+        .map(
+          (cond) =>
+            `(${cond.toSqlString(dialect, currentParamIndex, aliasMap)})`
+        )
+        .join(" AND ");
+    },
+  };
+}
+
+/**
+ * Combines multiple SQL conditions with an OR operator.
+ * Undefined conditions are filtered out.
+ * @param conditions An array of SQL conditions.
+ */
+export function or(...conditions: (SQL | undefined)[]): SQL | undefined {
+  const filteredConditions = conditions.filter(
+    (c): c is SQL => c !== undefined
+  );
+  if (filteredConditions.length === 0) {
+    return undefined;
+  }
+  if (filteredConditions.length === 1) {
+    return filteredConditions[0];
+  }
+
+  return {
+    _isSQL: true,
+    getValues: (dialect: Dialect): unknown[] => {
+      const allValues: unknown[] = [];
+      filteredConditions.forEach((cond) => {
+        allValues.push(...cond.getValues(dialect));
+      });
+      return allValues;
+    },
+    toSqlString: (
+      dialect: Dialect,
+      currentParamIndex?: { value: number },
+      aliasMap?: Map<string, string>
+    ): string => {
+      return filteredConditions
+        .map(
+          (cond) =>
+            `(${cond.toSqlString(dialect, currentParamIndex, aliasMap)})`
+        )
+        .join(" OR ");
+    },
+  };
+}
+
+/**
+ * Negates an SQL condition using NOT.
+ * @param condition The SQL condition to negate.
+ */
+export function not(condition: SQL): SQL {
+  // Drizzle's `not` returns `sql`NOT (${condition})`
+  // We need to ensure the `sql` tag handles the `condition` object correctly.
+  return {
+    _isSQL: true,
+    getValues: (dialect: Dialect): unknown[] => {
+      return condition.getValues(dialect);
+    },
+    toSqlString: (
+      dialect: Dialect,
+      currentParamIndex?: { value: number },
+      aliasMap?: Map<string, string>
+    ): string => {
+      return `NOT (${condition.toSqlString(
+        dialect,
+        currentParamIndex,
+        aliasMap
+      )})`;
     },
   };
 }
