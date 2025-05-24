@@ -389,20 +389,32 @@ async function runConditionExamples(db: OrmClient) {
 
   // Example 3: Greater than (gt)
   // Assuming 'posts' has a 'viewCount' column
-  // const popularPosts = await db.select().from(posts).where(gt(posts.viewCount, 1000));
-  // console.log("Popular Posts:", popularPosts);
+  const popularPosts = await db
+    .select()
+    .from(posts)
+    .where(gt(posts.viewCount, 1000));
+  console.log("Popular Posts:", popularPosts);
 
   // Example 4: Greater than or equal to (gte)
-  // const postsGte100 = await db.select().from(posts).where(gte(posts.viewCount, 100));
-  // console.log("Posts with >= 100 views:", postsGte100);
+  const postsGte100 = await db
+    .select()
+    .from(posts)
+    .where(gte(posts.viewCount, 100));
+  console.log("Posts with >= 100 views:", postsGte100);
 
   // Example 5: Less than (lt)
-  // const unpopularPosts = await db.select().from(posts).where(lt(posts.viewCount, 10));
-  // console.log("Unpopular Posts:", unpopularPosts);
+  const unpopularPosts = await db
+    .select()
+    .from(posts)
+    .where(lt(posts.viewCount, 10));
+  console.log("Unpopular Posts:", unpopularPosts);
 
   // Example 6: Less than or equal to (lte)
-  // const postsLte10 = await db.select().from(posts).where(lte(posts.viewCount, 10));
-  // console.log("Posts with <= 10 views:", postsLte10);
+  const postsLte10 = await db
+    .select()
+    .from(posts)
+    .where(lte(posts.viewCount, 10));
+  console.log("Posts with <= 10 views:", postsLte10);
 
   // Example 7: AND operator
   const specificUser = await db
