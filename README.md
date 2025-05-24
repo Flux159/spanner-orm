@@ -45,7 +45,7 @@ Read the published docs [here](https://flux159.github.io/spanner-orm) to get sta
 
 In today's diverse application landscape, developers often need to target multiple database backends. You might start with Pglite for rapid prototyping or local-first applications, move to PostgreSQL for self-hosted or managed deployments, and eventually require the massive scalability and global consistency of Google Spanner. `spanner-orm` addresses the critical challenge of managing data models and queries across these different systems without rewriting your data access layer.
 
-Currently, the Node.js/Bun ecosystem lacks a dedicated ORM that elegantly bridges PostgreSQL and Google Spanner with a single, consistent object model and a unified migration strategy. `spanner-orm` fills this gap by:
+The Node.js & Bun ecosystem lacked a dedicated ORM that elegantly bridges PostgreSQL and Google Spanner with a single, consistent object model and a unified migration strategy. `spanner-orm` fills this gap by:
 
 - **Enabling a Single Codebase:** Define your schema and write your queries once. `spanner-orm` handles the dialect-specific SQL generation.
 - **Streamlining Development & Deployment:** Simplify the transition between local development (Pglite/Postgres), testing, and production environments (Spanner or Postgres).
@@ -129,16 +129,14 @@ bun add pg @google-cloud/spanner @electric-sql/pglite # Install all, or pick the
       integer,
       boolean,
       jsonb,
-      uuid, // New uuid helper
+      uuid,
       index,
       uniqueIndex,
       sql,
-    } from "spanner-orm"; // Adjust import path as per your project structure
-    // No need to import crypto here if uuid() handles it internally via $defaultFn
+    } from "spanner-orm";
 
-    // --- Define a placeholder 'users' table for demonstrating references ---
     export const users = table("users", {
-      id: uuid("id").primaryKey(), // Using the new uuid helper
+      id: uuid("id").primaryKey(),
       email: text("email").notNull().unique(),
       name: text("name"),
       // ... other user fields
@@ -156,18 +154,18 @@ bun add pg @google-cloud/spanner @electric-sql/pglite # Install all, or pick the
         .notNull(),
     };
 
-    // Base model with ID (using uuid helper) and timestamps
+    // Base model with ID and timestamps
     export const baseModel = {
-      id: uuid("id").primaryKey(), // Automatically uses $defaultFn(() => crypto.randomUUID())
+      id: uuid("id").primaryKey(),
       ...timestamps,
     };
 
     // For resources that are owned by a user
     export const ownableResource = {
       ...baseModel,
-      userId: uuid("user_id") // Assuming user_id is also a UUID
+      userId: uuid("user_id")
         .notNull()
-        .references(() => users.id, { onDelete: "cascade" }), // Changed to users.id
+        .references(() => users.id, { onDelete: "cascade" }),
     };
 
     // For resources that have visibility permissions
@@ -178,7 +176,7 @@ bun add pg @google-cloud/spanner @electric-sql/pglite # Install all, or pick the
       visibility: varchar("visibility", { length: 10 }) // e.g., 'private', 'shared', 'public'
         .default("private")
         .notNull()
-        .$type<VisibilityStatus>(), // For type assertion if needed, or rely on TS inference
+        .$type<VisibilityStatus>(), // For type assertion if needed
     };
 
     // --- Example Table: Uploads (using shared components) ---
@@ -209,29 +207,9 @@ bun add pg @google-cloud/spanner @electric-sql/pglite # Install all, or pick the
     // You can then use these definitions to generate DDL or build queries.
     ```
 
-    This example demonstrates how you can compose schemas from shared building blocks, similar to patterns used in Drizzle ORM, and showcases the usage of new features like `uuid()` and `$defaultFn()` (implicitly used by `uuid()`).
-    _(Note: The import paths and exact feature set of `spanner-orm` should be adjusted based on the library's actual implementation as development progresses.)_
+    This example demonstrates how you can compose schemas from shared building blocks, similar to patterns used in Drizzle ORM, and showcases the usage of new features like `uuid()`.
 
 ## Usage Examples
-
-### Generating DDL with the CLI
-
-Once you have defined your schema (e.g., in `src/schema.ts`), you can generate DDL for PostgreSQL or Spanner:
-
-```bash
-# Ensure the project is built (bun run build)
-# The CLI will be available via the 'bin' script in package.json
-
-# Generate PostgreSQL DDL
-npx spanner-orm-cli ddl --schema ./path/to/your/schema.js --dialect postgres
-
-# Generate Spanner DDL
-npx spanner-orm-cli ddl --schema ./dist/schema.js --dialect spanner
-```
-
-This will print the generated `CREATE TABLE` statements to standard output or the specified file.
-
-Note if you're using bunx, you can write your schema files in Typescript without having to compile them to JS.
 
 ### Managing Migrations with the CLI
 
@@ -239,11 +217,10 @@ The CLI also provides tools to manage your database schema migrations. Migration
 
 **1. Create a new migration:**
 
-This command generates a single timestamped migration file (e.g., `YYYYMMDDHHMMSS-add-posts-table.ts`) containing dialect-specific `up` and `down` functions (e.g., `migratePostgresUp`, `migrateSpannerUp`, `migratePostgresDown`, `migrateSpannerDown`).
+This command generates a single timestamped migration file (e.g., `YYYYMMDDHHMMSS-add-posts-table.ts`) containing dialect-specific `up` and `down` functions.
 
 ```bash
 # Example: Create a migration file for adding a 'posts' table
-# This requires your schema file (e.g., dist/schema.js) to be built and specified.
 npx spanner-orm-cli migrate create add-posts-table --schema ./dist/schema.js
 
 # This will create a file like:
@@ -258,22 +235,14 @@ This command applies all pending migrations to your database for the specified d
 (Requires database connection to be configured - e.g., via environment variables, specific adapter setup needed).
 
 ```bash
-# Apply latest migrations (dialect determined by DB_DIALECT environment variable)
-# Example: export DB_DIALECT=postgres
-#          export DATABASE_URL=postgresql://user:pass@host:port/db
-npx spanner-orm-cli migrate latest --schema ./dist/schema.js
+# Apply latest migrations to postgres database (dialect determined by DB_DIALECT environment variable)
+npx spanner-orm-cli migrate latest --schema ./dist/schema.js DB_DIALECT=postgres DATABASE_URL=postgresql://user:pass@host:port/db
 
 # Apply latest migrations for pglite - use postgres dialect with a local file for DATABASE_URL
-# export DB_DIALECT=postgres
-# export DATABASE_URL="./spannerormtest.db"
-npx spanner-orm-cli migrate latest --schema ./dist/schema.js
+npx spanner-orm-cli migrate latest --schema ./dist/schema.js DB_DIALECT=postgres DATABASE_URL="./spannerormtest.db"
 
-# Example for Spanner:
-# export DB_DIALECT=spanner
-# export SPANNER_PROJECT_ID=my-gcp-project
-# export SPANNER_INSTANCE_ID=my-spanner-instance
-# export SPANNER_DATABASE_ID=my-spanner-database
-npx spanner-orm-cli migrate latest --schema ./dist/schema.js
+# Example for Spanner
+npx spanner-orm-cli migrate latest --schema ./dist/schema.js DB_DIALECT=spanner SPANNER_PROJECT_ID=my-gcp-project SPANNER_INSTANCE_ID=my-spanner-instance SPANNER_DATABASE_ID=my-spanner-database
 ```
 
 **3. Revert the last applied migration:**
@@ -285,7 +254,7 @@ This command reverts the last applied migration (dialect determined by `DB_DIALE
 npx spanner-orm-cli migrate down --schema ./dist/schema.js
 ```
 
-_(Note: The migration CLI commands `migrate latest` and `migrate down` now use environment variables such as `DB_DIALECT`, `DATABASE_URL` (for PG/Pglite), and Spanner-specific variables like `SPANNER_PROJECT_ID`, `SPANNER_INSTANCE_ID`, `SPANNER_DATABASE_ID` to connect to your database and apply/revert migrations.)_
+_(Note: The migration CLI commands `migrate latest` and `migrate down` use environment variables such as `DB_DIALECT`, `DATABASE_URL` (for PG/Pglite), and Spanner-specific variables like `SPANNER_PROJECT_ID`, `SPANNER_INSTANCE_ID`, `SPANNER_DATABASE_ID` to connect to your database and apply/revert migrations.)_
 
 ### Querying Examples with Fluent API (`db` object)
 
@@ -294,26 +263,23 @@ The `OrmClient` (typically instantiated as `db`) provides a fluent, chainable AP
 ```typescript
 import { OrmClient, sql, users, posts, count } from "spanner-orm";
 // Assuming 'users' and 'posts' tables are defined in your schema (e.g., from './schema.ts')
-// And 'count' is an aggregate function from 'spanner-orm/functions'
 
-// Example: Initialize with a Pglite adapter
+// Example: Initialize with a Pglite adapter in a module then reuse across app
 // import { PGlite } from "@electric-sql/pglite";
 // import { PgliteAdapter } from "spanner-orm"; // Or your specific adapter
-// const pglite = new PGlite(); // In-memory
+// const pglite = new PGlite(); // In-memory, can also pass folder path to persist to disk
 // const adapter = new PgliteAdapter(pglite);
 // const db = new OrmClient(adapter, "postgres"); // 'postgres' is the dialect for PGlite
 
 async function runFluentExamples(db: OrmClient) {
   // 1. Basic SELECT with WHERE, ORDER BY, LIMIT
   const recentUsers = await db
-    .select({ id: users.id, name: users.name }) // Changed to direct access
+    .select({ id: users.id, name: users.name })
     .from(users)
     .where(
-      sql`${users.createdAt} > ${new Date( // Changed to direct access
-        Date.now() - 24 * 60 * 60 * 1000
-      )}`
+      sql`${users.createdAt} > ${new Date(Date.now() - 24 * 60 * 60 * 1000)}`
     )
-    .orderBy(users.createdAt, "DESC") // Changed to direct access
+    .orderBy(users.createdAt, "DESC")
     .limit(10);
   console.log("Recent Users:", recentUsers);
   // recentUsers is typed as: Array<{ id: string; name: string; }> (assuming id is uuid/string)
@@ -328,16 +294,16 @@ async function runFluentExamples(db: OrmClient) {
   const updateResult = await db
     .update(users)
     .set({ name: "Alice in Chains" })
-    .where(sql`${users.email} = ${"alice@example.com"}`); // Changed to direct access
+    .where(sql`${users.email} = ${"alice@example.com"}`);
   console.log("Update Result:", updateResult); // e.g., { count: 1 }
 
   // 4. SELECT with Eager Loading (include)
   // Assuming 'posts' table has a 'userId' column referencing 'users.id'
   // And your schema definitions correctly set up this relation for the ORM to understand.
   const usersWithPosts = await db
-    .select({ id: users.id, userName: users.name }) // Changed to direct access
+    .select({ id: users.id, userName: users.name })
     .from(users)
-    .where(sql`${users.email} = ${"alice@example.com"}`) // Changed to direct access
+    .where(sql`${users.email} = ${"alice@example.com"}`)
     .include({
       posts: {
         // 'posts' is the relation name defined in your schema or inferred
@@ -352,7 +318,7 @@ async function runFluentExamples(db: OrmClient) {
   // 5. DELETE a user
   const deleteResult = await db
     .deleteFrom(users)
-    .where(sql`${users.email} = ${"alice@example.com"}`); // Changed to direct access
+    .where(sql`${users.email} = ${"alice@example.com"}`);
   console.log("Delete Result:", deleteResult); // e.g., { count: 1 }
 
   // 6. Raw SQL Query
@@ -364,9 +330,9 @@ async function runFluentExamples(db: OrmClient) {
   // 7. Transaction Example
   await db.transaction(async (txDb) => {
     const user = await txDb
-      .select({ id: users.id }) // Changed to direct access
+      .select({ id: users.id })
       .from(users)
-      .where(sql`${users.name} = ${"Bob The Builder"}`) // Changed to direct access
+      .where(sql`${users.name} = ${"Bob The Builder"}`)
       .limit(1);
 
     if (user.length > 0) {
@@ -388,6 +354,24 @@ async function runFluentExamples(db: OrmClient) {
 // runFluentExamples(db).catch(console.error);
 ```
 
+## Advanced
+
+### Generating DDL manually with the CLI
+
+Once you have defined your schema (e.g., in `src/schema.ts`), you can generate DDL for PostgreSQL or Spanner:
+
+```bash
+# Generate PostgreSQL DDL
+npx spanner-orm-cli ddl --schema ./path/to/your/schema.js --dialect postgres
+
+# Generate Spanner DDL
+npx spanner-orm-cli ddl --schema ./dist/schema.js --dialect spanner
+```
+
+This will print the generated `CREATE TABLE` statements to standard output or the specified file.
+
+Note if you're using bunx, you can write your schema files in Typescript without having to compile them to JS.
+
 ### Querying Examples with `QueryBuilder` (Lower-Level)
 
 Here's how you can use the `QueryBuilder` to construct and execute queries. This is a lower-level API compared to the `db` object and requires manual execution via a database adapter.
@@ -407,14 +391,12 @@ async function runQueryBuilderExamples(adapter) {
 
   // 1. Basic SELECT with WHERE
   const recentUsersQuery = new QueryBuilder() // Create a new QB for each query
-    .select({ id: users.id, name: users.name }) // Changed to direct access
+    .select({ id: users.id, name: users.name })
     .from(users)
     .where(
-      sql`${users.createdAt} > ${new Date( // Changed to direct access
-        Date.now() - 24 * 60 * 60 * 1000
-      )}`
+      sql`${users.createdAt} > ${new Date(Date.now() - 24 * 60 * 60 * 1000)}`
     )
-    .orderBy(users.createdAt, "DESC") // Changed to direct access
+    .orderBy(users.createdAt, "DESC")
     .limit(10);
 
   const recentUsersPrepared = recentUsersQuery.prepare(adapter.dialect);
@@ -427,5 +409,3 @@ async function runQueryBuilderExamples(adapter) {
 
 // runQueryBuilderExamples(adapter).catch(console.error);
 ```
-
-These examples illustrate how to perform common database operations. The actual execution would depend on your specific database adapter setup.
