@@ -205,6 +205,23 @@ bun add pg @google-cloud/spanner @electric-sql/pglite # Install all, or pick the
       })
     );
 
+    // Example with composite primary keys
+    export const myTableWithCompositePk = table(
+      "my_table",
+      {
+        partOne: text("part_one").notNull(),
+        partTwo: integer("part_two").notNull(),
+        data: text("data"),
+      },
+      (t) => ({
+        // 't' provides access to the defined columns like t.partOne, t.partTwo
+        primaryKey: {
+          columns: [t.partOne.name, t.partTwo.name], // Use .name to get the actual column name string
+          name: "my_table_pk", // Optional constraint name
+        },
+      })
+    );
+
     // You can then use these definitions to generate DDL or build queries.
     ```
 
