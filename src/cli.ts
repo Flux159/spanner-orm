@@ -15,20 +15,22 @@ import {
   generateMigrationDDL, // Still used by handleDdlGeneration
   generateCombinedMigrationFileContent,
 } from "./core/migration-generator.js";
-import {
-  MIGRATION_TABLE_NAME,
-  getCreateMigrationTableDDL,
-  getAppliedMigrationNames,
-  recordMigrationApplied,
-  recordMigrationReverted, // Now needed for migrate down
-} from "./core/migration-meta.js";
+// Unused migration-meta imports removed as this logic is now in migration-runner.ts
+// import {
+//   MIGRATION_TABLE_NAME,
+//   getCreateMigrationTableDDL,
+//   getAppliedMigrationNames,
+//   recordMigrationApplied,
+//   recordMigrationReverted,
+// } from "./core/migration-meta.js";
 import type {
   TableConfig,
   Dialect,
   SchemaSnapshot, // Added
-  MigrationExecutor, // Now needed
+  // MigrationExecutor, // No longer needed here
   // Dialect, // Removed duplicate
 } from "./types/common.js";
+import { OrmClient } from "./client.js"; // Added for programmatic migration
 
 const MIGRATIONS_DIR = "spanner-orm-migrations";
 const SNAPSHOT_FILENAME = "latest.snapshot.json"; // Added for snapshot management
@@ -349,113 +351,22 @@ async function handleMigrateLatest(options: MigrateLatestOptions) {
     console.error("Failed to initialize database adapter. Exiting.");
     process.exit(1);
   }
-  const dialect = adapter.dialect;
+  const dialect = adapter.dialect; // Keep dialect for logging
   console.log(
     `Starting 'migrate latest' for dialect: ${dialect} using schema: ${schemaPath}`
   );
 
-  const executeCmdSql = adapter.execute.bind(adapter);
-  const queryRowsSql = adapter.query.bind(adapter);
+  // Create an OrmClient instance to use the new migrateLatest method
+  const db = new OrmClient(adapter, dialect);
 
   try {
+    // The migrationsPath option is not strictly needed here if we rely on the default
+    // MIGRATIONS_DIR, which is what the CLI implicitly uses.
+    // The OrmClient.migrateLatest method will use its default if options.migrationsPath is undefined.
+    await db.migrateLatest({ migrationsPath: MIGRATIONS_DIR });
     console.log(
-      `Ensuring migration tracking table '${MIGRATION_TABLE_NAME}' exists...`
+      "CLI: All pending migrations applied successfully via OrmClient."
     );
-    const createTableDdlStatements = getCreateMigrationTableDDL(dialect);
-    for (const ddl of createTableDdlStatements) {
-      try {
-        await executeCmdSql(ddl);
-      } catch (error: any) {
-        if (
-          (dialect === "spanner" &&
-            error.message &&
-            error.message.includes("AlreadyExists")) ||
-          (dialect === "postgres" &&
-            error.message &&
-            error.message.includes("already exists"))
-        ) {
-          console.log(
-            `Migration table '${MIGRATION_TABLE_NAME}' already exists.`
-          );
-        } else {
-          throw error;
-        }
-      }
-    }
-    console.log("Migration tracking table check complete.");
-
-    const appliedMigrationNames = await getAppliedMigrationNames(
-      queryRowsSql,
-      dialect
-    );
-    console.log(
-      "Applied migrations:",
-      appliedMigrationNames.length > 0 ? appliedMigrationNames : "None"
-    );
-
-    await ensureMigrationsDirExists();
-    const allMigrationFiles = await fs.readdir(MIGRATIONS_DIR);
-    const migrationFileSuffix = ".ts";
-
-    const pendingMigrations = allMigrationFiles
-      .filter(
-        (file) =>
-          file.endsWith(migrationFileSuffix) &&
-          !file.endsWith(".pg.ts") && // Exclude old pg-specific format
-          !file.endsWith(".spanner.ts") && // Exclude old spanner-specific format
-          !appliedMigrationNames.includes(
-            file.replace(migrationFileSuffix, "")
-          ) &&
-          file !== SNAPSHOT_FILENAME // Exclude snapshot file
-      )
-      .sort();
-
-    if (pendingMigrations.length === 0) {
-      console.log("No pending migrations to apply.");
-      return;
-    }
-
-    console.log(
-      `Found ${pendingMigrations.length} pending migrations:`,
-      pendingMigrations
-    );
-
-    for (const migrationFile of pendingMigrations) {
-      const migrationName = migrationFile.replace(migrationFileSuffix, "");
-      console.log(`Applying migration: ${migrationFile}...`);
-      const migrationPath = path.join(
-        process.cwd(),
-        MIGRATIONS_DIR,
-        migrationFile
-      );
-
-      try {
-        const migrationModule = (await import(migrationPath)) as Record<
-          string,
-          MigrationExecutor
-        >;
-
-        const upFunctionName =
-          dialect === "postgres" ? "migratePostgresUp" : "migrateSpannerUp";
-        const upFunction: MigrationExecutor | undefined =
-          migrationModule[upFunctionName];
-
-        if (typeof upFunction !== "function") {
-          throw new Error(
-            `Migration file ${migrationFile} does not export a suitable '${upFunctionName}' function for dialect ${dialect}.`
-          );
-        }
-        await upFunction(executeCmdSql, dialect);
-        await recordMigrationApplied(executeCmdSql, migrationName, dialect);
-        console.log(`Successfully applied migration: ${migrationFile}`);
-      } catch (error) {
-        console.error(`Failed to apply migration ${migrationFile}:`, error);
-        console.error("Migration process halted due to error.");
-        process.exit(1);
-      }
-    }
-
-    console.log("All pending migrations applied successfully.");
   } catch (error) {
     console.error("Error during migration process:", error);
     process.exit(1);
@@ -476,74 +387,18 @@ async function handleMigrateDown(options: MigrateDownOptions) {
     console.error("Failed to initialize database adapter. Exiting.");
     process.exit(1);
   }
-  const dialect = adapter.dialect;
+  const dialect = adapter.dialect; // Keep dialect for logging
   console.log(
     `Starting 'migrate down' for dialect: ${dialect} using schema: ${schemaPath}`
   );
 
-  const executeCmdSql = adapter.execute.bind(adapter);
-  const queryRowsSql = adapter.query.bind(adapter);
+  // Create an OrmClient instance to use the new migrateDown method
+  const db = new OrmClient(adapter, dialect);
 
   try {
-    const appliedMigrationNames = await getAppliedMigrationNames(
-      queryRowsSql,
-      dialect
-    );
-
-    if (appliedMigrationNames.length === 0) {
-      console.log(
-        "No migrations have been applied for this dialect. Nothing to revert."
-      );
-      return;
-    }
-
-    const lastMigrationName =
-      appliedMigrationNames[appliedMigrationNames.length - 1];
-
-    const migrationFileSuffix = ".ts";
-    const migrationFile = `${lastMigrationName}${migrationFileSuffix}`;
-    console.log(`Attempting to revert migration: ${migrationFile}...`);
-
-    const migrationPath = path.join(
-      process.cwd(),
-      MIGRATIONS_DIR,
-      migrationFile
-    );
-
-    if (!(await fs.stat(migrationPath).catch(() => false))) {
-      console.error(
-        `Migration file ${migrationFile} not found in ./${MIGRATIONS_DIR}. Cannot revert.`
-      );
-      console.error(
-        `This might indicate an issue with the migration log or missing migration files.`
-      );
-      process.exit(1);
-    }
-
-    try {
-      const migrationModule = (await import(migrationPath)) as Record<
-        string,
-        MigrationExecutor
-      >;
-      const downFunctionName =
-        dialect === "postgres" ? "migratePostgresDown" : "migrateSpannerDown";
-      const downFunction: MigrationExecutor | undefined =
-        migrationModule[downFunctionName];
-
-      if (typeof downFunction !== "function") {
-        throw new Error(
-          `Migration file ${migrationFile} does not export a suitable '${downFunctionName}' function for dialect ${dialect}.`
-        );
-      }
-
-      await downFunction(executeCmdSql, dialect);
-      await recordMigrationReverted(executeCmdSql, lastMigrationName, dialect);
-      console.log(`Successfully reverted migration: ${migrationFile}`);
-    } catch (error) {
-      console.error(`Failed to revert migration ${migrationFile}:`, error);
-      console.error("Migration down process halted due to error.");
-      process.exit(1);
-    }
+    // Similar to migrateLatest, using the default MIGRATIONS_DIR.
+    await db.migrateDown({ migrationsPath: MIGRATIONS_DIR });
+    console.log("CLI: Last migration successfully reverted via OrmClient.");
   } catch (error) {
     console.error("Error during migrate down process:", error);
     process.exit(1);
