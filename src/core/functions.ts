@@ -157,6 +157,124 @@ export function lower(value: ColumnConfig<any, any> | string | SQL): SQL {
   };
 }
 
+// --- Condition Functions ---
+
+/**
+ * Helper type for arguments to condition functions.
+ * Can be a column, a literal value, or another SQL object.
+ */
+export type ConditionArg =
+  | ColumnConfig<any, any>
+  | string
+  | number
+  | boolean
+  | Date
+  | SQL;
+
+/**
+ * Test that two values are equal.
+ * Example: eq(cars.make, 'Ford')
+ */
+export const eq = (left: ConditionArg, right: ConditionArg): SQL =>
+  sql`(${left}) = ${right}`;
+
+/**
+ * Test that two values are not equal.
+ * Example: ne(cars.make, 'Ford')
+ */
+export const ne = (left: ConditionArg, right: ConditionArg): SQL =>
+  sql`(${left}) <> ${right}`;
+
+/**
+ * Test that the first expression is greater than the second.
+ * Example: gt(cars.year, 2000)
+ */
+export const gt = (left: ConditionArg, right: ConditionArg): SQL =>
+  sql`(${left}) > ${right}`;
+
+/**
+ * Test that the first expression is greater than or equal to the second.
+ * Example: gte(cars.year, 2000)
+ */
+export const gte = (left: ConditionArg, right: ConditionArg): SQL =>
+  sql`(${left}) >= ${right}`;
+
+/**
+ * Test that the first expression is less than the second.
+ * Example: lt(cars.year, 2000)
+ */
+export const lt = (left: ConditionArg, right: ConditionArg): SQL =>
+  sql`(${left}) < ${right}`;
+
+/**
+ * Test that the first expression is less than or equal to the second.
+ * Example: lte(cars.year, 2000)
+ */
+export const lte = (left: ConditionArg, right: ConditionArg): SQL =>
+  sql`(${left}) <= ${right}`;
+
+/**
+ * Negate the meaning of an expression using the `NOT` keyword.
+ * Example: not(eq(cars.make, 'Ford'))
+ */
+export const not = (condition: SQL): SQL => sql`NOT (${condition})`;
+
+/**
+ * Combine a list of conditions with the `AND` operator.
+ * Conditions that are `undefined` are automatically ignored.
+ * Example: and(eq(cars.make, 'Volvo'), eq(cars.year, 1950))
+ */
+export function and(...conditions: (SQL | undefined)[]): SQL | undefined {
+  const validConditions = conditions.filter((c): c is SQL => c !== undefined);
+  if (validConditions.length === 0) {
+    return undefined;
+  }
+  if (validConditions.length === 1) {
+    return validConditions[0];
+  }
+
+  const templateParts: string[] = ["("];
+  const values: SQL[] = [];
+
+  validConditions.forEach((condition, index) => {
+    values.push(condition);
+    if (index < validConditions.length - 1) {
+      templateParts.push(" AND ");
+    }
+  });
+  templateParts.push(")");
+
+  return sql(templateParts as unknown as TemplateStringsArray, ...values);
+}
+
+/**
+ * Combine a list of conditions with the `OR` operator.
+ * Conditions that are `undefined` are automatically ignored.
+ * Example: or(eq(cars.make, 'GM'), eq(cars.make, 'Ford'))
+ */
+export function or(...conditions: (SQL | undefined)[]): SQL | undefined {
+  const validConditions = conditions.filter((c): c is SQL => c !== undefined);
+  if (validConditions.length === 0) {
+    return undefined;
+  }
+  if (validConditions.length === 1) {
+    return validConditions[0];
+  }
+
+  const templateParts: string[] = ["("];
+  const values: SQL[] = [];
+
+  validConditions.forEach((condition, index) => {
+    values.push(condition);
+    if (index < validConditions.length - 1) {
+      templateParts.push(" OR ");
+    }
+  });
+  templateParts.push(")");
+
+  return sql(templateParts as unknown as TemplateStringsArray, ...values);
+}
+
 /**
  * Represents the UPPER SQL function.
  * @param value A column configuration, literal string, or SQL object to convert to uppercase.
