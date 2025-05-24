@@ -16,6 +16,10 @@ import type {
 } from "./types/common.js";
 import { QueryBuilder } from "./core/query-builder.js";
 import { shapeResults } from "./core/result-shaper.js";
+import {
+  runPendingMigrations,
+  revertLastMigration,
+} from "./core/migration-runner.js"; // Added for programmatic migrations
 
 // AffectedRows is now imported from adapter.js, so remove local definition
 // export interface AffectedRows {
@@ -280,6 +284,34 @@ export class OrmClient {
     public adapter: DatabaseAdapter, // Made public for direct access if needed
     public dialect: Dialect // Made public for direct access if needed
   ) {}
+
+  /**
+   * Applies all pending migrations.
+   * @param options Optional parameters.
+   * @param options.migrationsPath Path to the migrations directory. Defaults to "./spanner-orm-migrations".
+   */
+  async migrateLatest(options?: { migrationsPath?: string }): Promise<void> {
+    // Default migrationsPath can be handled by runPendingMigrations itself
+    await runPendingMigrations(
+      this.adapter,
+      this.dialect,
+      options?.migrationsPath
+    );
+  }
+
+  /**
+   * Reverts the last applied migration.
+   * @param options Optional parameters.
+   * @param options.migrationsPath Path to the migrations directory. Defaults to "./spanner-orm-migrations".
+   */
+  async migrateDown(options?: { migrationsPath?: string }): Promise<void> {
+    // Default migrationsPath can be handled by revertLastMigration itself
+    await revertLastMigration(
+      this.adapter,
+      this.dialect,
+      options?.migrationsPath
+    );
+  }
 
   select<
     TPrimaryTable extends TableConfig,
