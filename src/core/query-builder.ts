@@ -6,9 +6,13 @@ import type {
   InferModelType,
   Dialect,
   IncludeClause, // Old type, kept for include() method parameter for now
+  IncludeRelationOptions, // Added
   EnhancedIncludeClause, // New type
   PreparedQuery,
   ReturningObject,
+  Table, // Added
+  TypedIncludeRelationOptions, // Added
+  EnhancedIncludeClauseEntry, // Added
   // ReturningColumnSpec, // Not directly used as type annotation here
 } from "../types/common.js";
 import { sql } from "../types/common.js";
@@ -228,7 +232,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     return this;
   }
 
-  include(clause: IncludeClause): this {
+  include(clause: IncludeClause | EnhancedIncludeClause): this {
     if (this._operationType && this._operationType !== "select") {
       throw new Error(
         `Cannot call .include() for an '${this._operationType}' operation.`
@@ -237,19 +241,41 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     if (!this._operationType) this._operationType = "select";
 
     const currentEnhancedInclude = this._includeClause || {};
-    for (const [relationName, relationOptions] of Object.entries(clause)) {
-      const relatedTable = getTableConfig(relationName);
-      if (!relatedTable) {
+
+    for (const [relationName, relationValue] of Object.entries(clause)) {
+      let targetTable: TableConfig<any, any> | Table<any, any> | undefined;
+      let selectOptions: TypedIncludeRelationOptions<any>; // 'any' here is a placeholder, will be inferred
+
+      // Check if relationValue directly provides relationTable (like EnhancedIncludeClauseEntry)
+      if (
+        typeof relationValue === "object" &&
+        relationValue !== null &&
+        "relationTable" in relationValue &&
+        relationValue.relationTable // Ensure it's not undefined
+      ) {
+        // Input is like: { user: { relationTable: usersTableConfig, options: true } }
+        // or { user: { relationTable: usersTableConfig, options: { select: { name: true } } } }
+        const entry = relationValue as EnhancedIncludeClauseEntry<any>;
+        targetTable = entry.relationTable;
+        selectOptions = entry.options;
+      } else {
+        // Input is like: { user: true } or { user: { select: { name: true } } } (original IncludeClause)
+        targetTable = getTableConfig(relationName);
+        selectOptions = relationValue as IncludeRelationOptions; // Cast to the simpler options type
+      }
+
+      if (!targetTable) {
         console.warn(
-          `QueryBuilder: Table configuration for relation "${relationName}" not found. Skipping include.`
+          `QueryBuilder: Table configuration for relation "${relationName}" not found or not provided. Skipping include.`
         );
         continue;
       }
-      // The relationOptions (boolean | {select?: Record<string, boolean>})
-      // is compatible with TypedIncludeRelationOptions
+
+      // Ensure selectOptions is in the TypedIncludeRelationOptions format
+      // If it was a simple boolean, it's fine. If it was {select: ...}, it's also fine.
       currentEnhancedInclude[relationName] = {
-        relationTable: relatedTable,
-        options: relationOptions as EnhancedIncludeClause[string]["options"],
+        relationTable: targetTable,
+        options: selectOptions,
       };
     }
     this._includeClause = currentEnhancedInclude;
@@ -1440,6 +1466,15 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
             ? `"${tableAlias}"."${colConfig.name}"`
             : `\`${tableAlias}\`.\`${colConfig.name}\``;
         } else {
+          // This case implies _targetTableAlias was also not set, which would be unusual.
+          // Using an unqualified column name here is a fallback but can be ambiguous.
+          console.warn(
+            `QueryBuilder: Alias for GROUP BY column '${
+              colConfig.name
+            }' could not be determined (table: ${
+              colConfig._tableName || "unknown/primary"
+            }). Using unqualified name. This might lead to SQL errors if the column name is ambiguous.`
+          );
           return dialect === "postgres"
             ? `"${colConfig.name}"`
             : `\`${colConfig.name}\``;
