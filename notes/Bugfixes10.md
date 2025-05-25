@@ -275,3 +275,19 @@ return { items, total, page, limit };
 }
 
 We want to ensure that this can work correctly for users making these style of list queries.
+
+Fix up this error:
+
+Error fetching posts: 322 | const colConfig = field;
+323 | const tableAlias = colConfig.\_tableName
+324 | ? aliasMap.get(colConfig.\_tableName)
+325 | : this.\_targetTableAlias;
+326 | if (!tableAlias) {
+327 | throw new Error(`PG Alias not found for table of column: ${colConfig.name} (table: ${colConfig._tableName})`);
+^
+error: PG Alias not found for table of column: name (table: users)
+at <anonymous> (/Users/suyogsonwalkar/Projects/pixlr/node_modules/spanner-orm/dist/core/query-builder.js:327:27)
+at map (1:11)
+at buildSelectPgSQL (/Users/suyogsonwalkar/Projects/pixlr/node_modules/spanner-orm/dist/core/query-builder.js:313:52)
+at prepare (/Users/suyogsonwalkar/Projects/pixlr/node_modules/spanner-orm/dist/core/query-builder.js:189:30)
+at then (/Users/suyogsonwalkar/Projects/pixlr/node_modules/spanner-orm/dist/client.js:94:57)
