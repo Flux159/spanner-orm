@@ -302,6 +302,20 @@ async function runFluentExamples(db: OrmClient) {
   console.log("Recent Users:", recentUsers);
   // recentUsers is typed as: Array<{ id: string; name: string; }> (assuming id is uuid/string)
 
+  // 2. Debugging Queries
+  // The `debug()` method can be chained into your fluent query to log the generated SQL and parameters.
+  // This is useful for understanding what the ORM is generating or troubleshooting issues.
+  const usersForDebugging = await db
+    .select({ id: users.id, name: users.name })
+    .from(users)
+    .where(eq(users.name, "Alice"))
+    .debug() // Logs SQL and parameters to the console
+    .limit(1);
+  console.log("User for debugging:", usersForDebugging);
+  // The console output from .debug() would look something like:
+  // SQL: SELECT "id", "name" FROM "users" WHERE "name" = $1 LIMIT $2
+  // Parameters: ["Alice", 1]
+
   // 2. INSERT a new user (with returning)
   const [insertedUser] = await db
     .insert(users)
@@ -378,6 +392,21 @@ async function runFluentExamples(db: OrmClient) {
     }
   });
   console.log("Transaction example completed.");
+
+  // 8. Debugging with .sql and .params properties
+  // For more direct access to the SQL and parameters without executing the query,
+  // you can access the .sql and .params properties after preparing the query.
+  // Note: This is more aligned with QueryBuilder, but debug() on the fluent API is the primary way.
+  const preparedQuery = db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.name, "Test User"))
+    .prepare(); // Prepare the query
+
+  console.log("Prepared SQL:", preparedQuery.sql);
+  console.log("Prepared Params:", preparedQuery.params);
+  // You can then execute this prepared query using an adapter if needed:
+  // const result = await db.adapter.query(preparedQuery.sql, preparedQuery.params);
 }
 
 // To run these examples:

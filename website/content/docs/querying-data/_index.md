@@ -103,6 +103,21 @@ async function runFluentExamples(db: OrmClient) {
   //   });
   // console.log("User with Posts:", JSON.stringify(usersWithPosts, null, 2));
 
+  // 5. Debugging Queries
+  // The `debug()` method can be chained into your fluent query to log the generated SQL and parameters
+  // directly to the console before the query is executed. This is invaluable for understanding
+  // the SQL spanner-orm generates or for troubleshooting unexpected query behavior.
+  const userToDebug = await db
+    .select({ id: users.id, name: users.name })
+    .from(users)
+    .where(sql`${users.name} = ${"Debug User"}`)
+    .limit(1)
+    .debug(); // Call .debug() here
+  console.log("User fetched for debugging:", userToDebug);
+  // When .debug() is called, you'll see output like this in your console:
+  // SQL: SELECT "id", "name" FROM "users" WHERE "name" = $1 LIMIT $2
+  // Parameters: ["Debug User", 1]
+
   // 5. DELETE a user
   const deleteResult = await db
     .deleteFrom(users)
@@ -146,6 +161,22 @@ async function runFluentExamples(db: OrmClient) {
     }
   });
   console.log("Transaction example completed.");
+
+  // 8. Accessing SQL and Parameters without Execution
+  // If you need to get the SQL string and parameters without executing the query,
+  // you can use the `prepare()` method available on a query chain.
+  // This is part of the underlying QueryBuilder capabilities accessible via the fluent API.
+  const preparedSelectQuery = db
+    .select({ id: users.id, email: users.email })
+    .from(users)
+    .where(sql`${users.name} = ${"Prepared User"}`)
+    .prepare(); // This finalizes the query definition
+
+  console.log("Prepared SQL:", preparedSelectQuery.sql);
+  console.log("Prepared Parameters:", preparedSelectQuery.params);
+  // You could then execute this manually using the adapter if needed:
+  // const result = await db.adapter.query(preparedSelectQuery.sql, preparedSelectQuery.params);
+  // console.log("Result from prepared query:", result.rows);
 }
 
 // To run these examples:
