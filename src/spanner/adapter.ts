@@ -178,13 +178,19 @@ export class SpannerAdapter implements DatabaseAdapter {
 
     const adminClient = this.spannerClient.getDatabaseAdminClient();
 
-    console.log(`Executing DDL for Spanner: ${sql.substring(0, 200)}...`); // Log snippet
+    // Remove trailing semicolon if present, as Spanner DDL API doesn't like it.
+    let ddlSql = sql.trim();
+    if (ddlSql.endsWith(";")) {
+      ddlSql = ddlSql.slice(0, -1);
+    }
+
+    console.log(`Executing DDL for Spanner: ${ddlSql.substring(0, 200)}...`); // Log snippet
 
     try {
       const [operation] = await adminClient.updateDatabaseDdl({
         // Using the on-demand adminClient
         database: this.dbPath, // Using the fully qualified dbPath
-        statements: [sql], // Spanner API expects an array of statements
+        statements: [ddlSql], // Spanner API expects an array of statements
       });
 
       console.log(
