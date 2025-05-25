@@ -100,6 +100,14 @@ export interface DatabaseAdapter {
    * Rolls back the current transaction. (Usually part of the Transaction object)
    */
   // rollbackTransaction?(): Promise<void>; // This logic is now on the Transaction object
+
+  /**
+   * Executes a DDL command, specifically for adapters that require a different API for DDL.
+   * @param sql The DDL string to execute.
+   * @param params Optional array of parameters (often unused for DDL).
+   * @returns A promise that resolves similarly to execute, often with a count of 0 for DDL.
+   */
+  executeDDL?(sql: string, params?: unknown[]): Promise<number | AffectedRows>;
 }
 
 // Placeholder for connection options, to be defined per adapter

@@ -66,10 +66,16 @@ export async function runPendingMigrations(
   dialect: Dialect,
   migrationsDirectory: string = MIGRATIONS_DIR_DEFAULT
 ): Promise<void> {
-  const executeCmdSql = adapter.execute.bind(adapter);
+  const executeCmdSql = adapter.execute.bind(adapter); // For DML operations
   const queryRowsSql = adapter.query.bind(adapter) as QuerySqlFn;
 
-  await ensureMigrationTable(executeCmdSql, dialect);
+  // Use executeDDL for Spanner DDL, otherwise fallback to regular execute
+  const ddlExecutor: MigrationExecuteSql =
+    adapter.dialect === "spanner" && typeof adapter.executeDDL === "function"
+      ? adapter.executeDDL.bind(adapter)
+      : adapter.execute.bind(adapter);
+
+  await ensureMigrationTable(ddlExecutor, dialect); // ensureMigrationTable uses DDL
 
   const appliedMigrationNames = await getAppliedMigrationNames(
     queryRowsSql,
@@ -138,7 +144,9 @@ export async function runPendingMigrations(
           `Migration file ${migrationFile} does not export a suitable '${upFunctionName}' function for dialect ${dialect}.`
         );
       }
-      await upFunction(executeCmdSql, dialect);
+      // Pass ddlExecutor to upFunction for Spanner, executeCmdSql otherwise (though ddlExecutor falls back)
+      await upFunction(ddlExecutor, dialect);
+      // Recording migration is a DML operation (INSERT)
       await recordMigrationApplied(executeCmdSql, migrationName, dialect);
       console.log(`Successfully applied migration: ${migrationFile}`);
     } catch (error) {
@@ -155,8 +163,14 @@ export async function revertLastMigration(
   dialect: Dialect,
   migrationsDirectory: string = MIGRATIONS_DIR_DEFAULT
 ): Promise<void> {
-  const executeCmdSql = adapter.execute.bind(adapter);
+  const executeCmdSql = adapter.execute.bind(adapter); // For DML operations
   const queryRowsSql = adapter.query.bind(adapter) as QuerySqlFn;
+
+  // Use executeDDL for Spanner DDL, otherwise fallback to regular execute
+  const ddlExecutor: MigrationExecuteSql =
+    adapter.dialect === "spanner" && typeof adapter.executeDDL === "function"
+      ? adapter.executeDDL.bind(adapter)
+      : adapter.execute.bind(adapter);
 
   // No need to ensure migration table for down, if it's not there, no migrations were applied.
   const appliedMigrationNames = await getAppliedMigrationNames(
@@ -210,7 +224,9 @@ export async function revertLastMigration(
       );
     }
 
-    await downFunction(executeCmdSql, dialect);
+    // Pass ddlExecutor to downFunction for Spanner
+    await downFunction(ddlExecutor, dialect);
+    // Recording migration revert is a DML operation (DELETE)
     await recordMigrationReverted(executeCmdSql, lastMigrationName, dialect);
     console.log(`Successfully reverted migration: ${migrationFile}`);
   } catch (error) {

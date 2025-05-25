@@ -11,9 +11,9 @@ Read the published docs [here](https://flux159.github.io/spanner-orm) to get sta
 
 `spanner-orm` is built to address the following key requirements for developers working with PostgreSQL and Google Spanner:
 
-- **Single Object Model for PostgreSQL & Spanner:** Supports both PostgreSQL & Google Spanner with a single, Drizzle-inspired object model. Define your schema once and use it across both database systems.
-- **Cross-Dialect Migrations:** Produces migrations for both PostgreSQL & Spanner. These migrations can be run via the `spanner-orm-cli migrate` command or programmatically.
-- **Flexible Querying:** Build queries with a type-safe query builder or fall back to raw SQL using the `sql` template literal tag when needed.
+- **Single Object Model for PostgreSQL & Spanner:** Supports both postgres & google spanner with a single object model, inspired by Drizzle. This allows you to define your schema once and use it across both database systems.
+- **Cross-Dialect Migrations:** Produces migrations for both postgres & spanner that can be run via a migrate command or via cli (specifically, the `spanner-orm-cli migrate` command), and also programmatically.
+- **Flexible Querying:** Can build queries with a type-safe query builder or fallback to SQL (for instance, using the `sql` template literal tag when needed).
 - **Dialect-Aware SQL:**
   - **Spanner:** Supports Google SQL as the dialect for Spanner.
   - **PostgreSQL/PGLite:** Uses almost equivalent SQL for PostgreSQL & PGLite.
