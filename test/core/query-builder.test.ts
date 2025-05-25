@@ -249,7 +249,7 @@ describe("QueryBuilder SQL Generation with Aliasing", () => {
         .values({ name: "John Doe", age: 30 })
         .prepare("postgres");
       expect(preparedQuery.sql).toBe(
-        'INSERT INTO "users" ("age", "createdAt", "name") VALUES ($1, CURRENT_TIMESTAMP, $2)'
+        'INSERT INTO "users" ("age", "created_at", "name") VALUES ($1, CURRENT_TIMESTAMP, $2)'
       );
       expect(preparedQuery.parameters).toEqual([30, "John Doe"]);
     });
@@ -260,7 +260,7 @@ describe("QueryBuilder SQL Generation with Aliasing", () => {
         .values({ name: "Jane Doe", email: "jane@example.com" })
         .prepare("spanner");
       expect(preparedQuery.sql).toBe(
-        "INSERT INTO `users` (`createdAt`, `email`, `name`) VALUES (CURRENT_TIMESTAMP, @p1, @p2)"
+        "INSERT INTO `users` (`created_at`, `email`, `name`) VALUES (CURRENT_TIMESTAMP, @p1, @p2)"
       );
       expect(preparedQuery.parameters).toEqual([
         "jane@example.com",
@@ -357,7 +357,7 @@ describe("QueryBuilder RETURNING clause", () => {
         .returning("*") // or .returning() or .returning(true)
         .prepare("postgres");
       expect(prepared.sql).toBe(
-        'INSERT INTO "users" ("age", "createdAt", "name") VALUES ($1, CURRENT_TIMESTAMP, $2) RETURNING *'
+        'INSERT INTO "users" ("age", "created_at", "name") VALUES ($1, CURRENT_TIMESTAMP, $2) RETURNING *'
       );
       expect(prepared.parameters).toEqual([25, "Test User"]);
       expect(prepared.returning).toBe(true);
@@ -373,7 +373,7 @@ describe("QueryBuilder RETURNING clause", () => {
         })
         .prepare("postgres");
       expect(prepared.sql).toBe(
-        'INSERT INTO "users" ("createdAt", "email", "name") VALUES (CURRENT_TIMESTAMP, $1, $2) RETURNING "id" AS "id", "email" AS "userEmail"'
+        'INSERT INTO "users" ("created_at", "email", "name") VALUES (CURRENT_TIMESTAMP, $1, $2) RETURNING "id" AS "id", "email" AS "userEmail"'
       );
       expect(prepared.parameters).toEqual(["test@example.com", "Test User"]);
       expect(prepared.returning).toEqual({
@@ -445,7 +445,7 @@ describe("QueryBuilder RETURNING clause", () => {
         .returning("*")
         .prepare("spanner");
       expect(prepared.sql).toBe(
-        "INSERT INTO `users` (`age`, `createdAt`, `name`) VALUES (@p1, CURRENT_TIMESTAMP, @p2) THEN RETURN *"
+        "INSERT INTO `users` (`age`, `created_at`, `name`) VALUES (@p1, CURRENT_TIMESTAMP, @p2) THEN RETURN *"
       );
       expect(prepared.parameters).toEqual([40, "Spanner User"]);
     });
@@ -460,7 +460,7 @@ describe("QueryBuilder RETURNING clause", () => {
         })
         .prepare("spanner");
       expect(prepared.sql).toBe(
-        "INSERT INTO `users` (`createdAt`, `email`, `name`) VALUES (CURRENT_TIMESTAMP, @p1, @p2) THEN RETURN `id` AS `id`, `email` AS `userEmail`"
+        "INSERT INTO `users` (`created_at`, `email`, `name`) VALUES (CURRENT_TIMESTAMP, @p1, @p2) THEN RETURN `id` AS `id`, `email` AS `userEmail`"
       );
     });
 
