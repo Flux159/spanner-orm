@@ -263,7 +263,7 @@ export function table<
   // Return type changed to user-facing Table
   const builtColumnsArray = Object.entries(columnsInput).map(
     ([key, builder]) => {
-      const colConfig = builder.build();
+      const colConfig = { ...builder.build() }; // Clone the config
       colConfig._tableName = tableNameInput; // Assign table name to column config
       return [key, colConfig];
     }

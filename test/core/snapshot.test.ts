@@ -321,4 +321,71 @@ describe("generateSchemaSnapshot", () => {
       'Error resolving foreign key for posts_ref_missing_schema_table.user_id: Referenced table "another_users" for column "user_id" in table "posts_ref_missing_schema_table" not found in schema.'
     );
   });
+
+  it("should correctly resolve referencedTable when column builders are reused", () => {
+    // Define a shared column builder
+    const idColumnBuilder = varchar("id", { length: 36 }).primaryKey();
+
+    // Define tables using the shared builder
+    const tableA = table("tableA", {
+      id: idColumnBuilder,
+      data: text("dataA"),
+    });
+
+    const tableB = table("tableB", {
+      id: idColumnBuilder, // Reusing the same builder instance
+      data: text("dataB"),
+    });
+
+    // Define a table with a foreign key referencing tableA.id
+    const tableC = table("tableC", {
+      id: varchar("id_c", { length: 36 }).primaryKey(),
+      tableAId: varchar("table_a_id")
+        .notNull()
+        .references(() => tableA.columns.id), // Reference tableA.id
+    });
+
+    // Define a table with a foreign key referencing tableB.id
+    const tableD = table("tableD", {
+      id: varchar("id_d", { length: 36 }).primaryKey(),
+      tableBId: varchar("table_b_id")
+        .notNull()
+        .references(() => tableB.columns.id), // Reference tableB.id
+    });
+
+    const schemaWithReusedBuilders = {
+      tableA,
+      tableB,
+      tableC,
+      tableD,
+    };
+
+    const snapshot = generateSchemaSnapshot(schemaWithReusedBuilders);
+
+    // Assertions for tableC's foreign key
+    const tableCSnapshot = snapshot.tables.tableC;
+    expect(tableCSnapshot.columns.tableAId.references).toBeDefined();
+    expect(tableCSnapshot.columns.tableAId.references?.referencedTable).toBe(
+      "tableA"
+    );
+    expect(tableCSnapshot.columns.tableAId.references?.referencedColumn).toBe(
+      "id"
+    );
+
+    // Assertions for tableD's foreign key
+    const tableDSnapshot = snapshot.tables.tableD;
+    expect(tableDSnapshot.columns.tableBId.references).toBeDefined();
+    expect(tableDSnapshot.columns.tableBId.references?.referencedTable).toBe(
+      "tableB"
+    );
+    expect(tableDSnapshot.columns.tableBId.references?.referencedColumn).toBe(
+      "id"
+    );
+
+    // Also check that tableA and tableB themselves have the correct _tableName on their id columns internally
+    // This is implicitly tested by the FK resolution, but an explicit check on the snapshot is good.
+    expect(snapshot.tables.tableA.columns.id.name).toBe("id"); // name is correct
+    // The _tableName property is internal to ColumnConfig and not directly part of ColumnSnapshot.
+    // The fact that FKs to tableA.id and tableB.id resolve correctly is the main test.
+  });
 });
