@@ -13,6 +13,8 @@ import type {
   Dialect,
   EnhancedIncludeClause,
   SelectFields,
+  ReturningObject,
+  // ReturningColumnSpec, // Not directly used here
 } from "../src/types/common";
 import { QueryBuilder } from "../src/core/query-builder";
 import { shapeResults } from "../src/core/result-shaper";
@@ -26,7 +28,7 @@ const mockSql: SQL = {
 };
 
 const usersTable: TableConfig = {
-  name: "users",
+  tableName: "users",
   columns: {
     id: {
       name: "id",
@@ -50,7 +52,7 @@ const usersTable: TableConfig = {
 };
 
 const postsTable: TableConfig = {
-  name: "posts",
+  tableName: "posts",
   columns: {
     id: {
       name: "id",
@@ -87,6 +89,7 @@ const mockQueryBuilderInstance = {
   update: vi.fn().mockReturnThis(),
   set: vi.fn().mockReturnThis(),
   deleteFrom: vi.fn().mockReturnThis(),
+  returning: vi.fn().mockReturnThis(), // Added for returning()
   prepare: vi.fn(),
 };
 
@@ -385,5 +388,172 @@ describe("OrmClient & ExecutableQuery", () => {
       expect(mockTransaction.commit).not.toHaveBeenCalled();
       expect(mockTransaction.rollback).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+describe("ExecutableQuery with RETURNING", () => {
+  let mockAdapterReturning: DatabaseAdapter;
+  let dbReturning: OrmClient;
+
+  beforeEach(() => {
+    vi.clearAllMocks(); // Clear all mocks to be safe
+    (shapeResults as vi.Mock).mockClear();
+
+    Object.values(mockQueryBuilderInstance).forEach((mockFn) =>
+      (mockFn as vi.Mock).mockClear().mockReturnThis()
+    );
+    (mockQueryBuilderInstance.prepare as vi.Mock).mockClear();
+
+    mockAdapterReturning = {
+      dialect: "postgres" as Dialect,
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      execute: vi.fn().mockResolvedValue({ count: 1 } as AffectedRows),
+      query: vi.fn().mockResolvedValue([] as QueryResultRow[]),
+      beginTransaction: vi.fn(),
+      // Note: beginTransaction mock might need to return a mock transaction if used in these tests
+    };
+    dbReturning = new OrmClient(mockAdapterReturning, "postgres");
+
+    // Reset relevant mocks for QueryBuilder instance specifically for this suite
+    (mockQueryBuilderInstance.returning as vi.Mock)
+      .mockClear()
+      .mockReturnThis();
+  });
+
+  it("INSERT with returning() should call adapter.query and return data", async () => {
+    const returnedData = [
+      { id: 1, name: "Inserted User", email: "inserted@example.com" },
+    ];
+    const mockInsertReturningPreparedQuery: PreparedQuery<any, any> = {
+      sql: "INSERT INTO users (name, email) VALUES ($1, $2) RETURNING *",
+      parameters: ["Inserted User", "inserted@example.com"],
+      dialect: "postgres",
+      action: "insert",
+      primaryTable: usersTable,
+      returning: true,
+    };
+
+    (mockQueryBuilderInstance.prepare as vi.Mock).mockReturnValue(
+      mockInsertReturningPreparedQuery
+    );
+    (mockAdapterReturning.query as vi.Mock).mockResolvedValue(returnedData);
+
+    const result = await dbReturning
+      .insert(usersTable)
+      .values({ name: "Inserted User", email: "inserted@example.com" })
+      .returning();
+
+    expect(mockQueryBuilderInstance.returning).toHaveBeenCalledWith(undefined); // or true / "*" depending on default
+    expect(mockAdapterReturning.query).toHaveBeenCalledWith(
+      mockInsertReturningPreparedQuery.sql,
+      mockInsertReturningPreparedQuery.parameters
+    );
+    expect(mockAdapterReturning.execute).not.toHaveBeenCalled();
+    expect(result).toEqual(returnedData);
+  });
+
+  it("UPDATE with returning() should call adapter.query and return data", async () => {
+    const returnedData = [
+      { id: 1, name: "Updated User", email: "updated@example.com" },
+    ];
+    const mockUpdateReturningPreparedQuery: PreparedQuery<any, any> = {
+      sql: "UPDATE users SET name = $1 WHERE id = $2 RETURNING id, name, email",
+      parameters: ["Updated User", 1],
+      dialect: "postgres",
+      action: "update",
+      primaryTable: usersTable,
+      returning: {
+        id: usersTable.columns.id,
+        name: usersTable.columns.name,
+        email: usersTable.columns.email,
+      } as ReturningObject<typeof usersTable>,
+    };
+
+    (mockQueryBuilderInstance.prepare as vi.Mock).mockReturnValue(
+      mockUpdateReturningPreparedQuery
+    );
+    (mockAdapterReturning.query as vi.Mock).mockResolvedValue(returnedData);
+
+    const result = await dbReturning
+      .update(usersTable)
+      .set({ name: "Updated User" })
+      .where(mockSql) // Pass the mockSql object directly
+      .returning({
+        id: usersTable.columns.id,
+        name: usersTable.columns.name,
+        email: usersTable.columns.email,
+      });
+
+    expect(mockQueryBuilderInstance.returning).toHaveBeenCalledWith({
+      id: usersTable.columns.id,
+      name: usersTable.columns.name,
+      email: usersTable.columns.email,
+    });
+    expect(mockAdapterReturning.query).toHaveBeenCalledWith(
+      mockUpdateReturningPreparedQuery.sql,
+      mockUpdateReturningPreparedQuery.parameters
+    );
+    expect(mockAdapterReturning.execute).not.toHaveBeenCalled();
+    expect(result).toEqual(returnedData);
+  });
+
+  it("DELETE with returning() should call adapter.query and return data", async () => {
+    const returnedData = [
+      { id: 1, name: "Deleted User", email: "deleted@example.com" },
+    ];
+    const mockDeleteReturningPreparedQuery: PreparedQuery<any, any> = {
+      sql: "DELETE FROM users WHERE id = $1 RETURNING *",
+      parameters: [1],
+      dialect: "postgres",
+      action: "delete",
+      primaryTable: usersTable,
+      returning: true,
+    };
+
+    (mockQueryBuilderInstance.prepare as vi.Mock).mockReturnValue(
+      mockDeleteReturningPreparedQuery
+    );
+    (mockAdapterReturning.query as vi.Mock).mockResolvedValue(returnedData);
+
+    const result = await dbReturning
+      .deleteFrom(usersTable)
+      .where(mockSql) // Pass the mockSql object directly
+      .returning(true);
+
+    expect(mockQueryBuilderInstance.returning).toHaveBeenCalledWith(true);
+    expect(mockAdapterReturning.query).toHaveBeenCalledWith(
+      mockDeleteReturningPreparedQuery.sql,
+      mockDeleteReturningPreparedQuery.parameters
+    );
+    expect(mockAdapterReturning.execute).not.toHaveBeenCalled();
+    expect(result).toEqual(returnedData);
+  });
+
+  it("INSERT without returning() should call adapter.execute and return AffectedRows", async () => {
+    const mockInsertPreparedQuery: PreparedQuery<any, any> = {
+      sql: "INSERT INTO users (name, email) VALUES ($1, $2)",
+      parameters: ["No Return User", "noreturn@example.com"],
+      dialect: "postgres",
+      action: "insert",
+      primaryTable: usersTable,
+      // returning is undefined
+    };
+    (mockQueryBuilderInstance.prepare as vi.Mock).mockReturnValue(
+      mockInsertPreparedQuery
+    );
+    (mockAdapterReturning.execute as vi.Mock).mockResolvedValue({ count: 1 });
+
+    const result = await dbReturning
+      .insert(usersTable)
+      .values({ name: "No Return User", email: "noreturn@example.com" });
+
+    expect(mockQueryBuilderInstance.returning).not.toHaveBeenCalled();
+    expect(mockAdapterReturning.execute).toHaveBeenCalledWith(
+      mockInsertPreparedQuery.sql,
+      mockInsertPreparedQuery.parameters
+    );
+    expect(mockAdapterReturning.query).not.toHaveBeenCalled();
+    expect(result).toEqual({ count: 1 });
   });
 });

@@ -302,18 +302,30 @@ async function runFluentExamples(db: OrmClient) {
   console.log("Recent Users:", recentUsers);
   // recentUsers is typed as: Array<{ id: string; name: string; }> (assuming id is uuid/string)
 
-  // 2. INSERT a new user
-  const insertResult = await db
+  // 2. INSERT a new user (with returning)
+  const [insertedUser] = await db
     .insert(users)
-    .values({ name: "Alice Wonderland", email: "alice@example.com" });
-  console.log("Insert Result:", insertResult); // e.g., { count: 1 }
+    .values({ name: "Alice Wonderland", email: "alice@example.com" })
+    .returning(); // Returns all columns by default
+  console.log("Inserted User:", insertedUser);
+  // insertedUser is typed as InferModelType<typeof users>
+  // e.g., { id: 'uuid-string', name: "Alice Wonderland", email: "alice@example.com", ... }
 
-  // 3. UPDATE an existing user
-  const updateResult = await db
+  // Example of returning specific columns:
+  const [insertedId] = await db
+    .insert(users)
+    .values({ name: "Bob The Second", email: "bob2@example.com" })
+    .returning({ id: users.columns.id });
+  console.log("Inserted User ID:", insertedId.id);
+
+  // 3. UPDATE an existing user (with returning)
+  const [updatedUser] = await db
     .update(users)
     .set({ name: "Alice in Chains" })
-    .where(sql`${users.email} = ${"alice@example.com"}`);
-  console.log("Update Result:", updateResult); // e.g., { count: 1 }
+    .where(sql`${users.email} = ${"alice@example.com"}`)
+    .returning({ name: users.columns.name, email: users.columns.email });
+  console.log("Updated User Info:", updatedUser);
+  // updatedUser is typed as { name: string; email: string; }
 
   // 4. SELECT with Eager Loading (include)
   // Assuming 'posts' table has a 'userId' column referencing 'users.id'
@@ -333,11 +345,13 @@ async function runFluentExamples(db: OrmClient) {
   // usersWithPosts would be typed, e.g.:
   // Array<{ id: string; userName: string; posts: Array<{ title: string; content: string; }> }>
 
-  // 5. DELETE a user
-  const deleteResult = await db
+  // 5. DELETE a user (with returning)
+  const [deletedUser] = await db
     .deleteFrom(users)
-    .where(sql`${users.email} = ${"alice@example.com"}`);
-  console.log("Delete Result:", deleteResult); // e.g., { count: 1 }
+    .where(sql`${users.email} = ${"alice@example.com"}`)
+    .returning();
+  console.log("Deleted User:", deletedUser);
+  // deletedUser contains all columns of the deleted user
 
   // 6. Raw SQL Query
   const rawUsersCount = await db.raw<{ total_users: number }[]>(

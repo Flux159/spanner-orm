@@ -527,4 +527,14 @@ export interface PreparedQuery<
   primaryTable?: TPrimaryTable; // For result shaping
   // Potentially add selectedFields map here if needed for more advanced shaping or type inference
   fields?: SelectFields<TPrimaryTable>; // Added to carry selected fields info
+  returning?: ReturningObject<TPrimaryTable> | true; // For INSERT/UPDATE/DELETE RETURNING
 }
+
+// --- Types for RETURNING clause ---
+export type ReturningColumnSpec<
+  TTable extends TableConfig<any, any> | Table<any, any>
+> = SQL | ColumnConfig<any, any> | Extract<keyof TTable["columns"], string>;
+
+export type ReturningObject<
+  TTable extends TableConfig<any, any> | Table<any, any>
+> = Record<string, ReturningColumnSpec<TTable>>;
