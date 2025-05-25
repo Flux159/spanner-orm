@@ -394,4 +394,127 @@ describe("generateSchemaDiff", () => {
       }
     });
   });
+
+  describe("Optional Property Handling", () => {
+    it("should not detect changes for FKs with implicit undefined onDelete or name", () => {
+      const snapshotOldFK = createBaseSnapshot({
+        users: {
+          tableName: "users",
+          columns: { id: sampleColumn("id", "uuid", { primaryKey: true }) },
+        },
+        uploads: {
+          tableName: "uploads",
+          columns: { id: sampleColumn("id", "uuid", { primaryKey: true }) },
+        },
+        comments: {
+          tableName: "comments",
+          columns: {
+            id: sampleColumn("id", "uuid", { primaryKey: true }),
+            user_id: sampleColumn("user_id", "uuid", {
+              references: {
+                referencedTable: "users",
+                referencedColumn: "id",
+                onDelete: "cascade",
+              },
+            }),
+            parent_id: sampleColumn("parent_id", "uuid", {
+              // onDelete is implicitly undefined
+              references: {
+                referencedTable: "comments",
+                referencedColumn: "id",
+              },
+            }),
+            upload_id: sampleColumn("upload_id", "uuid", {
+              // name is implicitly undefined
+              references: {
+                referencedTable: "uploads",
+                referencedColumn: "id",
+              },
+            }),
+          },
+        },
+      });
+
+      const snapshotNewFK = createBaseSnapshot({
+        users: {
+          tableName: "users",
+          columns: { id: sampleColumn("id", "uuid", { primaryKey: true }) },
+        },
+        uploads: {
+          tableName: "uploads",
+          columns: { id: sampleColumn("id", "uuid", { primaryKey: true }) },
+        },
+        comments: {
+          tableName: "comments",
+          columns: {
+            id: sampleColumn("id", "uuid", { primaryKey: true }),
+            user_id: sampleColumn("user_id", "uuid", {
+              references: {
+                referencedTable: "users",
+                referencedColumn: "id",
+                onDelete: "cascade",
+              },
+            }),
+            parent_id: sampleColumn("parent_id", "uuid", {
+              references: {
+                referencedTable: "comments",
+                referencedColumn: "id",
+                onDelete: undefined,
+              }, // Explicitly undefined
+            }),
+            upload_id: sampleColumn("upload_id", "uuid", {
+              references: {
+                referencedTable: "uploads",
+                referencedColumn: "id",
+                name: undefined,
+              }, // Explicitly undefined
+            }),
+          },
+        },
+      });
+      const diff = generateSchemaDiff(snapshotOldFK, snapshotNewFK);
+      expect(diff.tableChanges).toEqual([]);
+    });
+
+    it("should not detect changes for composite PKs with implicit undefined name", () => {
+      const snapshotOldPK = createBaseSnapshot({
+        posts: {
+          tableName: "posts",
+          columns: { id: sampleColumn("id", "uuid", { primaryKey: true }) },
+        },
+        uploads: {
+          tableName: "uploads",
+          columns: { id: sampleColumn("id", "uuid", { primaryKey: true }) },
+        },
+        post_uploads: {
+          tableName: "post_uploads",
+          columns: {
+            post_id: sampleColumn("post_id", "uuid", { notNull: true }),
+            upload_id: sampleColumn("upload_id", "uuid", { notNull: true }),
+          },
+          compositePrimaryKey: samplePK(["post_id", "upload_id"]), // name is implicitly undefined
+        },
+      });
+      const snapshotNewPK = createBaseSnapshot({
+        posts: {
+          tableName: "posts",
+          columns: { id: sampleColumn("id", "uuid", { primaryKey: true }) },
+        },
+        uploads: {
+          tableName: "uploads",
+          columns: { id: sampleColumn("id", "uuid", { primaryKey: true }) },
+        },
+        post_uploads: {
+          tableName: "post_uploads",
+          columns: {
+            post_id: sampleColumn("post_id", "uuid", { notNull: true }),
+            upload_id: sampleColumn("upload_id", "uuid", { notNull: true }),
+          },
+          compositePrimaryKey: samplePK(["post_id", "upload_id"], undefined), // name is explicitly undefined
+        },
+      });
+      const diff = generateSchemaDiff(snapshotOldPK, snapshotNewPK);
+      expect(diff.tableChanges).toEqual([]);
+    });
+  });
 });
