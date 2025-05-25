@@ -64,8 +64,10 @@ function compareColumns(
 
   if (col1.primaryKey !== col2.primaryKey) changes.primaryKey = col2.primaryKey;
   if (col1.unique !== col2.unique) changes.unique = col2.unique;
-  if (!isEqual(col1.references, col2.references))
+  // Use the new compareReferences helper
+  if (!compareReferences(col1.references, col2.references)) {
     changes.references = col2.references;
+  }
   return changes;
 }
 
@@ -79,6 +81,40 @@ function compareIndexes(
   if (idx1.unique !== idx2.unique) changes.unique = idx2.unique;
   // Add other index properties to compare here if they exist (e.g., using, predicate)
   return changes;
+}
+
+// Helper to compare two ReferenceSnapshot objects
+function compareReferences(
+  ref1?: ColumnSnapshot["references"],
+  ref2?: ColumnSnapshot["references"]
+): boolean {
+  if (ref1 === ref2) return true; // Handles both being undefined or same object
+  if (!ref1 || !ref2) return false; // One is undefined, the other is not
+
+  return (
+    ref1.referencedTable === ref2.referencedTable &&
+    ref1.referencedColumn === ref2.referencedColumn &&
+    (ref1.name || undefined) === (ref2.name || undefined) && // Treat undefined and missing name the same
+    (ref1.onDelete || undefined) === (ref2.onDelete || undefined) // Treat undefined and missing onDelete the same
+  );
+}
+
+// Helper to compare two PrimaryKeySnapshot objects
+function comparePrimaryKeys(
+  pk1?: TableSnapshot["compositePrimaryKey"],
+  pk2?: TableSnapshot["compositePrimaryKey"]
+): boolean {
+  if (pk1 === pk2) return true; // Handles both being undefined or same object
+  if (!pk1 || !pk2) return false; // One is undefined, the other is not
+
+  // Check if columns are equal (order matters)
+  if (!pk1.columns || !pk2.columns || pk1.columns.length !== pk2.columns.length)
+    return false;
+  for (let i = 0; i < pk1.columns.length; i++) {
+    if (pk1.columns[i] !== pk2.columns[i]) return false;
+  }
+
+  return (pk1.name || undefined) === (pk2.name || undefined); // Treat undefined and missing name the same
 }
 
 function diffTables(
@@ -189,7 +225,13 @@ function diffTables(
     }
 
     let primaryKeyChange: PrimaryKeyDiffAction | undefined;
-    if (!isEqual(oldTable.compositePrimaryKey, newTable.compositePrimaryKey)) {
+    // Use the new comparePrimaryKeys helper
+    if (
+      !comparePrimaryKeys(
+        oldTable.compositePrimaryKey,
+        newTable.compositePrimaryKey
+      )
+    ) {
       if (newTable.compositePrimaryKey) {
         primaryKeyChange = { action: "set", pk: newTable.compositePrimaryKey };
       } else if (oldTable.compositePrimaryKey) {
