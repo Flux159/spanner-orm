@@ -127,6 +127,35 @@ export class ExecutableQuery<
     return this;
   }
 
+  // --- Join Methods ---
+  leftJoin(
+    table: TableConfig<any, any>,
+    onCondition: SQL
+  ): ExecutableQuery<TResult, TPrimaryTable, TFields, TInclude> {
+    this.internalQueryBuilder.leftJoin(table, onCondition);
+    return this;
+  }
+
+  // Add other join methods (innerJoin, rightJoin, fullJoin, joinRelation, etc.) here
+  // in a similar fashion if they should be part of the fluent API.
+  // For example:
+  // innerJoin(table: TableConfig<any, any>, onCondition: SQL): this {
+  //   this.internalQueryBuilder.innerJoin(table, onCondition);
+  //   return this;
+  // }
+  // joinRelation(relationName: string, joinType?: "INNER" | "LEFT" | "RIGHT" | "FULL"): this {
+  //   this.internalQueryBuilder.joinRelation(relationName, joinType);
+  //   return this;
+  // }
+  // leftJoinRelation(relationName: string): this {
+  //   this.internalQueryBuilder.leftJoinRelation(relationName);
+  //   return this;
+  // }
+  // innerJoinRelation(relationName: string): this {
+  //   this.internalQueryBuilder.innerJoinRelation(relationName);
+  //   return this;
+  // }
+
   include<NewInclude extends EnhancedIncludeClause>( // EnhancedIncludeClause is not generic
     clause: NewInclude
   ): ExecutableQuery<
