@@ -44,6 +44,11 @@ describe("QueryBuilder SQL Generation with Aliasing", () => {
       expect(preparedQuery.sql).toBe('SELECT * FROM "users" AS "t1"');
     });
 
+    it("should generate SELECT * when select() is called with no arguments (PostgreSQL)", () => {
+      const preparedQuery = qb.select().from(usersTable).prepare("postgres");
+      expect(preparedQuery.sql).toBe('SELECT * FROM "users" AS "t1"');
+    });
+
     it("should generate SELECT with specific aliased columns", () => {
       const preparedQuery = qb
         .select({ id: usersTable.columns.id, name: usersTable.columns.name })
@@ -134,6 +139,11 @@ describe("QueryBuilder SQL Generation with Aliasing", () => {
   describe("Spanner Dialect", () => {
     it("should generate SELECT * with table alias", () => {
       const preparedQuery = qb.select("*").from(usersTable).prepare("spanner");
+      expect(preparedQuery.sql).toBe("SELECT * FROM `users` AS `t1`");
+    });
+
+    it("should generate SELECT * when select() is called with no arguments (Spanner)", () => {
+      const preparedQuery = qb.select().from(usersTable).prepare("spanner");
       expect(preparedQuery.sql).toBe("SELECT * FROM `users` AS `t1`");
     });
 
