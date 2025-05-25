@@ -27,34 +27,70 @@ type QuerySqlFn = <T extends QueryResultRow = QueryResultRow>(
 
 // Changed executeSql type to MigrationExecuteSql
 async function ensureMigrationTable(
-  executeSql: MigrationExecuteSql,
+  adapter: DatabaseAdapter, // Changed from executeSql to adapter
   dialect: Dialect
 ) {
   console.log(
     `Ensuring migration tracking table '${MIGRATION_TABLE_NAME}' exists...`
   );
-  const createTableDdlStatements = getCreateMigrationTableDDL(dialect);
-  for (const ddl of createTableDdlStatements) {
+
+  const ddlExecutor: MigrationExecuteSql =
+    adapter.dialect === "spanner" && typeof adapter.executeDDL === "function"
+      ? adapter.executeDDL.bind(adapter)
+      : adapter.execute.bind(adapter);
+  const queryRows = adapter.query.bind(adapter) as QuerySqlFn;
+
+  if (dialect === "spanner") {
+    const checkSql = `SELECT table_name FROM INFORMATION_SCHEMA.TABLES WHERE table_name = @tableName`;
     try {
-      await executeSql(ddl, []); // Pass empty array for params
-    } catch (error: any) {
-      if (
-        (dialect === "spanner" &&
-          error.message &&
-          error.message.includes("AlreadyExists")) ||
-        (dialect === "postgres" &&
-          error.message &&
-          error.message.includes("already exists"))
-      ) {
+      const result = await queryRows(checkSql, {
+        tableName: MIGRATION_TABLE_NAME,
+      });
+      if (result.length === 0) {
+        console.log(
+          `Migration table '${MIGRATION_TABLE_NAME}' does not exist. Creating...`
+        );
+        const createTableDdlStatements = getCreateMigrationTableDDL(dialect);
+        for (const ddl of createTableDdlStatements) {
+          await ddlExecutor(ddl, []);
+        }
+        console.log(
+          `Migration table '${MIGRATION_TABLE_NAME}' created successfully.`
+        );
+      } else {
         console.log(
           `Migration table '${MIGRATION_TABLE_NAME}' already exists.`
         );
-      } else {
-        console.error(
-          `Error creating migration table '${MIGRATION_TABLE_NAME}':`,
-          error
-        );
-        throw error;
+      }
+    } catch (error) {
+      console.error(
+        `Error checking or creating migration table '${MIGRATION_TABLE_NAME}' for Spanner:`,
+        error
+      );
+      throw error;
+    }
+  } else {
+    // Existing logic for PostgreSQL (and potentially other dialects)
+    const createTableDdlStatements = getCreateMigrationTableDDL(dialect);
+    for (const ddl of createTableDdlStatements) {
+      try {
+        await ddlExecutor(ddl, []); // Pass empty array for params
+      } catch (error: any) {
+        if (
+          dialect === "postgres" &&
+          error.message &&
+          error.message.includes("already exists")
+        ) {
+          console.log(
+            `Migration table '${MIGRATION_TABLE_NAME}' already exists.`
+          );
+        } else {
+          console.error(
+            `Error creating migration table '${MIGRATION_TABLE_NAME}':`,
+            error
+          );
+          throw error;
+        }
       }
     }
   }
@@ -75,7 +111,7 @@ export async function runPendingMigrations(
       ? adapter.executeDDL.bind(adapter)
       : adapter.execute.bind(adapter);
 
-  await ensureMigrationTable(ddlExecutor, dialect); // ensureMigrationTable uses DDL
+  await ensureMigrationTable(adapter, dialect); // Pass adapter instead of ddlExecutor
 
   const appliedMigrationNames = await getAppliedMigrationNames(
     queryRowsSql,
