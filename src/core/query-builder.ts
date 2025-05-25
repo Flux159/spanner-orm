@@ -8,10 +8,13 @@ import type {
   IncludeClause, // Old type, kept for include() method parameter for now
   EnhancedIncludeClause, // New type
   PreparedQuery,
+  SelectFields as CommonSelectFields, // Import the generic SelectFields
 } from "../types/common.js";
 import { sql } from "../types/common.js";
 import { getTableConfig } from "./schema.js";
 
+// This local SelectFields is used for _selectedFields.
+// _returningFields will use CommonSelectFields<TTable>.
 export type SelectFields = Record<
   string,
   ColumnConfig<any, any> | SQL | string
@@ -56,6 +59,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
   private _updateSetValues?: UpdateData<TTable>;
   private _conditions: WhereCondition[] = [];
   private _includeClause?: EnhancedIncludeClause; // Changed to EnhancedIncludeClause
+  private _returningFields?: CommonSelectFields<TTable> | true; // Use imported CommonSelectFields
 
   constructor() {}
 
@@ -197,6 +201,20 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       throw new Error(`.groupBy() is only applicable to SELECT queries.`);
     }
     this._groupBy.push(...fields);
+    return this;
+  }
+
+  returning(fields?: CommonSelectFields<TTable> | true): this {
+    // Use imported CommonSelectFields
+    if (
+      !this._operationType ||
+      !["insert", "update", "delete"].includes(this._operationType)
+    ) {
+      throw new Error(
+        `.returning() is only applicable to INSERT, UPDATE, or DELETE operations. Current operation: '${this._operationType}'`
+      );
+    }
+    this._returningFields = fields === undefined ? true : fields;
     return this;
   }
 
@@ -872,7 +890,65 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       })
       .join(", ");
 
-    return `INSERT INTO "${this._targetTable.tableName}" (${columns}) VALUES ${valuePlaceholders}`;
+    let sql = `INSERT INTO "${this._targetTable.tableName}" (${columns}) VALUES ${valuePlaceholders}`;
+    if (this._returningFields) {
+      if (this._returningFields === true) {
+        sql += " RETURNING *";
+      } else if (
+        this._returningFields &&
+        typeof this._returningFields === "object"
+      ) {
+        // Explicit check for object
+        const returningCols = Object.entries(
+          this._returningFields // Removed cast here
+        )
+          .map(([aliasKey, fieldSpec]) => {
+            if (fieldSpec === true) {
+              const columnInTable =
+                this._targetTable!.columns[aliasKey as keyof TTable["columns"]];
+              if (!columnInTable) {
+                throw new Error(
+                  `RETURNING: Column '${aliasKey}' (specified with true) not found in table '${
+                    this._targetTable!.tableName
+                  }'.`
+                );
+              }
+              return `"${columnInTable.name}"`;
+            } else if (
+              typeof fieldSpec === "object" &&
+              fieldSpec !== null &&
+              (fieldSpec as SQL)._isSQL
+            ) {
+              return `${(fieldSpec as SQL).toSqlString(
+                "postgres",
+                paramIndexState,
+                aliasMap
+              )} AS "${aliasKey}"`;
+            } else if (
+              typeof fieldSpec === "object" &&
+              fieldSpec !== null &&
+              "name" in fieldSpec
+            ) {
+              const colConfig = fieldSpec as ColumnConfig<any, any>;
+              if (colConfig.name !== aliasKey) {
+                return `"${colConfig.name}" AS "${aliasKey}"`;
+              }
+              return `"${colConfig.name}"`;
+            } else {
+              throw new Error(
+                `Invalid field specification for RETURNING clause with alias '${aliasKey}'.`
+              );
+            }
+          })
+          .join(", ");
+        if (returningCols) {
+          sql += ` RETURNING ${returningCols}`;
+        } else {
+          sql += " RETURNING *"; // Should not happen if _returningFields is an empty object but not true
+        }
+      }
+    }
+    return sql;
   }
 
   private buildInsertSpannerSQL(
@@ -881,6 +957,10 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
   ): string {
     if (!this._targetTable) throw new Error("Target table not set for INSERT.");
     if (!this._insertValues) throw new Error("Values not set for INSERT.");
+
+    // Spanner DML statements do not support RETURNING.
+    // The ORM will handle this via a subsequent SELECT if _returningFields is set.
+    // So, no error is thrown here based on _returningFields for Spanner.
 
     let processedInsertData: Partial<InferModelType<TTable>>[];
     if (Array.isArray(this._insertValues)) {
@@ -973,7 +1053,65 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       paramIndexState,
       aliasMap
     );
-    return `UPDATE "${this._targetTable.tableName}" SET ${setParts} ${whereClause}`.trim();
+    let sql = `UPDATE "${this._targetTable.tableName}" SET ${setParts} ${whereClause}`;
+    if (this._returningFields) {
+      if (this._returningFields === true) {
+        sql += " RETURNING *";
+      } else if (
+        this._returningFields &&
+        typeof this._returningFields === "object"
+      ) {
+        // Explicit check for object
+        const returningCols = Object.entries(
+          this._returningFields // Removed cast here
+        )
+          .map(([aliasKey, fieldSpec]) => {
+            if (fieldSpec === true) {
+              const columnInTable =
+                this._targetTable!.columns[aliasKey as keyof TTable["columns"]];
+              if (!columnInTable) {
+                throw new Error(
+                  `RETURNING: Column '${aliasKey}' (specified with true) not found in table '${
+                    this._targetTable!.tableName
+                  }'.`
+                );
+              }
+              return `"${columnInTable.name}"`;
+            } else if (
+              typeof fieldSpec === "object" &&
+              fieldSpec !== null &&
+              (fieldSpec as SQL)._isSQL
+            ) {
+              return `${(fieldSpec as SQL).toSqlString(
+                "postgres",
+                paramIndexState,
+                aliasMap
+              )} AS "${aliasKey}"`;
+            } else if (
+              typeof fieldSpec === "object" &&
+              fieldSpec !== null &&
+              "name" in fieldSpec
+            ) {
+              const colConfig = fieldSpec as ColumnConfig<any, any>;
+              if (colConfig.name !== aliasKey) {
+                return `"${colConfig.name}" AS "${aliasKey}"`;
+              }
+              return `"${colConfig.name}"`;
+            } else {
+              throw new Error(
+                `Invalid field specification for RETURNING clause with alias '${aliasKey}'.`
+              );
+            }
+          })
+          .join(", ");
+        if (returningCols) {
+          sql += ` RETURNING ${returningCols}`;
+        } else {
+          sql += " RETURNING *";
+        }
+      }
+    }
+    return sql.trim();
   }
 
   private buildUpdateSpannerSQL(
@@ -983,6 +1121,10 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     if (!this._targetTable) throw new Error("Target table not set for UPDATE.");
     if (!this._updateSetValues)
       throw new Error("SET values not provided for UPDATE.");
+
+    // Spanner DML statements do not support RETURNING.
+    // The ORM will handle this via a subsequent SELECT if _returningFields is set.
+
     const setParts = Object.entries(this._updateSetValues)
       .map(([column, value]) => {
         if (typeof value === "object" && value !== null && "_isSQL" in value) {
@@ -1013,7 +1155,65 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       paramIndexState,
       aliasMap
     );
-    return `DELETE FROM "${this._targetTable.tableName}" ${whereClause}`.trim();
+    let sql = `DELETE FROM "${this._targetTable.tableName}" ${whereClause}`;
+    if (this._returningFields) {
+      if (this._returningFields === true) {
+        sql += " RETURNING *";
+      } else if (
+        this._returningFields &&
+        typeof this._returningFields === "object"
+      ) {
+        // Explicit check for object
+        const returningCols = Object.entries(
+          this._returningFields // Removed cast here
+        )
+          .map(([aliasKey, fieldSpec]) => {
+            if (fieldSpec === true) {
+              const columnInTable =
+                this._targetTable!.columns[aliasKey as keyof TTable["columns"]];
+              if (!columnInTable) {
+                throw new Error(
+                  `RETURNING: Column '${aliasKey}' (specified with true) not found in table '${
+                    this._targetTable!.tableName
+                  }'.`
+                );
+              }
+              return `"${columnInTable.name}"`;
+            } else if (
+              typeof fieldSpec === "object" &&
+              fieldSpec !== null &&
+              (fieldSpec as SQL)._isSQL
+            ) {
+              return `${(fieldSpec as SQL).toSqlString(
+                "postgres",
+                paramIndexState,
+                aliasMap
+              )} AS "${aliasKey}"`;
+            } else if (
+              typeof fieldSpec === "object" &&
+              fieldSpec !== null &&
+              "name" in fieldSpec
+            ) {
+              const colConfig = fieldSpec as ColumnConfig<any, any>;
+              if (colConfig.name !== aliasKey) {
+                return `"${colConfig.name}" AS "${aliasKey}"`;
+              }
+              return `"${colConfig.name}"`;
+            } else {
+              throw new Error(
+                `Invalid field specification for RETURNING clause with alias '${aliasKey}'.`
+              );
+            }
+          })
+          .join(", ");
+        if (returningCols) {
+          sql += ` RETURNING ${returningCols}`;
+        } else {
+          sql += " RETURNING *";
+        }
+      }
+    }
+    return sql.trim();
   }
 
   private buildDeleteSpannerSQL(
@@ -1021,6 +1221,10 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     aliasMap: Map<string, string>
   ): string {
     if (!this._targetTable) throw new Error("Target table not set for DELETE.");
+
+    // Spanner DML statements do not support RETURNING.
+    // The ORM will handle this via a subsequent SELECT if _returningFields is set.
+
     const whereClause = this.buildWhereClause(
       "spanner",
       paramIndexState,

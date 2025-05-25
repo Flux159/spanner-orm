@@ -306,14 +306,65 @@ async function runFluentExamples(db: OrmClient) {
   const insertResult = await db
     .insert(users)
     .values({ name: "Alice Wonderland", email: "alice@example.com" });
-  console.log("Insert Result:", insertResult); // e.g., { count: 1 }
+  console.log("Insert Result (count):", insertResult); // e.g., { count: 1 }
+
+  // 2b. INSERT a new user and return the inserted row (PostgreSQL/PGLite only)
+  // For Spanner, using .returning() will throw an error as it's not supported.
+  try {
+    const newUser = await db
+      .insert(users)
+      .values({ name: "Bob The Builder", email: "bob@example.com" })
+      .returning(); // Returns all columns by default: { id: ..., name: ..., email: ... }[]
+    if (newUser.length > 0) {
+      console.log("Newly Inserted User (PostgreSQL/PGLite):", newUser[0]);
+    }
+
+    // Or returning specific columns:
+    const specificFields = await db
+      .insert(users)
+      .values({ name: "Carol Singer", email: "carol@example.com" })
+      .returning({ id: users.id, email: users.email });
+    if (specificFields.length > 0) {
+      console.log(
+        "Inserted User - Specific Fields (PostgreSQL/PGLite):",
+        specificFields[0]
+      );
+    }
+  } catch (e: any) {
+    if (e.message.includes("RETURNING clause is not supported for Spanner")) {
+      console.log("Skipped .returning() example for Spanner as expected.");
+    } else {
+      throw e;
+    }
+  }
 
   // 3. UPDATE an existing user
   const updateResult = await db
     .update(users)
     .set({ name: "Alice in Chains" })
-    .where(sql`${users.email} = ${"alice@example.com"}`);
-  console.log("Update Result:", updateResult); // e.g., { count: 1 }
+    .where(sql`${users.email} = ${"alice@example.com"}`); // Ensure email matches an existing record
+  console.log("Update Result (count):", updateResult); // e.g., { count: 1 }
+
+  // 3b. UPDATE an existing user and return the updated row(s) (PostgreSQL/PGLite only)
+  // For Spanner, using .returning() will throw an error.
+  try {
+    const updatedUsers = await db
+      .update(users)
+      .set({ name: "Alice Updated Name" })
+      .where(sql`${users.email} = ${"alice@example.com"}`)
+      .returning();
+    if (updatedUsers.length > 0) {
+      console.log("Updated User (PostgreSQL/PGLite):", updatedUsers[0]);
+    }
+  } catch (e: any) {
+    if (e.message.includes("RETURNING clause is not supported for Spanner")) {
+      console.log(
+        "Skipped UPDATE .returning() example for Spanner as expected."
+      );
+    } else {
+      throw e;
+    }
+  }
 
   // 4. SELECT with Eager Loading (include)
   // Assuming 'posts' table has a 'userId' column referencing 'users.id'
@@ -336,8 +387,28 @@ async function runFluentExamples(db: OrmClient) {
   // 5. DELETE a user
   const deleteResult = await db
     .deleteFrom(users)
-    .where(sql`${users.email} = ${"alice@example.com"}`);
-  console.log("Delete Result:", deleteResult); // e.g., { count: 1 }
+    .where(sql`${users.email} = ${"alice@example.com"}`); // Ensure email matches an existing record
+  console.log("Delete Result (count):", deleteResult); // e.g., { count: 1 }
+
+  // 5b. DELETE users and return the deleted row(s) (PostgreSQL/PGLite only)
+  // For Spanner, using .returning() will throw an error.
+  try {
+    const deletedUsers = await db
+      .deleteFrom(users)
+      .where(sql`${users.email} = ${"bob@example.com"}`) // Ensure email matches an existing record
+      .returning({ id: users.id, name: users.name });
+    if (deletedUsers.length > 0) {
+      console.log("Deleted User (PostgreSQL/PGLite):", deletedUsers[0]);
+    }
+  } catch (e: any) {
+    if (e.message.includes("RETURNING clause is not supported for Spanner")) {
+      console.log(
+        "Skipped DELETE .returning() example for Spanner as expected."
+      );
+    } else {
+      throw e;
+    }
+  }
 
   // 6. Raw SQL Query
   const rawUsersCount = await db.raw<{ total_users: number }[]>(
