@@ -26,7 +26,7 @@ const mockSql: SQL = {
 };
 
 const usersTable: TableConfig = {
-  name: "users",
+  tableName: "users", // Changed from name to tableName
   columns: {
     id: {
       name: "id",
@@ -50,7 +50,7 @@ const usersTable: TableConfig = {
 };
 
 const postsTable: TableConfig = {
-  name: "posts",
+  tableName: "posts", // Changed from name to tableName
   columns: {
     id: {
       name: "id",
@@ -87,6 +87,7 @@ const mockQueryBuilderInstance = {
   update: vi.fn().mockReturnThis(),
   set: vi.fn().mockReturnThis(),
   deleteFrom: vi.fn().mockReturnThis(),
+  returning: vi.fn().mockReturnThis(), // Added returning mock
   prepare: vi.fn(),
 };
 
@@ -241,6 +242,125 @@ describe("OrmClient & ExecutableQuery", () => {
     });
   });
 
+  describe("ExecutableQuery (INSERT with RETURNING)", () => {
+    it("should execute INSERT with RETURNING * and use adapter.query", async () => {
+      const mockInsertReturningStarPreparedQuery: PreparedQuery<any, any> = {
+        sql: "INSERT INTO users (name) VALUES ($1) RETURNING *",
+        parameters: ["Returning User"],
+        dialect: "postgres",
+        action: "insert",
+        primaryTable: usersTable,
+      };
+      (mockQueryBuilderInstance.prepare as vi.Mock).mockReturnValue(
+        mockInsertReturningStarPreparedQuery
+      );
+      const mockReturnedData = [
+        { id: 1, name: "Returning User", email: "ret@ex.com" },
+      ];
+      (mockAdapter.query as vi.Mock).mockResolvedValue(mockReturnedData);
+
+      const result = await db
+        .insert(usersTable)
+        .values({ name: "Returning User" })
+        .returning(); // Implicit RETURNING *
+
+      expect(mockQueryBuilderInstance.returning).toHaveBeenCalledWith(
+        undefined
+      ); // or true, depending on QueryBuilder impl.
+      expect(mockAdapter.query).toHaveBeenCalledWith(
+        mockInsertReturningStarPreparedQuery.sql,
+        mockInsertReturningStarPreparedQuery.parameters
+      );
+      expect(mockAdapter.execute).not.toHaveBeenCalled();
+      expect(result).toEqual(mockReturnedData);
+    });
+
+    it("should execute INSERT with RETURNING specific columns", async () => {
+      const mockInsertReturningColsPreparedQuery: PreparedQuery<any, any> = {
+        sql: "INSERT INTO users (name, email) VALUES ($1, $2) RETURNING id, email",
+        parameters: ["Specific Col User", "specific@example.com"],
+        dialect: "postgres",
+        action: "insert",
+        primaryTable: usersTable,
+      };
+      (mockQueryBuilderInstance.prepare as vi.Mock).mockReturnValue(
+        mockInsertReturningColsPreparedQuery
+      );
+      const mockReturnedData = [{ id: 2, email: "specific@example.com" }];
+      (mockAdapter.query as vi.Mock).mockResolvedValue(mockReturnedData);
+
+      const result = await db
+        .insert(usersTable)
+        .values({ name: "Specific Col User", email: "specific@example.com" })
+        .returning({
+          id: usersTable.columns.id,
+          email: usersTable.columns.email,
+        });
+
+      expect(mockQueryBuilderInstance.returning).toHaveBeenCalledWith({
+        id: usersTable.columns.id,
+        email: usersTable.columns.email,
+      });
+      expect(mockAdapter.query).toHaveBeenCalledWith(
+        mockInsertReturningColsPreparedQuery.sql,
+        mockInsertReturningColsPreparedQuery.parameters
+      );
+      expect(result).toEqual(mockReturnedData);
+    });
+
+    it("should emulate INSERT with RETURNING for Spanner", async () => {
+      db = new OrmClient(mockAdapter, "spanner");
+      const insertData = {
+        id: "new-uuid",
+        name: "Spanner User",
+        email: "spanner@user.com",
+      };
+
+      // Mock for the initial INSERT DML
+      const mockInsertDmlPrepared: PreparedQuery<any, any> = {
+        sql: "INSERT INTO users (id, name, email) VALUES (@p1, @p2, @p3)",
+        parameters: [insertData.id, insertData.name, insertData.email],
+        dialect: "spanner",
+        action: "insert",
+        primaryTable: usersTable,
+      };
+
+      // Mock for the subsequent SELECT to fetch the "returned" data
+      const mockSelectAfterInsertPrepared: PreparedQuery<any, any> = {
+        sql: "SELECT id, name, email FROM users WHERE id = @p1", // Simplified for test
+        parameters: [insertData.id],
+        dialect: "spanner",
+        action: "select",
+        primaryTable: usersTable,
+        fields: { id: true, name: true, email: true } as any,
+      };
+      const expectedReturnedData = [insertData];
+
+      (mockQueryBuilderInstance.prepare as vi.Mock)
+        .mockReturnValueOnce(mockInsertDmlPrepared) // For the .insert().values() part
+        .mockReturnValueOnce(mockSelectAfterInsertPrepared); // For the internal SELECT
+
+      (mockAdapter.execute as vi.Mock).mockResolvedValueOnce({ count: 1 });
+      (mockAdapter.query as vi.Mock).mockResolvedValueOnce(
+        expectedReturnedData
+      );
+
+      const result = await db.insert(usersTable).values(insertData).returning();
+
+      expect(mockAdapter.execute).toHaveBeenCalledWith(
+        mockInsertDmlPrepared.sql,
+        mockInsertDmlPrepared.parameters
+      );
+      expect(mockAdapter.query).toHaveBeenCalledWith(
+        mockSelectAfterInsertPrepared.sql,
+        mockSelectAfterInsertPrepared.parameters
+      );
+      expect(result).toEqual(expectedReturnedData);
+      // Ensure QueryBuilder.returning was called
+      expect(mockQueryBuilderInstance.returning).toHaveBeenCalled();
+    });
+  });
+
   describe("ExecutableQuery (UPDATE)", () => {
     it("should build and execute an UPDATE query", async () => {
       const mockUpdatePreparedQuery: PreparedQuery<any, any> = {
@@ -266,6 +386,90 @@ describe("OrmClient & ExecutableQuery", () => {
     });
   });
 
+  describe("ExecutableQuery (UPDATE with RETURNING)", () => {
+    it("should execute UPDATE with RETURNING *", async () => {
+      const mockUpdateReturningStar: PreparedQuery<any, any> = {
+        sql: "UPDATE users SET name = $1 WHERE id = $2 RETURNING *",
+        parameters: ["Updated Name", 1],
+        dialect: "postgres",
+        action: "update",
+        primaryTable: usersTable,
+      };
+      (mockQueryBuilderInstance.prepare as vi.Mock).mockReturnValue(
+        mockUpdateReturningStar
+      );
+      const mockReturnedData = [
+        { id: 1, name: "Updated Name", email: "user@example.com" },
+      ];
+      (mockAdapter.query as vi.Mock).mockResolvedValue(mockReturnedData);
+
+      const result = await db
+        .update(usersTable)
+        .set({ name: "Updated Name" })
+        .where(mockSql) // mockSql is just a placeholder for where condition
+        .returning();
+
+      expect(mockAdapter.query).toHaveBeenCalledWith(
+        mockUpdateReturningStar.sql,
+        mockUpdateReturningStar.parameters
+      );
+      expect(result).toEqual(mockReturnedData);
+    });
+
+    it("should emulate UPDATE with RETURNING for Spanner", async () => {
+      db = new OrmClient(mockAdapter, "spanner");
+      const updateData = { name: "Spanner Update" };
+      const whereConditionSql = mockSql; // Using the existing mockSql for the WHERE
+
+      const mockUpdateDmlPrepared: PreparedQuery<any, any> = {
+        sql: "UPDATE users SET name = @p1 WHERE SELECT mock",
+        parameters: [updateData.name],
+        dialect: "spanner",
+        action: "update",
+        primaryTable: usersTable,
+      };
+
+      // Mock for the SELECT that fetches based on the original WHERE
+      const mockSelectAfterUpdatePrepared: PreparedQuery<any, any> = {
+        sql: "SELECT id, name, email FROM users WHERE SELECT mock", // WHERE clause should match update
+        parameters: whereConditionSql.getValues("spanner"),
+        dialect: "spanner",
+        action: "select",
+        primaryTable: usersTable,
+        fields: { id: true, name: true, email: true } as any,
+      };
+      const expectedReturnedData = [
+        { id: 1, name: "Spanner Update", email: "original@spanner.com" },
+      ];
+
+      (mockQueryBuilderInstance.prepare as vi.Mock)
+        .mockReturnValueOnce(mockUpdateDmlPrepared)
+        .mockReturnValueOnce(mockSelectAfterUpdatePrepared);
+
+      (mockAdapter.execute as vi.Mock).mockResolvedValueOnce({ count: 1 });
+      (mockAdapter.query as vi.Mock).mockResolvedValueOnce(
+        expectedReturnedData
+      );
+
+      const result = await db
+        .update(usersTable)
+        .set(updateData)
+        .where(whereConditionSql)
+        .returning();
+
+      expect(mockAdapter.execute).toHaveBeenCalledWith(
+        mockUpdateDmlPrepared.sql,
+        mockUpdateDmlPrepared.parameters
+      );
+      expect(mockAdapter.query).toHaveBeenCalledWith(
+        mockSelectAfterUpdatePrepared.sql,
+        mockSelectAfterUpdatePrepared.parameters
+      );
+      expect(result).toEqual(expectedReturnedData);
+      expect(mockQueryBuilderInstance.returning).toHaveBeenCalled();
+    });
+  });
+
   describe("ExecutableQuery (DELETE)", () => {
     it("should build and execute a DELETE query", async () => {
       const mockDeletePreparedQuery: PreparedQuery<any, any> = {
@@ -285,6 +489,86 @@ describe("OrmClient & ExecutableQuery", () => {
         mockDeletePreparedQuery.parameters
       );
       expect(result).toEqual({ count: 1 });
+    });
+  });
+
+  describe("ExecutableQuery (DELETE with RETURNING)", () => {
+    it("should execute DELETE with RETURNING *", async () => {
+      const mockDeleteReturningStar: PreparedQuery<any, any> = {
+        sql: "DELETE FROM users WHERE id = $1 RETURNING *",
+        parameters: [1],
+        dialect: "postgres",
+        action: "delete",
+        primaryTable: usersTable,
+      };
+      (mockQueryBuilderInstance.prepare as vi.Mock).mockReturnValue(
+        mockDeleteReturningStar
+      );
+      const mockReturnedData = [
+        { id: 1, name: "Deleted User", email: "deleted@example.com" },
+      ];
+      (mockAdapter.query as vi.Mock).mockResolvedValue(mockReturnedData);
+
+      const result = await db
+        .deleteFrom(usersTable)
+        .where(mockSql) // mockSql for where condition
+        .returning();
+
+      expect(mockAdapter.query).toHaveBeenCalledWith(
+        mockDeleteReturningStar.sql,
+        mockDeleteReturningStar.parameters
+      );
+      expect(result).toEqual(mockReturnedData);
+    });
+
+    it("should emulate DELETE with RETURNING for Spanner", async () => {
+      db = new OrmClient(mockAdapter, "spanner");
+      const whereConditionSql = mockSql;
+
+      // Mock for the SELECT that happens BEFORE the delete
+      const mockSelectBeforeDeletePrepared: PreparedQuery<any, any> = {
+        sql: "SELECT id, name, email FROM users WHERE SELECT mock",
+        parameters: whereConditionSql.getValues("spanner"),
+        dialect: "spanner",
+        action: "select",
+        primaryTable: usersTable,
+        fields: { id: true, name: true, email: true } as any,
+      };
+      const dataToBeDeleted = [
+        { id: 1, name: "About To Be Deleted", email: "delete@spanner.com" },
+      ];
+
+      // Mock for the DELETE DML
+      const mockDeleteDmlPrepared: PreparedQuery<any, any> = {
+        sql: "DELETE FROM users WHERE SELECT mock",
+        parameters: whereConditionSql.getValues("spanner"),
+        dialect: "spanner",
+        action: "delete",
+        primaryTable: usersTable,
+      };
+
+      (mockQueryBuilderInstance.prepare as vi.Mock)
+        .mockReturnValueOnce(mockSelectBeforeDeletePrepared) // For the internal SELECT
+        .mockReturnValueOnce(mockDeleteDmlPrepared); // For the DELETE DML
+
+      (mockAdapter.query as vi.Mock).mockResolvedValueOnce(dataToBeDeleted);
+      (mockAdapter.execute as vi.Mock).mockResolvedValueOnce({ count: 1 });
+
+      const result = await db
+        .deleteFrom(usersTable)
+        .where(whereConditionSql)
+        .returning();
+
+      expect(mockAdapter.query).toHaveBeenCalledWith(
+        mockSelectBeforeDeletePrepared.sql,
+        mockSelectBeforeDeletePrepared.parameters
+      );
+      expect(mockAdapter.execute).toHaveBeenCalledWith(
+        mockDeleteDmlPrepared.sql,
+        mockDeleteDmlPrepared.parameters
+      );
+      expect(result).toEqual(dataToBeDeleted);
+      expect(mockQueryBuilderInstance.returning).toHaveBeenCalled();
     });
   });
 

@@ -14,6 +14,7 @@ import type {
   PreparedQuery, // PreparedQuery is defined in common.ts
   ColumnConfig, // For orderBy/groupBy casts
 } from "./types/common.js";
+import { sql } from "./types/common.js"; // Import sql as a value
 import { QueryBuilder } from "./core/query-builder.js";
 import { shapeResults } from "./core/result-shaper.js";
 import {
@@ -36,11 +37,15 @@ export class ExecutableQuery<
   // TFields uses SelectFields from common.ts. It's a map of selections.
   TFields extends SelectFields<TPrimaryTable> = SelectFields<TPrimaryTable>,
   // EnhancedIncludeClause is not generic.
-  TInclude extends EnhancedIncludeClause | undefined = undefined
+  TInclude extends EnhancedIncludeClause | undefined = undefined,
+  // Add TReturningResult to represent the type when .returning() is used
+  TReturningResult = TResult // Defaults to TResult if not specified
 > {
   // QueryBuilder is generic on TTable (which is TPrimaryTable here)
   protected internalQueryBuilder: QueryBuilder<TPrimaryTable>;
   protected client: OrmClient;
+  // Flag to indicate if returning was called, to help with type inference and execution logic
+  private _hasReturning: boolean = false;
 
   constructor(
     client: OrmClient,
@@ -74,36 +79,66 @@ export class ExecutableQuery<
 
   from(
     table: TPrimaryTable
-  ): ExecutableQuery<TResult, TPrimaryTable, TFields, TInclude> {
+  ): ExecutableQuery<
+    TResult,
+    TPrimaryTable,
+    TFields,
+    TInclude,
+    TReturningResult
+  > {
     this.internalQueryBuilder.from(table);
-    return this;
+    return this as any; // Cast needed due to TReturningResult
   }
 
   where(
     condition: SQL
-  ): ExecutableQuery<TResult, TPrimaryTable, TFields, TInclude> {
+  ): ExecutableQuery<
+    TResult,
+    TPrimaryTable,
+    TFields,
+    TInclude,
+    TReturningResult
+  > {
     this.internalQueryBuilder.where(condition);
-    return this;
+    return this as any;
   }
 
   limit(
     count: number
-  ): ExecutableQuery<TResult, TPrimaryTable, TFields, TInclude> {
+  ): ExecutableQuery<
+    TResult,
+    TPrimaryTable,
+    TFields,
+    TInclude,
+    TReturningResult
+  > {
     this.internalQueryBuilder.limit(count);
-    return this;
+    return this as any;
   }
 
   offset(
     count: number
-  ): ExecutableQuery<TResult, TPrimaryTable, TFields, TInclude> {
+  ): ExecutableQuery<
+    TResult,
+    TPrimaryTable,
+    TFields,
+    TInclude,
+    TReturningResult
+  > {
     this.internalQueryBuilder.offset(count);
-    return this;
+    return this as any;
   }
 
   orderBy(
     column: SQL | keyof TPrimaryTable["columns"],
     direction: "ASC" | "DESC" = "ASC"
-  ): ExecutableQuery<TResult, TPrimaryTable, TFields, TInclude> {
+  ): ExecutableQuery<
+    TResult,
+    TPrimaryTable,
+    TFields,
+    TInclude,
+    TReturningResult
+  > {
     // QueryBuilder's orderBy expects ColumnConfig or SQL.
     // If keyof TPrimaryTable["columns"] is passed, it needs to be resolved or QueryBuilder needs to handle it.
     // For now, assume it's handled by SQL template or direct ColumnConfig usage.
@@ -111,16 +146,22 @@ export class ExecutableQuery<
       column as SQL | ColumnConfig<any, any>,
       direction
     );
-    return this;
+    return this as any;
   }
 
   groupBy(
     ...columns: (SQL | keyof TPrimaryTable["columns"])[]
-  ): ExecutableQuery<TResult, TPrimaryTable, TFields, TInclude> {
+  ): ExecutableQuery<
+    TResult,
+    TPrimaryTable,
+    TFields,
+    TInclude,
+    TReturningResult
+  > {
     this.internalQueryBuilder.groupBy(
       ...(columns as (SQL | ColumnConfig<any, any>)[])
     );
-    return this;
+    return this as any;
   }
 
   include<NewInclude extends EnhancedIncludeClause>( // EnhancedIncludeClause is not generic
@@ -149,31 +190,68 @@ export class ExecutableQuery<
     data:
       | Partial<InferModelType<TPrimaryTable>> // InferModelType takes one generic arg
       | Partial<InferModelType<TPrimaryTable>>[]
-  ): ExecutableQuery<AffectedRows, TPrimaryTable, undefined, undefined> {
+  ): ExecutableQuery<
+    AffectedRows,
+    TPrimaryTable,
+    undefined,
+    undefined,
+    AffectedRows
+  > {
     this.internalQueryBuilder.values(data);
+    // When .values() is called, the result type is AffectedRows unless .returning() is called later.
+    // The TReturningResult here is the default for this specific chain link.
     return this as unknown as ExecutableQuery<
       AffectedRows,
       TPrimaryTable,
       undefined,
-      undefined
+      undefined,
+      AffectedRows
     >;
   }
 
   set(
     data: Partial<InferModelType<TPrimaryTable>> // InferModelType takes one generic arg
-  ): ExecutableQuery<AffectedRows, TPrimaryTable, undefined, undefined> {
+  ): ExecutableQuery<
+    AffectedRows,
+    TPrimaryTable,
+    undefined,
+    undefined,
+    AffectedRows
+  > {
     this.internalQueryBuilder.set(data);
     return this as unknown as ExecutableQuery<
       AffectedRows,
       TPrimaryTable,
       undefined,
-      undefined
+      undefined,
+      AffectedRows
+    >;
+  }
+
+  returning(fields?: SelectFields<TPrimaryTable> | true): ExecutableQuery<
+    InferModelType<TPrimaryTable>[], // This becomes the TResult
+    TPrimaryTable,
+    TFields, // TFields from original select (or undefined for DML)
+    undefined, // TInclude is undefined for DML returning
+    InferModelType<TPrimaryTable>[] // This is the TReturningResult
+  > {
+    this.internalQueryBuilder.returning(fields);
+    this._hasReturning = true;
+    // The key is to cast 'this' to a new ExecutableQuery with updated TResult and TReturningResult
+    return this as unknown as ExecutableQuery<
+      InferModelType<TPrimaryTable>[],
+      TPrimaryTable,
+      TFields,
+      undefined,
+      InferModelType<TPrimaryTable>[]
     >;
   }
 
   // --- Thenable Implementation ---
-  then<TData = TResult, TError = never>(
-    onFulfilled?: (value: TResult) => TData | PromiseLike<TData>,
+  // TData is the type of the resolved value from onFulfilled
+  // TResult is the type this ExecutableQuery instance is supposed to yield (could be AffectedRows or Model[])
+  then<TData = TReturningResult, TError = never>(
+    onFulfilled?: (value: TReturningResult) => TData | PromiseLike<TData>,
     onRejected?: (reason: any) => TError | PromiseLike<TError>
   ): Promise<TData | TError> {
     // prepare() returns PreparedQuery<TPrimaryTable, EnhancedIncludeClause | undefined>
@@ -182,60 +260,265 @@ export class ExecutableQuery<
       this.client.dialect
     ) as PreparedQuery<TPrimaryTable, TInclude>;
 
-    let executionPromise: Promise<any>;
+    let executionPromise: Promise<TReturningResult>; // Use TReturningResult here
 
     switch (preparedQuery.action) {
       case "select":
         executionPromise = this.client.adapter.query(
           preparedQuery.sql,
           preparedQuery.parameters
-        );
-        if (
-          preparedQuery.includeClause &&
-          preparedQuery.primaryTable
-          // preparedQuery.fields is not used by shapeResults current signature
-        ) {
+        ) as Promise<TReturningResult>; // Cast to TReturningResult
+        if (preparedQuery.includeClause && preparedQuery.primaryTable) {
           executionPromise = executionPromise.then((rawData) =>
             shapeResults(
-              rawData,
+              rawData as any[], // rawData is TReturningResult, shapeResults expects any[]
               preparedQuery.primaryTable as TableConfig,
-              preparedQuery.includeClause // Pass as is, shapeResults takes TInclude extends EnhancedIncludeClause | undefined
+              preparedQuery.includeClause
             )
-          );
+          ) as Promise<TReturningResult>; // Cast result of shapeResults
         }
         break;
       case "insert":
+        if (this._hasReturning && this.client.dialect === "spanner") {
+          executionPromise = this.executeSpannerInsertReturning(preparedQuery);
+        } else if (this._hasReturning) {
+          executionPromise = this.client.adapter.query(
+            preparedQuery.sql,
+            preparedQuery.parameters
+          ) as Promise<TReturningResult>;
+        } else {
+          executionPromise = this.client.adapter
+            .execute(preparedQuery.sql, preparedQuery.parameters)
+            .then((res: number | AffectedRows) => ({
+              count: typeof res === "number" ? res : res.count ?? 0,
+            })) as Promise<TReturningResult>;
+        }
+        break;
       case "update":
+        if (this._hasReturning && this.client.dialect === "spanner") {
+          executionPromise = this.executeSpannerUpdateReturning(preparedQuery);
+        } else if (this._hasReturning) {
+          executionPromise = this.client.adapter.query(
+            preparedQuery.sql,
+            preparedQuery.parameters
+          ) as Promise<TReturningResult>;
+        } else {
+          executionPromise = this.client.adapter
+            .execute(preparedQuery.sql, preparedQuery.parameters)
+            .then((res: number | AffectedRows) => ({
+              count: typeof res === "number" ? res : res.count ?? 0,
+            })) as Promise<TReturningResult>;
+        }
+        break;
       case "delete":
-        executionPromise = this.client.adapter
-          .execute(preparedQuery.sql, preparedQuery.parameters)
-          .then((res: number | AffectedRows) => ({
-            // Add type for res
-            count:
-              typeof res === "number" ? res : (res as AffectedRows).count ?? 0,
-          })); // Ensure consistent return
+        if (this._hasReturning && this.client.dialect === "spanner") {
+          executionPromise = this.executeSpannerDeleteReturning(preparedQuery);
+        } else if (this._hasReturning) {
+          executionPromise = this.client.adapter.query(
+            preparedQuery.sql,
+            preparedQuery.parameters
+          ) as Promise<TReturningResult>;
+        } else {
+          executionPromise = this.client.adapter
+            .execute(preparedQuery.sql, preparedQuery.parameters)
+            .then((res: number | AffectedRows) => ({
+              count: typeof res === "number" ? res : res.count ?? 0,
+            })) as Promise<TReturningResult>;
+        }
         break;
       default:
+        // This cast for onFulfilled might be problematic if TData is not Promise<never>
         return Promise.reject(
           new Error(`Unsupported query action: ${preparedQuery.action}`)
-        ).then(onFulfilled, onRejected);
+        ).then(onFulfilled as any, onRejected);
     }
-
+    // The final promise should resolve to TData or TError
     return executionPromise.then(onFulfilled, onRejected);
   }
 
   catch<TError = never>(
     onRejected?: (reason: any) => TError | PromiseLike<TError>
-  ): Promise<TResult | TError> {
+  ): Promise<TReturningResult | TError> {
+    // Result type is TReturningResult
     return this.then(undefined, onRejected);
   }
 
   // Utility to get SQL and parameters, e.g., for logging or debugging
+  // The return type of prepare() is already generic and should be fine.
   toSQL(): PreparedQuery<TPrimaryTable, TInclude> {
     // PreparedQuery is generic. prepare() returns with TInclude as EnhancedIncludeClause | undefined.
     return this.internalQueryBuilder.prepare(
       this.client.dialect
     ) as PreparedQuery<TPrimaryTable, TInclude>;
+  }
+
+  private async executeSpannerInsertReturning(
+    dmlPreparedQuery: PreparedQuery<TPrimaryTable, TInclude>
+  ): Promise<TReturningResult> {
+    await this.client.adapter.execute(
+      dmlPreparedQuery.sql,
+      dmlPreparedQuery.parameters
+    );
+
+    const table = this.internalQueryBuilder["_targetTable"];
+    const insertValues = this.internalQueryBuilder["_insertValues"];
+    if (!table || !insertValues) {
+      throw new Error(
+        "Spanner INSERT RETURNING: Target table or values missing."
+      );
+    }
+
+    const pkColumns = Object.values(table.columns).filter((c) => c.primaryKey);
+    if (pkColumns.length === 0) {
+      throw new Error(
+        `Spanner INSERT RETURNING: No primary key defined for table ${table.tableName}. Cannot fetch inserted rows.`
+      );
+    }
+
+    const records = Array.isArray(insertValues) ? insertValues : [insertValues];
+    if (records.length === 0) return [] as unknown as TReturningResult;
+
+    // Assuming all records have PKs defined in the input
+    const pkConditions: SQL[] = [];
+
+    for (const record of records) {
+      const recordPkConditions: SQL[] = [];
+      for (const pkCol of pkColumns) {
+        const pkValue = (record as any)[pkCol.name];
+        if (pkValue === undefined) {
+          throw new Error(
+            `Spanner INSERT RETURNING: Primary key value for ${pkCol.name} is missing in one of the records.`
+          );
+        }
+        recordPkConditions.push(sql`${pkCol} = ${pkValue}`);
+      }
+      if (recordPkConditions.length > 1) {
+        // Manually construct AND conditions for composite PKs
+        let andClause = recordPkConditions[0];
+        for (let k = 1; k < recordPkConditions.length; k++) {
+          andClause = sql`${andClause} AND ${recordPkConditions[k]}`;
+        }
+        pkConditions.push(sql`(${andClause})`);
+      } else if (recordPkConditions.length === 1) {
+        pkConditions.push(recordPkConditions[0]);
+      }
+    }
+
+    let finalWhereCondition: SQL;
+    if (pkConditions.length > 1) {
+      // Manually construct OR conditions for multiple records
+      let orClause = pkConditions[0];
+      for (let k = 1; k < pkConditions.length; k++) {
+        orClause = sql`${orClause} OR ${pkConditions[k]}`;
+      }
+      finalWhereCondition = sql`(${orClause})`;
+    } else if (pkConditions.length === 1) {
+      finalWhereCondition = pkConditions[0];
+    } else {
+      return [] as unknown as TReturningResult; // Should not happen if records.length > 0
+    }
+
+    const selectQb = new QueryBuilder<TPrimaryTable>();
+    const returningFields = this.internalQueryBuilder["_returningFields"];
+
+    if (returningFields === true) {
+      selectQb.select("*");
+    } else if (returningFields && typeof returningFields === "object") {
+      // QueryBuilder.select expects the local SelectFields type, not CommonSelectFields
+      selectQb.select(returningFields as any);
+    } else {
+      selectQb.select("*"); // Default to all if not specified
+    }
+    selectQb.from(table).where(finalWhereCondition);
+
+    const selectPreparedQuery = selectQb.prepare(this.client.dialect);
+    return this.client.adapter.query(
+      selectPreparedQuery.sql,
+      selectPreparedQuery.parameters
+    ) as Promise<TReturningResult>;
+  }
+
+  private async executeSpannerUpdateReturning(
+    dmlPreparedQuery: PreparedQuery<TPrimaryTable, TInclude>
+  ): Promise<TReturningResult> {
+    await this.client.adapter.execute(
+      dmlPreparedQuery.sql,
+      dmlPreparedQuery.parameters
+    );
+
+    const table = this.internalQueryBuilder["_targetTable"];
+    if (!table) {
+      throw new Error("Spanner UPDATE RETURNING: Target table missing.");
+    }
+    const originalConditions = this.internalQueryBuilder["_conditions"];
+
+    const selectQb = new QueryBuilder<TPrimaryTable>();
+    const returningFields = this.internalQueryBuilder["_returningFields"];
+
+    if (returningFields === true) {
+      selectQb.select("*");
+    } else if (returningFields && typeof returningFields === "object") {
+      selectQb.select(returningFields as any);
+    } else {
+      selectQb.select("*");
+    }
+    selectQb.from(table);
+    if (originalConditions && originalConditions.length > 0) {
+      originalConditions.forEach((cond) => selectQb.where(cond));
+    } else {
+      // Updating all rows, so select all rows. This might be dangerous / unintended.
+      // Consider if a warning or error is more appropriate if WHERE clause is missing for UPDATE RETURNING.
+    }
+
+    const selectPreparedQuery = selectQb.prepare(this.client.dialect);
+    return this.client.adapter.query(
+      selectPreparedQuery.sql,
+      selectPreparedQuery.parameters
+    ) as Promise<TReturningResult>;
+  }
+
+  private async executeSpannerDeleteReturning(
+    dmlPreparedQuery: PreparedQuery<TPrimaryTable, TInclude>
+  ): Promise<TReturningResult> {
+    const table = this.internalQueryBuilder["_targetTable"];
+    if (!table) {
+      throw new Error("Spanner DELETE RETURNING: Target table missing.");
+    }
+    const originalConditions = this.internalQueryBuilder["_conditions"];
+
+    // 1. Select the rows that are about to be deleted
+    const selectQb = new QueryBuilder<TPrimaryTable>();
+    const returningFields = this.internalQueryBuilder["_returningFields"];
+
+    if (returningFields === true) {
+      selectQb.select("*");
+    } else if (returningFields && typeof returningFields === "object") {
+      selectQb.select(returningFields as any);
+    } else {
+      selectQb.select("*"); // Default to all
+    }
+    selectQb.from(table);
+    if (originalConditions && originalConditions.length > 0) {
+      originalConditions.forEach((cond) => selectQb.where(cond));
+    } else {
+      // Deleting all rows. This is a significant operation.
+      // Fetching all rows first could be memory intensive.
+    }
+
+    const selectPreparedQuery = selectQb.prepare(this.client.dialect);
+    const rowsToDelete = (await this.client.adapter.query(
+      selectPreparedQuery.sql,
+      selectPreparedQuery.parameters
+    )) as TReturningResult;
+
+    // 2. Execute the DELETE DML
+    await this.client.adapter.execute(
+      dmlPreparedQuery.sql,
+      dmlPreparedQuery.parameters
+    );
+
+    // 3. Return the previously fetched rows
+    return rowsToDelete;
   }
 }
 
