@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { QueryBuilder } from "../../src/core/query-builder.js";
 import { table, text, integer, timestamp } from "../../src/core/schema.js";
 import { sql } from "../../src/types/common.js";
@@ -29,6 +29,16 @@ const postsTable = table("posts", {
   title: text("title").notNull(),
   userId: integer("user_id").references(() => usersTable.columns.id),
   content: text("content"),
+});
+
+const commentsTable = table("comments", {
+  id: integer("id").primaryKey(), // Simplified: removed generatedAlwaysAsIdentity()
+  content: text("content").notNull(),
+  userId: integer("user_id").references(() => usersTable.columns.id),
+  rootId: integer("root_id").notNull(),
+  entityType: text("entity_type").notNull(), // e.g., 'post', 'another_comment'
+  parentId: integer("parent_id").references(() => commentsTable.columns.id), // Self-referencing for replies
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
 describe("QueryBuilder SQL Generation with Aliasing", () => {
@@ -338,6 +348,206 @@ describe("QueryBuilder SQL Generation with Aliasing", () => {
       expect(preparedQuery.sql).toBe('DELETE FROM "users"');
       expect(preparedQuery.parameters).toEqual([]);
     });
+  });
+});
+
+describe("QueryBuilder Debug Method", () => {
+  let qb: QueryBuilder<typeof usersTable>;
+
+  beforeEach(() => {
+    qb = new QueryBuilder<typeof usersTable>();
+    // Default spy setup moved to individual tests if needed, or keep general one if it works for others
+  });
+
+  // General spy for tests that don't need special handling
+  let generalConsoleLogSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    generalConsoleLogSpy = vi
+      .spyOn(console, "log")
+      .mockImplementation(() => {}); // Mock implementation to suppress output during most tests
+    generalConsoleLogSpy.mockClear();
+  });
+  afterEach(() => {
+    generalConsoleLogSpy.mockRestore();
+  });
+
+  it("should log SQL and parameters when debug() is called for a SELECT query", () => {
+    // Use the general spy, but clear it first for this specific test's assertions
+    generalConsoleLogSpy.mockClear();
+    const preparedQuery = qb
+      .select({ id: usersTable.columns.id })
+      .from(usersTable)
+      .where(sql`${usersTable.columns.age} > ${30}`)
+      .debug()
+      .prepare("postgres");
+
+    expect(generalConsoleLogSpy).toHaveBeenCalledTimes(5);
+    expect(generalConsoleLogSpy).toHaveBeenCalledWith("--- SQL Query ---");
+    expect(generalConsoleLogSpy).toHaveBeenCalledWith(
+      'SELECT "t1"."id" AS "id" FROM "users" AS "t1" WHERE "t1"."age" > $1'
+    );
+    expect(generalConsoleLogSpy).toHaveBeenCalledWith("--- Parameters ---");
+    expect(generalConsoleLogSpy).toHaveBeenCalledWith([30]);
+    expect(generalConsoleLogSpy).toHaveBeenCalledWith("-----------------");
+    expect(preparedQuery.sql).toBe(
+      'SELECT "t1"."id" AS "id" FROM "users" AS "t1" WHERE "t1"."age" > $1'
+    );
+    expect(preparedQuery.parameters).toEqual([30]);
+  });
+
+  it("should log SQL and parameters when debug() is called for an INSERT query", () => {
+    // Dedicated spy for this test
+    const insertTestConsoleLogSpy = vi
+      .spyOn(console, "log")
+      .mockImplementation(() => {});
+
+    const localQb = new QueryBuilder<typeof usersTable>(); // Use a local qb instance
+    const preparedQuery = localQb
+      .insert(usersTable)
+      .values({ name: "Debug User", age: 25 })
+      .debug()
+      .prepare("postgres");
+
+    expect(insertTestConsoleLogSpy).toHaveBeenCalledTimes(5);
+    expect(insertTestConsoleLogSpy).toHaveBeenCalledWith("--- SQL Query ---");
+    expect(insertTestConsoleLogSpy).toHaveBeenCalledWith(
+      'INSERT INTO "users" ("age", "created_at", "name") VALUES ($1, CURRENT_TIMESTAMP, $2)'
+    );
+    expect(insertTestConsoleLogSpy).toHaveBeenCalledWith("--- Parameters ---");
+    expect(insertTestConsoleLogSpy).toHaveBeenCalledWith([25, "Debug User"]);
+    expect(insertTestConsoleLogSpy).toHaveBeenCalledWith("-----------------");
+    expect(preparedQuery.sql).toBe(
+      'INSERT INTO "users" ("age", "created_at", "name") VALUES ($1, CURRENT_TIMESTAMP, $2)'
+    );
+    // Note: default for createdAt is handled, so it's not in the explicit parameters list for the values() part
+    // but the getBoundParameters should reflect the actual values being sent.
+    // The current implementation of getBoundParameters for insert processes defaults and then extracts values.
+    expect(preparedQuery.parameters).toEqual([25, "Debug User"]);
+
+    insertTestConsoleLogSpy.mockRestore(); // Clean up dedicated spy
+  });
+
+  it("should not log if debug() is not called", () => {
+    generalConsoleLogSpy.mockClear(); // Ensure clear state for this test
+    qb.select({ id: usersTable.columns.id })
+      .from(usersTable)
+      .prepare("postgres");
+    expect(generalConsoleLogSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("QueryBuilder Multi-Value Insert with Optional Fields", () => {
+  let qbComments: QueryBuilder<typeof commentsTable>;
+
+  beforeEach(() => {
+    qbComments = new QueryBuilder<typeof commentsTable>();
+  });
+
+  it("PostgreSQL: should correctly generate parameters for multi-value insert with missing optional fields", () => {
+    const insertData = [
+      {
+        content: "Comment 1",
+        userId: 1,
+        rootId: 100,
+        entityType: "post",
+      }, // parentId is missing
+      {
+        content: "Reply to Comment 1",
+        userId: 2,
+        rootId: 100,
+        entityType: "post",
+        parentId: 1,
+      },
+      {
+        content: "Comment 2",
+        userId: 3,
+        rootId: 101,
+        entityType: "post",
+      }, // parentId is missing
+    ];
+
+    // Directly test getBoundParameters logic
+    qbComments.insert(commentsTable).values(insertData);
+    const parameters = qbComments.getBoundParameters("postgres");
+
+    // Expected order of keys after processing defaults and sorting:
+    // content, createdAt, entityType, parentId, rootId, userId
+    // (id is auto-generated and not part of insert values)
+
+    // Row 1: content, createdAt (default), entityType, parentId (null), rootId, userId
+    // Row 2: content, createdAt (default), entityType, parentId (1), rootId, userId
+    // Row 3: content, createdAt (default), entityType, parentId (null), rootId, userId
+
+    expect(parameters.length).toBe(3 * 5); // 3 rows, 5 bind parameters each (createdAt is embedded)
+
+    // Check parameters for the first row (5 params: content, entityType, parentId, rootId, userId)
+    expect(parameters[0]).toBe("Comment 1"); // content
+    expect(parameters[1]).toBe("post"); // entityType
+    expect(parameters[2]).toBe(null); // parentId (should be null)
+    expect(parameters[3]).toBe(100); // rootId
+    expect(parameters[4]).toBe(1); // userId
+
+    // Check parameters for the second row
+    expect(parameters[5]).toBe("Reply to Comment 1"); // content
+    expect(parameters[6]).toBe("post"); // entityType
+    expect(parameters[7]).toBe(1); // parentId
+    expect(parameters[8]).toBe(100); // rootId
+    expect(parameters[9]).toBe(2); // userId
+
+    // Check parameters for the third row
+    expect(parameters[10]).toBe("Comment 2"); // content
+    expect(parameters[11]).toBe("post"); // entityType
+    expect(parameters[12]).toBe(null); // parentId (should be null)
+    expect(parameters[13]).toBe(101); // rootId
+    expect(parameters[14]).toBe(3); // userId
+
+    // Check the generated SQL
+    const preparedQuery = qbComments.prepare("postgres");
+    expect(preparedQuery.sql).toBe(
+      'INSERT INTO "comments" ("content", "created_at", "entity_type", "parent_id", "root_id", "user_id") VALUES ($1, CURRENT_TIMESTAMP, $2, $3, $4, $5), ($6, CURRENT_TIMESTAMP, $7, $8, $9, $10), ($11, CURRENT_TIMESTAMP, $12, $13, $14, $15)'
+    );
+  });
+
+  it("Spanner: should correctly generate parameters for multi-value insert with missing optional fields", () => {
+    const insertData = [
+      {
+        content: "Comment 1 Spanner",
+        userId: 1,
+        rootId: 200,
+        entityType: "post",
+      }, // parentId is missing
+      {
+        content: "Reply to Comment 1 Spanner",
+        userId: 2,
+        rootId: 200,
+        entityType: "post",
+        parentId: 10,
+      },
+    ];
+    qbComments.insert(commentsTable).values(insertData);
+    const parameters = qbComments.getBoundParameters("spanner");
+
+    // Expected order: content, createdAt, entityType, parentId, rootId, userId
+    expect(parameters.length).toBe(2 * 5); // 2 rows, 5 bind parameters each
+
+    // Row 1 (5 params: content, entityType, parentId, rootId, userId)
+    expect(parameters[0]).toBe("Comment 1 Spanner");
+    expect(parameters[1]).toBe("post"); // entityType
+    expect(parameters[2]).toBe(null); // parentId
+    expect(parameters[3]).toBe(200); // rootId
+    expect(parameters[4]).toBe(1); // userId
+
+    // Row 2
+    expect(parameters[5]).toBe("Reply to Comment 1 Spanner");
+    expect(parameters[6]).toBe("post"); // entityType
+    expect(parameters[7]).toBe(10); // parentId
+    expect(parameters[8]).toBe(200); // rootId
+    expect(parameters[9]).toBe(2); // userId
+
+    const preparedQuery = qbComments.prepare("spanner");
+    expect(preparedQuery.sql).toBe(
+      "INSERT INTO `comments` (`content`, `created_at`, `entity_type`, `parent_id`, `root_id`, `user_id`) VALUES (@p1, CURRENT_TIMESTAMP, @p2, @p3, @p4, @p5), (@p6, CURRENT_TIMESTAMP, @p7, @p8, @p9, @p10)"
+    );
   });
 });
 

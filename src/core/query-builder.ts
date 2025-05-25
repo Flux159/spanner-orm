@@ -59,8 +59,14 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
   private _conditions: WhereCondition[] = [];
   private _includeClause?: EnhancedIncludeClause; // Changed to EnhancedIncludeClause
   private _returningClause?: ReturningObject<TTable> | true; // Use ReturningObject
+  private _debugMode: boolean = false;
 
   constructor() {}
+
+  debug(): this {
+    this._debugMode = true;
+    return this;
+  }
 
   private generateTableAlias(table: TableConfig<any, any>): string {
     if (!this._tableAliases.has(table)) {
@@ -302,9 +308,19 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       // Should have been caught earlier, but as a safeguard
       throw new Error("Operation type is undefined during prepare.");
     }
+
+    const params = this.getBoundParameters(dialect);
+    if (this._debugMode) {
+      console.log("--- SQL Query ---");
+      console.log(sqlString);
+      console.log("--- Parameters ---");
+      console.log(params);
+      console.log("-----------------");
+    }
+
     return {
       sql: sqlString,
-      parameters: this.getBoundParameters(dialect),
+      parameters: params,
       dialect: dialect,
       action: this._operationType, // Add the action here
       includeClause:
@@ -1490,12 +1506,16 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           allKeysForParams.add(key)
         );
       });
-      const orderedColumnNames = Array.from(allKeysForParams).sort();
+      const orderedColumnNames = Array.from(allKeysForParams).sort(); // These are the TS keys
       for (const record of processedInsertDataForParams) {
-        for (const columnName of orderedColumnNames) {
-          const value = (record as Record<string, any>)[columnName];
-          if (value === undefined) continue;
-          if (
+        for (const tsKey of orderedColumnNames) {
+          // Iterate using the TS key from orderedColumnNames
+          const value = (record as Record<string, any>)[tsKey]; // Get value using TS key
+
+          if (value === undefined) {
+            // If the TS key is not in the current record, or its value is undefined
+            allParams.push(null); // Supply null for this parameter
+          } else if (
             typeof value === "object" &&
             value !== null &&
             (value as SQL)._isSQL === true

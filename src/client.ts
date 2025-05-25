@@ -204,6 +204,11 @@ export class ExecutableQuery<
     >;
   }
 
+  debug(): this {
+    this.internalQueryBuilder.debug();
+    return this;
+  }
+
   // --- Thenable Implementation ---
   then<TData = TResult, TError = never>(
     onFulfilled?: (value: TResult) => TData | PromiseLike<TData>,
