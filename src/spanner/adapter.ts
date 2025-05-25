@@ -138,6 +138,39 @@ export class SpannerAdapter implements DatabaseAdapter {
     }
   }
 
+  async executeDDL(
+    sql: string,
+    params?: Record<string, any>
+  ): Promise<number | AffectedRows> {
+    const db = this.ensureConnected(); // Relies on connect() having awaited this.ready
+    try {
+      // Spanner's runUpdate returns an array where the first element is the affected row count.
+      // The result of runTransactionAsync is the result of its callback.
+      // const rowCount = await
+
+      const adminClient = this.spannerClient?.getDatabaseAdminClient();
+      await adminClient?.updateDatabaseDdl({
+        database: this.options.databaseId,
+        statements: [sql],
+      });
+
+      // TODO: Fix this
+      const rowCount = 0;
+
+      // const rowCount = await db.runTransactionAsync(
+      //   async (transaction: SpannerNativeTransaction) => {
+      //     const [count] = await transaction.runUpdate({ sql, params });
+      //     // No explicit commit needed here, runTransactionAsync handles it.
+      //     return count;
+      //   }
+      // );
+      return { count: typeof rowCount === "number" ? rowCount : 0 };
+    } catch (error) {
+      console.error("Error executing command with Spanner adapter:", error);
+      throw error;
+    }
+  }
+
   async query<TResult extends AdapterQueryResultRow = AdapterQueryResultRow>(
     sql: string,
     params?: Record<string, any>
