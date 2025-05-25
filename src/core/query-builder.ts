@@ -8,6 +8,8 @@ import type {
   IncludeClause, // Old type, kept for include() method parameter for now
   EnhancedIncludeClause, // New type
   PreparedQuery,
+  ReturningObject,
+  // ReturningColumnSpec, // Not directly used as type annotation here
 } from "../types/common.js";
 import { sql } from "../types/common.js";
 import { getTableConfig } from "./schema.js";
@@ -56,6 +58,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
   private _updateSetValues?: UpdateData<TTable>;
   private _conditions: WhereCondition[] = [];
   private _includeClause?: EnhancedIncludeClause; // Changed to EnhancedIncludeClause
+  private _returningClause?: ReturningObject<TTable> | true; // Use ReturningObject
 
   constructor() {}
 
@@ -165,6 +168,25 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
 
   deleteFrom(table: TTable): this {
     this.setOperation("delete", table);
+    return this;
+  }
+
+  returning(fields?: ReturningObject<TTable> | "*" | true): this {
+    if (
+      this._operationType !== "insert" &&
+      this._operationType !== "update" &&
+      this._operationType !== "delete"
+    ) {
+      throw new Error(
+        `.returning() is only applicable to INSERT, UPDATE, or DELETE queries.`
+      );
+    }
+    if (fields === "*" || fields === true || fields === undefined) {
+      this._returningClause = true; // Means return all columns
+    } else {
+      // Now fields is ReturningObject<TTable>
+      this._returningClause = fields;
+    }
     return this;
   }
 
@@ -287,12 +309,12 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       action: this._operationType, // Add the action here
       includeClause:
         this._operationType === "select" ? this._includeClause : undefined,
-      primaryTable:
-        this._operationType === "select" ? this._targetTable : undefined,
+      primaryTable: this._targetTable, // Keep primaryTable for all operations for returning()
       fields:
         this._operationType === "select"
           ? (this._selectedFields as any)
           : undefined, // Add selected fields
+      returning: this._returningClause, // Add returning clause info
     };
   }
 
@@ -846,7 +868,21 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       );
     });
     const orderedKeys = Array.from(allKeys).sort();
-    const columns = orderedKeys.map((col) => `"${col}"`).join(", ");
+    const columns = orderedKeys
+      .map((tsKey) => {
+        const columnConfig = this._targetTable!.columns[tsKey] as ColumnConfig<
+          any,
+          any
+        >;
+        if (!columnConfig)
+          throw new Error(
+            `Column config not found for key ${tsKey} in table ${
+              this._targetTable!.tableName
+            }`
+          );
+        return `"${columnConfig.name}"`;
+      })
+      .join(", ");
 
     const valuePlaceholders = processedInsertData
       .map((record) => {
@@ -872,7 +908,51 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       })
       .join(", ");
 
-    return `INSERT INTO "${this._targetTable.tableName}" (${columns}) VALUES ${valuePlaceholders}`;
+    let sql = `INSERT INTO "${this._targetTable.tableName}" (${columns}) VALUES ${valuePlaceholders}`;
+    if (this._returningClause) {
+      if (this._returningClause === true) {
+        sql += ` RETURNING *`;
+      } else {
+        // this._returningClause is ReturningObject<TTable>
+        const returningColumns = Object.entries(this._returningClause)
+          .map(([alias, fieldSpec]) => {
+            // fieldSpec is ReturningColumnSpec<TTable>
+            if (typeof fieldSpec === "string") {
+              // It's a TypeScript key string, used as alias
+              const tsKey = fieldSpec as string;
+              const columnConfig = this._targetTable!.columns[
+                tsKey
+              ] as ColumnConfig<any, any>;
+              if (!columnConfig)
+                throw new Error(
+                  `Column config not found for returning key ${tsKey} in table ${
+                    this._targetTable!.tableName
+                  }`
+                );
+              return `"${columnConfig.name}" AS "${alias}"`;
+            } else if ("_isSQL" in fieldSpec) {
+              // It's an SQL object
+              return `${(fieldSpec as SQL).toSqlString(
+                "postgres",
+                paramIndexState,
+                aliasMap
+              )} AS "${alias}"`;
+            } else {
+              // It's a ColumnConfig object
+              const colConfig = fieldSpec as ColumnConfig<any, any>;
+              return `"${colConfig.name}" AS "${alias}"`;
+            }
+          })
+          .join(", ");
+        if (returningColumns) {
+          sql += ` RETURNING ${returningColumns}`;
+        } else {
+          // Default to RETURNING * if _returningClause is an empty object (edge case)
+          sql += ` RETURNING *`;
+        }
+      }
+    }
+    return sql;
   }
 
   private buildInsertSpannerSQL(
@@ -920,7 +1000,21 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       );
     });
     const orderedKeys = Array.from(allKeys).sort();
-    const columns = orderedKeys.map((col) => `\`${col}\``).join(", ");
+    const columns = orderedKeys
+      .map((tsKey) => {
+        const columnConfig = this._targetTable!.columns[tsKey] as ColumnConfig<
+          any,
+          any
+        >;
+        if (!columnConfig)
+          throw new Error(
+            `Column config not found for key ${tsKey} in table ${
+              this._targetTable!.tableName
+            }`
+          );
+        return `\`${columnConfig.name}\``;
+      })
+      .join(", ");
 
     const valuePlaceholders = processedInsertData
       .map((record) => {
@@ -945,7 +1039,48 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           .join(", ")})`;
       })
       .join(", ");
-    return `INSERT INTO \`${this._targetTable.tableName}\` (${columns}) VALUES ${valuePlaceholders}`;
+
+    let sql = `INSERT INTO \`${this._targetTable.tableName}\` (${columns}) VALUES ${valuePlaceholders}`;
+    if (this._returningClause) {
+      if (this._returningClause === true) {
+        sql += ` THEN RETURN *`;
+      } else {
+        // this._returningClause is ReturningObject<TTable>
+        const returningColumns = Object.entries(this._returningClause)
+          .map(([alias, fieldSpec]) => {
+            // fieldSpec is ReturningColumnSpec<TTable>
+            if (typeof fieldSpec === "string") {
+              const tsKey = fieldSpec as string;
+              const columnConfig = this._targetTable!.columns[
+                tsKey
+              ] as ColumnConfig<any, any>;
+              if (!columnConfig)
+                throw new Error(
+                  `Column config not found for returning key ${tsKey} in table ${
+                    this._targetTable!.tableName
+                  }`
+                );
+              return `\`${columnConfig.name}\` AS \`${alias}\``;
+            } else if ("_isSQL" in fieldSpec) {
+              return `${(fieldSpec as SQL).toSqlString(
+                "spanner",
+                paramIndexState,
+                aliasMap
+              )} AS \`${alias}\``;
+            } else {
+              const colConfig = fieldSpec as ColumnConfig<any, any>;
+              return `\`${colConfig.name}\` AS \`${alias}\``;
+            }
+          })
+          .join(", ");
+        if (returningColumns) {
+          sql += ` THEN RETURN ${returningColumns}`;
+        } else {
+          sql += ` THEN RETURN *`;
+        }
+      }
+    }
+    return sql;
   }
 
   private buildUpdatePgSQL(
@@ -957,15 +1092,26 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       throw new Error("SET values not provided for UPDATE.");
 
     const setParts = Object.entries(this._updateSetValues)
-      .map(([column, value]) => {
+      .map(([tsKey, value]) => {
+        const columnConfig = this._targetTable!.columns[tsKey] as ColumnConfig<
+          any,
+          any
+        >;
+        if (!columnConfig)
+          throw new Error(
+            `Column config not found for key ${tsKey} in table ${
+              this._targetTable!.tableName
+            }`
+          );
+        const sqlColumnName = columnConfig.name;
         if (typeof value === "object" && value !== null && "_isSQL" in value) {
-          return `"${column}" = ${(value as SQL).toSqlString(
+          return `"${sqlColumnName}" = ${(value as SQL).toSqlString(
             "postgres",
             paramIndexState,
             aliasMap
           )}`;
         }
-        return `"${column}" = $${paramIndexState.value++}`;
+        return `"${sqlColumnName}" = $${paramIndexState.value++}`;
       })
       .join(", ");
     const whereClause = this.buildWhereClause(
@@ -973,7 +1119,46 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       paramIndexState,
       aliasMap
     );
-    return `UPDATE "${this._targetTable.tableName}" SET ${setParts} ${whereClause}`.trim();
+    let sql =
+      `UPDATE "${this._targetTable.tableName}" SET ${setParts} ${whereClause}`.trim();
+    if (this._returningClause) {
+      if (this._returningClause === true) {
+        sql += ` RETURNING *`;
+      } else {
+        const returningColumns = Object.entries(this._returningClause)
+          .map(([alias, fieldSpec]) => {
+            if (typeof fieldSpec === "string") {
+              const tsKey = fieldSpec as string;
+              const columnConfig = this._targetTable!.columns[
+                tsKey
+              ] as ColumnConfig<any, any>;
+              if (!columnConfig)
+                throw new Error(
+                  `Column config not found for returning key ${tsKey} in table ${
+                    this._targetTable!.tableName
+                  }`
+                );
+              return `"${columnConfig.name}" AS "${alias}"`;
+            } else if ("_isSQL" in fieldSpec) {
+              return `${(fieldSpec as SQL).toSqlString(
+                "postgres",
+                paramIndexState,
+                aliasMap
+              )} AS "${alias}"`;
+            } else {
+              const colConfig = fieldSpec as ColumnConfig<any, any>;
+              return `"${colConfig.name}" AS "${alias}"`;
+            }
+          })
+          .join(", ");
+        if (returningColumns) {
+          sql += ` RETURNING ${returningColumns}`;
+        } else {
+          sql += ` RETURNING *`;
+        }
+      }
+    }
+    return sql;
   }
 
   private buildUpdateSpannerSQL(
@@ -984,15 +1169,26 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     if (!this._updateSetValues)
       throw new Error("SET values not provided for UPDATE.");
     const setParts = Object.entries(this._updateSetValues)
-      .map(([column, value]) => {
+      .map(([tsKey, value]) => {
+        const columnConfig = this._targetTable!.columns[tsKey] as ColumnConfig<
+          any,
+          any
+        >;
+        if (!columnConfig)
+          throw new Error(
+            `Column config not found for key ${tsKey} in table ${
+              this._targetTable!.tableName
+            }`
+          );
+        const sqlColumnName = columnConfig.name;
         if (typeof value === "object" && value !== null && "_isSQL" in value) {
-          return `\`${column}\` = ${(value as SQL).toSqlString(
+          return `\`${sqlColumnName}\` = ${(value as SQL).toSqlString(
             "spanner",
             paramIndexState,
             aliasMap
           )}`;
         }
-        return `\`${column}\` = @p${paramIndexState.value++}`;
+        return `\`${sqlColumnName}\` = @p${paramIndexState.value++}`;
       })
       .join(", ");
     const whereClause = this.buildWhereClause(
@@ -1000,7 +1196,46 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       paramIndexState,
       aliasMap
     );
-    return `UPDATE \`${this._targetTable.tableName}\` SET ${setParts} ${whereClause}`.trim();
+    let sql =
+      `UPDATE \`${this._targetTable.tableName}\` SET ${setParts} ${whereClause}`.trim();
+    if (this._returningClause) {
+      if (this._returningClause === true) {
+        sql += ` THEN RETURN *`;
+      } else {
+        const returningColumns = Object.entries(this._returningClause)
+          .map(([alias, fieldSpec]) => {
+            if (typeof fieldSpec === "string") {
+              const tsKey = fieldSpec as string;
+              const columnConfig = this._targetTable!.columns[
+                tsKey
+              ] as ColumnConfig<any, any>;
+              if (!columnConfig)
+                throw new Error(
+                  `Column config not found for returning key ${tsKey} in table ${
+                    this._targetTable!.tableName
+                  }`
+                );
+              return `\`${columnConfig.name}\` AS \`${alias}\``;
+            } else if ("_isSQL" in fieldSpec) {
+              return `${(fieldSpec as SQL).toSqlString(
+                "spanner",
+                paramIndexState,
+                aliasMap
+              )} AS \`${alias}\``;
+            } else {
+              const colConfig = fieldSpec as ColumnConfig<any, any>;
+              return `\`${colConfig.name}\` AS \`${alias}\``;
+            }
+          })
+          .join(", ");
+        if (returningColumns) {
+          sql += ` THEN RETURN ${returningColumns}`;
+        } else {
+          sql += ` THEN RETURN *`;
+        }
+      }
+    }
+    return sql;
   }
 
   private buildDeletePgSQL(
@@ -1013,7 +1248,46 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       paramIndexState,
       aliasMap
     );
-    return `DELETE FROM "${this._targetTable.tableName}" ${whereClause}`.trim();
+    let sql =
+      `DELETE FROM "${this._targetTable.tableName}" ${whereClause}`.trim();
+    if (this._returningClause) {
+      if (this._returningClause === true) {
+        sql += ` RETURNING *`;
+      } else {
+        const returningColumns = Object.entries(this._returningClause)
+          .map(([alias, fieldSpec]) => {
+            if (typeof fieldSpec === "string") {
+              const tsKey = fieldSpec as string;
+              const columnConfig = this._targetTable!.columns[
+                tsKey
+              ] as ColumnConfig<any, any>;
+              if (!columnConfig)
+                throw new Error(
+                  `Column config not found for returning key ${tsKey} in table ${
+                    this._targetTable!.tableName
+                  }`
+                );
+              return `"${columnConfig.name}" AS "${alias}"`;
+            } else if ("_isSQL" in fieldSpec) {
+              return `${(fieldSpec as SQL).toSqlString(
+                "postgres",
+                paramIndexState,
+                aliasMap
+              )} AS "${alias}"`;
+            } else {
+              const colConfig = fieldSpec as ColumnConfig<any, any>;
+              return `"${colConfig.name}" AS "${alias}"`;
+            }
+          })
+          .join(", ");
+        if (returningColumns) {
+          sql += ` RETURNING ${returningColumns}`;
+        } else {
+          sql += ` RETURNING *`;
+        }
+      }
+    }
+    return sql;
   }
 
   private buildDeleteSpannerSQL(
@@ -1026,7 +1300,46 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       paramIndexState,
       aliasMap
     );
-    return `DELETE FROM \`${this._targetTable.tableName}\` ${whereClause}`.trim();
+    let sql =
+      `DELETE FROM \`${this._targetTable.tableName}\` ${whereClause}`.trim();
+    if (this._returningClause) {
+      if (this._returningClause === true) {
+        sql += ` THEN RETURN *`;
+      } else {
+        const returningColumns = Object.entries(this._returningClause)
+          .map(([alias, fieldSpec]) => {
+            if (typeof fieldSpec === "string") {
+              const tsKey = fieldSpec as string;
+              const columnConfig = this._targetTable!.columns[
+                tsKey
+              ] as ColumnConfig<any, any>;
+              if (!columnConfig)
+                throw new Error(
+                  `Column config not found for returning key ${tsKey} in table ${
+                    this._targetTable!.tableName
+                  }`
+                );
+              return `\`${columnConfig.name}\` AS \`${alias}\``;
+            } else if ("_isSQL" in fieldSpec) {
+              return `${(fieldSpec as SQL).toSqlString(
+                "spanner",
+                paramIndexState,
+                aliasMap
+              )} AS \`${alias}\``;
+            } else {
+              const colConfig = fieldSpec as ColumnConfig<any, any>;
+              return `\`${colConfig.name}\` AS \`${alias}\``;
+            }
+          })
+          .join(", ");
+        if (returningColumns) {
+          sql += ` THEN RETURN ${returningColumns}`;
+        } else {
+          sql += ` THEN RETURN *`;
+        }
+      }
+    }
+    return sql;
   }
 
   private buildWhereClause(

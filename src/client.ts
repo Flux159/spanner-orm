@@ -7,12 +7,14 @@ import type {
 import type {
   TableConfig,
   InferModelType,
-  SelectFields, // Now defined in common.ts
+  SelectFields,
   EnhancedIncludeClause,
   ShapedResultItem,
-  SQL, // SQL is defined in common.ts
-  PreparedQuery, // PreparedQuery is defined in common.ts
-  ColumnConfig, // For orderBy/groupBy casts
+  SQL,
+  PreparedQuery,
+  ColumnConfig,
+  ReturningObject, // Added
+  // ReturningColumnSpec, // Not directly used in ExecutableQuery signature, but good to be aware of
 } from "./types/common.js";
 import { QueryBuilder } from "./core/query-builder.js";
 import { shapeResults } from "./core/result-shaper.js";
@@ -35,10 +37,12 @@ export class ExecutableQuery<
   TPrimaryTable extends TableConfig,
   // TFields uses SelectFields from common.ts. It's a map of selections.
   TFields extends SelectFields<TPrimaryTable> = SelectFields<TPrimaryTable>,
-  // EnhancedIncludeClause is not generic.
-  TInclude extends EnhancedIncludeClause | undefined = undefined
+  TInclude extends EnhancedIncludeClause | undefined = undefined,
+  _TReturning extends  // Prefixed with underscore
+    | ReturningObject<TPrimaryTable>
+    | true
+    | undefined = undefined // For returning type
 > {
-  // QueryBuilder is generic on TTable (which is TPrimaryTable here)
   protected internalQueryBuilder: QueryBuilder<TPrimaryTable>;
   protected client: OrmClient;
 
@@ -160,14 +164,43 @@ export class ExecutableQuery<
   }
 
   set(
-    data: Partial<InferModelType<TPrimaryTable>> // InferModelType takes one generic arg
-  ): ExecutableQuery<AffectedRows, TPrimaryTable, undefined, undefined> {
+    data: Partial<InferModelType<TPrimaryTable>>
+  ): ExecutableQuery<
+    AffectedRows,
+    TPrimaryTable,
+    undefined,
+    undefined,
+    undefined
+  > {
     this.internalQueryBuilder.set(data);
     return this as unknown as ExecutableQuery<
       AffectedRows,
       TPrimaryTable,
       undefined,
+      undefined,
       undefined
+    >;
+  }
+
+  returning(
+    fields?: ReturningObject<TPrimaryTable> | "*" | true
+  ): ExecutableQuery<
+    InferModelType<TPrimaryTable>[], // Placeholder, will be more specific
+    TPrimaryTable,
+    TFields,
+    TInclude,
+    ReturningObject<TPrimaryTable> | true // Update TReturning
+  > {
+    this.internalQueryBuilder.returning(fields);
+    // The actual TResult type will depend on the 'fields' argument.
+    // For now, let's assume it returns an array of the full model type.
+    // This cast is a simplification; true type safety requires more complex generics.
+    return this as unknown as ExecutableQuery<
+      InferModelType<TPrimaryTable>[],
+      TPrimaryTable,
+      TFields,
+      TInclude,
+      ReturningObject<TPrimaryTable> | true
     >;
   }
 
@@ -176,11 +209,9 @@ export class ExecutableQuery<
     onFulfilled?: (value: TResult) => TData | PromiseLike<TData>,
     onRejected?: (reason: any) => TError | PromiseLike<TError>
   ): Promise<TData | TError> {
-    // prepare() returns PreparedQuery<TPrimaryTable, EnhancedIncludeClause | undefined>
-    // TInclude is EnhancedIncludeClause | undefined, so this should be compatible with an assertion.
     const preparedQuery = this.internalQueryBuilder.prepare(
       this.client.dialect
-    ) as PreparedQuery<TPrimaryTable, TInclude>;
+    ) as PreparedQuery<TPrimaryTable, TInclude>; // TInclude should be fine
 
     let executionPromise: Promise<any>;
 
@@ -190,16 +221,12 @@ export class ExecutableQuery<
           preparedQuery.sql,
           preparedQuery.parameters
         );
-        if (
-          preparedQuery.includeClause &&
-          preparedQuery.primaryTable
-          // preparedQuery.fields is not used by shapeResults current signature
-        ) {
+        if (preparedQuery.includeClause && preparedQuery.primaryTable) {
           executionPromise = executionPromise.then((rawData) =>
             shapeResults(
               rawData,
-              preparedQuery.primaryTable as TableConfig,
-              preparedQuery.includeClause // Pass as is, shapeResults takes TInclude extends EnhancedIncludeClause | undefined
+              preparedQuery.primaryTable as TableConfig, // primaryTable is TPrimaryTable
+              preparedQuery.includeClause // includeClause is TInclude
             )
           );
         }
@@ -207,13 +234,26 @@ export class ExecutableQuery<
       case "insert":
       case "update":
       case "delete":
-        executionPromise = this.client.adapter
-          .execute(preparedQuery.sql, preparedQuery.parameters)
-          .then((res: number | AffectedRows) => ({
-            // Add type for res
-            count:
-              typeof res === "number" ? res : (res as AffectedRows).count ?? 0,
-          })); // Ensure consistent return
+        if (preparedQuery.returning) {
+          // If returning clause is present, use adapter.query to get rows back
+          executionPromise = this.client.adapter.query(
+            preparedQuery.sql,
+            preparedQuery.parameters
+          );
+          // Here, TResult should ideally be Array<InferReturningType<TPrimaryTable, TReturning>>
+          // For now, it will be Array<InferModelType<TPrimaryTable>> or Array<Partial<...>>
+          // based on the ExecutableQuery's TResult generic.
+        } else {
+          // Original behavior: get affected rows count
+          executionPromise = this.client.adapter
+            .execute(preparedQuery.sql, preparedQuery.parameters)
+            .then((res: number | AffectedRows) => ({
+              count:
+                typeof res === "number"
+                  ? res
+                  : (res as AffectedRows).count ?? 0,
+            }));
+        }
         break;
       default:
         return Promise.reject(
@@ -315,35 +355,38 @@ export class OrmClient {
 
   select<
     TPrimaryTable extends TableConfig,
-    // TFields uses SelectFields from common.ts
     TSelectedFields extends SelectFields<TPrimaryTable>
   >(
     fields: TSelectedFields
   ): ExecutableQuery<
-    // Result type needs to be based on TSelectedFields and TPrimaryTable
-    // Using InferSelectedModelType or similar from common.ts might be appropriate
-    // For now, using InferModelType<TPrimaryTable>[] as a placeholder, to be refined
-    InferModelType<TPrimaryTable>[],
+    InferModelType<TPrimaryTable>[], // Placeholder, refine with InferSelectedModelType
     TPrimaryTable,
-    TSelectedFields, // Pass TSelectedFields as TFields for ExecutableQuery
-    undefined
+    TSelectedFields,
+    undefined,
+    undefined // No returning for select initially
   > {
-    // Pass "select" operation type, no initial table (set by .from()), and selected fields
     return new ExecutableQuery<
       InferModelType<TPrimaryTable>[],
       TPrimaryTable,
       TSelectedFields,
+      undefined,
       undefined
     >(this, "select", undefined, fields);
   }
 
   insert<TPrimaryTable extends TableConfig>(
     table: TPrimaryTable
-  ): ExecutableQuery<AffectedRows, TPrimaryTable, undefined, undefined> {
-    // Pass "insert" operation type and the target table
+  ): ExecutableQuery<
+    AffectedRows,
+    TPrimaryTable,
+    undefined,
+    undefined,
+    undefined
+  > {
     return new ExecutableQuery<
       AffectedRows,
       TPrimaryTable,
+      undefined,
       undefined,
       undefined
     >(this, "insert", table);
@@ -351,11 +394,17 @@ export class OrmClient {
 
   update<TPrimaryTable extends TableConfig>(
     table: TPrimaryTable
-  ): ExecutableQuery<AffectedRows, TPrimaryTable, undefined, undefined> {
-    // Pass "update" operation type and the target table
+  ): ExecutableQuery<
+    AffectedRows,
+    TPrimaryTable,
+    undefined,
+    undefined,
+    undefined
+  > {
     return new ExecutableQuery<
       AffectedRows,
       TPrimaryTable,
+      undefined,
       undefined,
       undefined
     >(this, "update", table);
@@ -363,11 +412,17 @@ export class OrmClient {
 
   deleteFrom<TPrimaryTable extends TableConfig>(
     table: TPrimaryTable
-  ): ExecutableQuery<AffectedRows, TPrimaryTable, undefined, undefined> {
-    // Pass "delete" operation type and the target table
+  ): ExecutableQuery<
+    AffectedRows,
+    TPrimaryTable,
+    undefined,
+    undefined,
+    undefined
+  > {
     return new ExecutableQuery<
       AffectedRows,
       TPrimaryTable,
+      undefined,
       undefined,
       undefined
     >(this, "delete", table);

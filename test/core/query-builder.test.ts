@@ -249,7 +249,7 @@ describe("QueryBuilder SQL Generation with Aliasing", () => {
         .values({ name: "John Doe", age: 30 })
         .prepare("postgres");
       expect(preparedQuery.sql).toBe(
-        'INSERT INTO "users" ("age", "createdAt", "name") VALUES ($1, CURRENT_TIMESTAMP, $2)'
+        'INSERT INTO "users" ("age", "created_at", "name") VALUES ($1, CURRENT_TIMESTAMP, $2)'
       );
       expect(preparedQuery.parameters).toEqual([30, "John Doe"]);
     });
@@ -260,7 +260,7 @@ describe("QueryBuilder SQL Generation with Aliasing", () => {
         .values({ name: "Jane Doe", email: "jane@example.com" })
         .prepare("spanner");
       expect(preparedQuery.sql).toBe(
-        "INSERT INTO `users` (`createdAt`, `email`, `name`) VALUES (CURRENT_TIMESTAMP, @p1, @p2)"
+        "INSERT INTO `users` (`created_at`, `email`, `name`) VALUES (CURRENT_TIMESTAMP, @p1, @p2)"
       );
       expect(preparedQuery.parameters).toEqual([
         "jane@example.com",
@@ -337,6 +337,180 @@ describe("QueryBuilder SQL Generation with Aliasing", () => {
       const preparedQuery = qb.deleteFrom(usersTable).prepare("postgres");
       expect(preparedQuery.sql).toBe('DELETE FROM "users"');
       expect(preparedQuery.parameters).toEqual([]);
+    });
+  });
+});
+
+describe("QueryBuilder RETURNING clause", () => {
+  let qbReturning: QueryBuilder<typeof usersTable>;
+
+  beforeEach(() => {
+    qbReturning = new QueryBuilder<typeof usersTable>();
+  });
+
+  // --- PostgreSQL RETURNING ---
+  describe("PostgreSQL RETURNING", () => {
+    it("should generate INSERT ... RETURNING *", () => {
+      const prepared = qbReturning
+        .insert(usersTable)
+        .values({ name: "Test User", age: 25 })
+        .returning("*") // or .returning() or .returning(true)
+        .prepare("postgres");
+      expect(prepared.sql).toBe(
+        'INSERT INTO "users" ("age", "created_at", "name") VALUES ($1, CURRENT_TIMESTAMP, $2) RETURNING *'
+      );
+      expect(prepared.parameters).toEqual([25, "Test User"]);
+      expect(prepared.returning).toBe(true);
+    });
+
+    it("should generate INSERT ... RETURNING specific columns", () => {
+      const prepared = qbReturning
+        .insert(usersTable)
+        .values({ name: "Test User", email: "test@example.com" })
+        .returning({
+          id: usersTable.columns.id,
+          userEmail: usersTable.columns.email,
+        })
+        .prepare("postgres");
+      expect(prepared.sql).toBe(
+        'INSERT INTO "users" ("created_at", "email", "name") VALUES (CURRENT_TIMESTAMP, $1, $2) RETURNING "id" AS "id", "email" AS "userEmail"'
+      );
+      expect(prepared.parameters).toEqual(["test@example.com", "Test User"]);
+      expect(prepared.returning).toEqual({
+        id: usersTable.columns.id,
+        userEmail: usersTable.columns.email,
+      });
+    });
+
+    it("should generate UPDATE ... RETURNING *", () => {
+      const prepared = qbReturning
+        .update(usersTable)
+        .set({ age: 30 })
+        .where(sql`${usersTable.columns.id} = ${1}`)
+        .returning()
+        .prepare("postgres");
+      expect(prepared.sql).toBe(
+        'UPDATE "users" SET "age" = $1 WHERE "t1"."id" = $2 RETURNING *'
+      );
+      expect(prepared.parameters).toEqual([30, 1]);
+      expect(prepared.returning).toBe(true);
+    });
+
+    it("should generate UPDATE ... RETURNING specific columns", () => {
+      const prepared = qbReturning
+        .update(usersTable)
+        .set({ name: "New Name" })
+        .where(sql`${usersTable.columns.id} = ${2}`)
+        .returning({ name: usersTable.columns.name })
+        .prepare("postgres");
+      expect(prepared.sql).toBe(
+        'UPDATE "users" SET "name" = $1 WHERE "t1"."id" = $2 RETURNING "name" AS "name"'
+      );
+      expect(prepared.parameters).toEqual(["New Name", 2]);
+    });
+
+    it("should generate DELETE ... RETURNING *", () => {
+      const prepared = qbReturning
+        .deleteFrom(usersTable)
+        .where(sql`${usersTable.columns.id} = ${3}`)
+        .returning(true)
+        .prepare("postgres");
+      expect(prepared.sql).toBe(
+        'DELETE FROM "users" WHERE "t1"."id" = $1 RETURNING *'
+      );
+      expect(prepared.parameters).toEqual([3]);
+    });
+
+    it("should generate DELETE ... RETURNING specific columns", () => {
+      const prepared = qbReturning
+        .deleteFrom(usersTable)
+        .where(sql`${usersTable.columns.email} = ${"del@example.com"}`)
+        .returning({
+          deletedId: usersTable.columns.id,
+          oldEmail: usersTable.columns.email,
+        })
+        .prepare("postgres");
+      expect(prepared.sql).toBe(
+        'DELETE FROM "users" WHERE "t1"."email" = $1 RETURNING "id" AS "deletedId", "email" AS "oldEmail"'
+      );
+    });
+  });
+
+  // --- Spanner THEN RETURN ---
+  describe("Spanner THEN RETURN", () => {
+    it("should generate INSERT ... THEN RETURN *", () => {
+      const prepared = qbReturning
+        .insert(usersTable)
+        .values({ name: "Spanner User", age: 40 })
+        .returning("*")
+        .prepare("spanner");
+      expect(prepared.sql).toBe(
+        "INSERT INTO `users` (`age`, `created_at`, `name`) VALUES (@p1, CURRENT_TIMESTAMP, @p2) THEN RETURN *"
+      );
+      expect(prepared.parameters).toEqual([40, "Spanner User"]);
+    });
+
+    it("should generate INSERT ... THEN RETURN specific columns", () => {
+      const prepared = qbReturning
+        .insert(usersTable)
+        .values({ name: "Spanner User 2", email: "spanner@example.com" })
+        .returning({
+          id: usersTable.columns.id,
+          userEmail: usersTable.columns.email,
+        })
+        .prepare("spanner");
+      expect(prepared.sql).toBe(
+        "INSERT INTO `users` (`created_at`, `email`, `name`) VALUES (CURRENT_TIMESTAMP, @p1, @p2) THEN RETURN `id` AS `id`, `email` AS `userEmail`"
+      );
+    });
+
+    it("should generate UPDATE ... THEN RETURN *", () => {
+      const prepared = qbReturning
+        .update(usersTable)
+        .set({ age: 45 })
+        .where(sql`${usersTable.columns.id} = ${10}`)
+        .returning()
+        .prepare("spanner");
+      expect(prepared.sql).toBe(
+        "UPDATE `users` SET `age` = @p1 WHERE `t1`.`id` = @p2 THEN RETURN *"
+      );
+    });
+
+    it("should generate UPDATE ... THEN RETURN specific columns", () => {
+      const prepared = qbReturning
+        .update(usersTable)
+        .set({ name: "Updated Spanner Name" })
+        .where(sql`${usersTable.columns.id} = ${11}`)
+        .returning({
+          name: usersTable.columns.name,
+          age: usersTable.columns.age,
+        })
+        .prepare("spanner");
+      expect(prepared.sql).toBe(
+        "UPDATE `users` SET `name` = @p1 WHERE `t1`.`id` = @p2 THEN RETURN `name` AS `name`, `age` AS `age`"
+      );
+    });
+
+    it("should generate DELETE ... THEN RETURN *", () => {
+      const prepared = qbReturning
+        .deleteFrom(usersTable)
+        .where(sql`${usersTable.columns.id} = ${12}`)
+        .returning(true)
+        .prepare("spanner");
+      expect(prepared.sql).toBe(
+        "DELETE FROM `users` WHERE `t1`.`id` = @p1 THEN RETURN *"
+      );
+    });
+
+    it("should generate DELETE ... THEN RETURN specific columns", () => {
+      const prepared = qbReturning
+        .deleteFrom(usersTable)
+        .where(sql`${usersTable.columns.email} = ${"del_spanner@example.com"}`)
+        .returning({ id: usersTable.columns.id })
+        .prepare("spanner");
+      expect(prepared.sql).toBe(
+        "DELETE FROM `users` WHERE `t1`.`email` = @p1 THEN RETURN `id` AS `id`"
+      );
     });
   });
 });
