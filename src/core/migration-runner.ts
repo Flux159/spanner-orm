@@ -22,7 +22,7 @@ interface QueryResultRow {
 }
 type QuerySqlFn = <T extends QueryResultRow = QueryResultRow>(
   sql: string,
-  params?: unknown[]
+  params?: unknown[] | { [key: string]: string }
 ) => Promise<T[]>;
 
 // Changed executeSql type to MigrationExecuteSql

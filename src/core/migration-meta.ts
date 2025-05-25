@@ -13,7 +13,7 @@ interface QueryResultRow {
 }
 type QuerySqlFn = <T extends QueryResultRow = QueryResultRow>(
   sql: string,
-  params?: unknown[]
+  params?: unknown[] | { [key: string]: string }
 ) => Promise<T[]>;
 
 /**
@@ -72,9 +72,10 @@ export async function getAppliedMigrationNames(
     dialect === "postgres"
       ? `SELECT name FROM ${tableName} WHERE dialect = $1 ORDER BY applied_at ASC, name ASC;`
       : `SELECT name FROM ${tableName} WHERE dialect = @p1 ORDER BY applied_at ASC, name ASC;`;
+  const params = dialect === "postgres" ? [dialect] : { p1: dialect };
 
   try {
-    const result = await querySql<{ name: string }>(selectSql, [dialect]);
+    const result = await querySql<{ name: string }>(selectSql, params);
     return result.map((row) => row.name);
   } catch (error) {
     // If the table doesn't exist, it's a common scenario for the first migration.
