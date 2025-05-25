@@ -311,35 +311,44 @@ async function handleMigrateCreate(
   );
 
   const migrationPath = path.join(MIGRATIONS_DIR, `${baseFilename}.ts`);
-  let migrationGeneratedSuccessfully = true;
+  let migrationGeneratedSuccessfully = false; // Default to false
 
-  try {
-    await fs.writeFile(migrationPath, migrationFileContent);
-    console.log(`Created migration file: ${migrationPath}`);
-  } catch (error) {
-    console.error(`Error creating migration file:`, error);
-    migrationGeneratedSuccessfully = false;
-  }
-
-  if (migrationGeneratedSuccessfully) {
+  if (migrationFileContent === null) {
+    console.log("No schema changes detected. Migration file not created.");
+    // Snapshot should not be updated if no migration file is created
+  } else {
     try {
-      await fs.writeFile(
-        snapshotFilePath,
-        JSON.stringify(currentSnapshot, null, 2)
-      );
-      console.log(
-        `Successfully saved current schema snapshot to ${snapshotFilePath}`
-      );
+      await fs.writeFile(migrationPath, migrationFileContent);
+      console.log(`Created migration file: ${migrationPath}`);
+      migrationGeneratedSuccessfully = true;
     } catch (error) {
+      console.error(`Error creating migration file:`, error);
+      // migrationGeneratedSuccessfully remains false
+    }
+
+    if (migrationGeneratedSuccessfully) {
+      try {
+        await fs.writeFile(
+          snapshotFilePath,
+          JSON.stringify(currentSnapshot, null, 2)
+        );
+        console.log(
+          `Successfully saved current schema snapshot to ${snapshotFilePath}`
+        );
+      } catch (error) {
+        console.error(
+          `Error saving current schema snapshot to ${snapshotFilePath}:`,
+          error
+        );
+        // Note: Migration file was created, but snapshot failed. This is a potential partial state.
+        // Depending on desired atomicity, one might consider deleting the migration file here.
+        // For now, we'll just log the error.
+      }
+    } else {
       console.error(
-        `Error saving current schema snapshot to ${snapshotFilePath}:`,
-        error
+        "Migration file content was generated but could not be written to disk. Snapshot will not be updated."
       );
     }
-  } else {
-    console.error(
-      "Migration file could not be generated. Snapshot will not be updated."
-    );
   }
 }
 

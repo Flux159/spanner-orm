@@ -375,6 +375,53 @@ describe("spanner-orm-cli", () => {
         );
         expect(result.exitCode).toBeGreaterThan(0);
       });
+
+      it("should not create a migration file or update snapshot if no schema changes are detected", async () => {
+        // 1. Create an initial migration and snapshot
+        const initialMigrationName = "initial-for-no-change-test";
+        await runCliCommand(
+          `migrate create ${initialMigrationName} --schema ${initialSchemaJsPath}`
+        );
+
+        const filesBefore = await fs.readdir(MIGRATIONS_DIR_TEST);
+        const snapshotContentBefore = await fs.readFile(
+          snapshotFilePathTest,
+          "utf-8"
+        );
+
+        // 2. Attempt to create another migration with the exact same schema
+        const noChangeMigrationName = "no-changes-test";
+        const { stdout, stderr } = await runCliCommand(
+          `migrate create ${noChangeMigrationName} --schema ${initialSchemaJsPath}`
+        );
+
+        if (stderr) console.error("CLI stderr (no-changes-test):", stderr);
+        expect(stdout).toContain(
+          "No schema changes detected. Migration file not created."
+        );
+
+        // 3. Assert no new migration file was created
+        const filesAfter = await fs.readdir(MIGRATIONS_DIR_TEST);
+        const newMigrationFile = filesAfter.find((f) =>
+          f.endsWith(`${noChangeMigrationName}.ts`)
+        );
+        expect(newMigrationFile).toBeUndefined();
+        // Check count: initial migration file + snapshot file
+        const initialMigrationFileExists = filesBefore.some((f) =>
+          f.endsWith(`${initialMigrationName}.ts`)
+        );
+        expect(initialMigrationFileExists).toBe(true);
+        // After the 'no-changes' attempt, the number of files should remain the same as after the initial migration.
+        // The filesBefore already includes the first migration and the snapshot.
+        expect(filesAfter.length).toBe(filesBefore.length);
+
+        // 4. Assert snapshot was not updated
+        const snapshotContentAfter = await fs.readFile(
+          snapshotFilePathTest,
+          "utf-8"
+        );
+        expect(snapshotContentAfter).toEqual(snapshotContentBefore);
+      }, 20000);
     });
 
     describe("latest", () => {
