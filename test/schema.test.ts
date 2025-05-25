@@ -273,3 +273,79 @@ describe("Schema Builder", () => {
     expect(childTable.interleave?.onDelete).toBe("cascade");
   });
 });
+
+describe("UUID Column Builder", () => {
+  // Mock a table for foreign key reference
+  const referencedTable = table("referenced_table", {
+    id: varchar("id", { length: 36 }).primaryKey(),
+  });
+
+  it("should allow explicit $defaultFn for a UUID primary key", () => {
+    const items = table("items_uuid_pk", {
+      id: varchar("id", { length: 36 }) // Simulating uuid() structure before $defaultFn
+        .$defaultFn(() => crypto.randomUUID())
+        .primaryKey(),
+    });
+
+    const idColumn = items.columns.id;
+    expect(idColumn.primaryKey).toBe(true);
+    expect(typeof idColumn.default).toBe("function");
+    expect(idColumn._hasClientDefaultFn).toBe(true);
+    if (typeof idColumn.default === "function") {
+      const uuidVal = idColumn.default();
+      expect(typeof uuidVal).toBe("string");
+      expect(uuidVal.length).toBe(36);
+    }
+  });
+
+  it("should NOT automatically apply $defaultFn for a UUID foreign key", () => {
+    const orders = table("orders_uuid_fk", {
+      id: varchar("id", { length: 36 }).primaryKey(), // Regular PK
+      userId: varchar("user_id", { length: 36 }) // Simulating uuid() for FK
+        .references(() => referencedTable.columns.id),
+    });
+
+    const userIdColumn = orders.columns.userId;
+    expect(userIdColumn.references).toBeDefined();
+    expect(userIdColumn.default).toBeUndefined();
+    expect(userIdColumn._hasClientDefaultFn).toBeUndefined(); // or false
+  });
+
+  it("should NOT automatically apply $defaultFn for a plain UUID column", () => {
+    const logs = table("logs_uuid_plain", {
+      eventId: varchar("event_id", { length: 36 }), // Simulating plain uuid()
+    });
+
+    const eventIdColumn = logs.columns.eventId;
+    expect(eventIdColumn.primaryKey).toBeUndefined();
+    expect(eventIdColumn.references).toBeUndefined();
+    expect(eventIdColumn.default).toBeUndefined();
+    expect(eventIdColumn._hasClientDefaultFn).toBeUndefined(); // or false
+  });
+
+  it("should correctly set dialect types for uuid (Postgres: UUID, Spanner: STRING(36))", async () => {
+    // We need to import the actual uuid function to test it directly
+    const { uuid } = await import("../src/core/schema.js");
+    const testTable = table("test_uuid_types", {
+      uuidField: uuid("uuid_field"),
+    });
+    expect(testTable.columns.uuidField.dialectTypes.postgres).toBe("UUID");
+    expect(testTable.columns.uuidField.dialectTypes.spanner).toBe("STRING(36)");
+  });
+
+  it("uuid() column should allow chaining $defaultFn explicitly", async () => {
+    const { uuid } = await import("../src/core/schema.js");
+    const customDefaultTable = table("custom_default_uuid", {
+      customId: uuid("custom_id")
+        .$defaultFn(() => "custom-uuid-value")
+        .primaryKey(),
+    });
+    const customIdCol = customDefaultTable.columns.customId;
+    expect(customIdCol.primaryKey).toBe(true);
+    expect(typeof customIdCol.default).toBe("function");
+    expect(customIdCol._hasClientDefaultFn).toBe(true);
+    if (typeof customIdCol.default === "function") {
+      expect(customIdCol.default()).toBe("custom-uuid-value");
+    }
+  });
+});
