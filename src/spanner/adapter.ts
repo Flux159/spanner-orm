@@ -5,6 +5,8 @@ import type {
   Database as SpannerDatabase,
   Transaction as SpannerNativeTransaction,
   Instance as SpannerInstance,
+  // DatabaseAdminClient will be obtained via this.spannerClient.getDatabaseAdminClient()
+  // google.longrunning.IOperation type will be inferred
 } from "@google-cloud/spanner";
 
 // Type for the Spanner class constructor
@@ -36,6 +38,8 @@ export class SpannerAdapter implements DatabaseAdapter {
   private spannerClient?: SpannerClientInstanceType;
   private instance?: SpannerInstance;
   private db?: SpannerDatabase;
+  // private adminClient?: DatabaseAdminClient; // Removed, will be obtained on demand
+  private dbPath?: string; // Kept
   private options: SpannerConnectionOptions;
   private isConnected: boolean = false;
   private ready: Promise<void>;
@@ -71,9 +75,16 @@ export class SpannerAdapter implements DatabaseAdapter {
     try {
       this.spannerClient = new this.SpannerClientClass({
         projectId: this.options.projectId,
+        // Consider adding credentials if they are part of options
       });
       this.instance = this.spannerClient.instance(this.options.instanceId);
       this.db = this.instance.database(this.options.databaseId);
+
+      // Construct the fully qualified database path
+      this.dbPath = `projects/${this.options.projectId}/instances/${this.options.instanceId}/databases/${this.options.databaseId}`;
+
+      // adminClient is no longer initialized here
+
       // Perform a simple query to verify connection and authentication
       await this.db.run("SELECT 1");
       this.isConnected = true;
@@ -83,6 +94,8 @@ export class SpannerAdapter implements DatabaseAdapter {
       this.spannerClient = undefined;
       this.instance = undefined;
       this.db = undefined;
+      // this.adminClient = undefined; // Removed
+      this.dbPath = undefined;
       throw error;
     }
   }
@@ -94,11 +107,17 @@ export class SpannerAdapter implements DatabaseAdapter {
       return;
     }
     try {
-      await this.spannerClient.close();
+      // Close the main client
+      if (this.spannerClient) {
+        await this.spannerClient.close();
+      }
+      // adminClient is no longer a class member to close here
       this.isConnected = false;
       this.spannerClient = undefined;
       this.instance = undefined;
       this.db = undefined;
+      // this.adminClient = undefined; // Removed
+      this.dbPath = undefined;
       console.log("Spanner adapter disconnected.");
     } catch (error) {
       console.error("Error disconnecting Spanner adapter:", error);
@@ -134,6 +153,54 @@ export class SpannerAdapter implements DatabaseAdapter {
       return { count: typeof rowCount === "number" ? rowCount : 0 };
     } catch (error) {
       console.error("Error executing command with Spanner adapter:", error);
+      throw error;
+    }
+  }
+
+  async executeDDL(
+    sql: string,
+    // params are ignored for Spanner DDL but kept for interface compatibility
+    _params?: unknown[]
+  ): Promise<number | AffectedRows> {
+    this.ensureConnected(); // Ensures spannerClient and db are available
+
+    if (!this.spannerClient) {
+      // Should be caught by ensureConnected if db is not set, but good to be explicit
+      throw new Error(
+        "Spanner client is not initialized. Call connect() first."
+      );
+    }
+    if (!this.dbPath) {
+      throw new Error(
+        "Spanner database path is not set. Call connect() first."
+      );
+    }
+
+    const adminClient = this.spannerClient.getDatabaseAdminClient();
+
+    console.log(`Executing DDL for Spanner: ${sql.substring(0, 200)}...`); // Log snippet
+
+    try {
+      const [operation] = await adminClient.updateDatabaseDdl({
+        // Using the on-demand adminClient
+        database: this.dbPath, // Using the fully qualified dbPath
+        statements: [sql], // Spanner API expects an array of statements
+      });
+
+      console.log(
+        `DDL operation "${operation.name}" started. Waiting for completion...`
+      );
+
+      // Wait for the operation to complete.
+      // The promise() method on the operation polls until it's done.
+      // The result of promise() is an array, typically [response, metadata, finalOperation]
+      // For updateDatabaseDdl, the response is often empty upon success.
+      await operation.promise();
+
+      console.log(`DDL operation "${operation.name}" completed successfully.`);
+      return { count: 0 }; // DDLs don't have 'affected rows' like DML
+    } catch (error) {
+      console.error("Error executing DDL with Spanner adapter:", error);
       throw error;
     }
   }
