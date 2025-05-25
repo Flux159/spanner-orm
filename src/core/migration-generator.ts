@@ -1183,7 +1183,8 @@ export function generateCombinedMigrationFileContent(
   downSchemaDiff: SchemaDiff,
   currentSchemaSnapshot: SchemaSnapshot, // For "up" DDL (target state)
   previousSchemaSnapshot: SchemaSnapshot // For "down" DDL (target state after revert)
-): string {
+): string | null {
+  // Return type updated to allow null
   // Generate DDL for Postgres
   const pgUpDdl = generateMigrationDDL(
     upSchemaDiff,
@@ -1219,6 +1220,16 @@ export function generateCombinedMigrationFileContent(
     spannerDownDdl,
     "spanner"
   );
+
+  // Check if UP DDLs are empty
+  const isPgUpEmpty = pgUpDdl.length === 0;
+  const isSpannerUpEmpty = (spannerUpDdl as string[][]).every(
+    (batch) => batch.length === 0
+  );
+
+  if (isPgUpEmpty && isSpannerUpEmpty) {
+    return null; // Indicate no file should be generated
+  }
 
   // Populate the template
   let content = newMigrationFileTemplate;
