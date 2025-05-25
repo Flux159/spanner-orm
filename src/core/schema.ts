@@ -1,5 +1,4 @@
 // src/core/schema.ts
-import crypto from "node:crypto"; // Added for uuid helper
 import type {
   ColumnConfig,
   TableConfig, // Base config type
@@ -369,27 +368,11 @@ export function uuid<TName extends string>(
   // For now, assuming crypto is available in the scope where this runs.
   // A better approach might be to pass crypto.randomUUID to $defaultFn if schema.ts can't import crypto directly.
   // However, the $defaultFn is executed by the QueryBuilder, which can import crypto.
-  builder.$defaultFn(() => {
-    // This function will be stringified and rehydrated or directly called by QueryBuilder.
-    // Ensure QueryBuilder has access to 'crypto' or this function is self-contained.
-    // For Node.js environment where QueryBuilder runs, crypto should be available.
-    // For browser/other envs, this might need adjustment or a polyfill.
-    // Dynamically importing crypto to avoid making it a hard dependency for users not using uuid().
-    // This is a bit of a hack for the schema definition phase.
-    // The actual execution of this function happens in QueryBuilder's context.
-    if (typeof crypto !== "undefined" && crypto.randomUUID) {
-      return crypto.randomUUID();
-    }
-    // Fallback or error if crypto is not available in the execution context of $defaultFn
-    // This part is tricky because the function is defined here but executed elsewhere.
-    // The QueryBuilder will need to handle the execution environment of these functions.
-    // For now, let's assume a Node-like environment for the QueryBuilder.
-    // A more robust solution might involve the ORM providing a UUID generation mechanism.
-    // For simplicity in this ORM, we rely on the runtime environment of the QueryBuilder.
-    // This will be `import crypto from "node:crypto";` in query-builder.ts
-    throw new Error(
-      "crypto.randomUUID is not available in the execution environment for default value generation. Ensure 'crypto' module can be imported."
-    );
-  });
+  // NOTE: The $defaultFn for UUIDs is no longer automatically applied by the uuid() helper.
+  // It should be explicitly chained if client-side UUID generation is desired, for example:
+  // export const myTable = table("myTable", {
+  //   id: uuid("id").$defaultFn(() => crypto.randomUUID()).primaryKey(),
+  //   // ... other columns
+  // });
   return builder;
 }
