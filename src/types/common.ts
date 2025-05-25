@@ -32,6 +32,8 @@ export interface ColumnConfig<T, TName extends string = string> {
   references?: ForeignKeyConfig;
   _tableName?: string; // Internal: Name of the table this column belongs to
   _hasClientDefaultFn?: boolean; // Internal: Flag for client-side default functions
+  _isUuidTypeForDefault?: boolean; // Internal: Flag to indicate this column type is a candidate for auto-default UUID on PK
+  _autoDefaultedUuid?: boolean; // Internal: Flag to indicate if the default was auto-applied by primaryKey() for a UUID type
   // Placeholder for more advanced properties like $onUpdate, $type from example
 }
 
