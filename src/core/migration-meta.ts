@@ -1,7 +1,7 @@
 // src/core/migration-meta.ts
 import type { Dialect } from "../types/common.js";
 
-export const MIGRATION_TABLE_NAME = "_spanner_orm_migrations_log";
+export const MIGRATION_TABLE_NAME = "spanner_orm_migrations_log";
 
 // Use the centrally defined MigrationExecuteSql type
 import type { MigrationExecuteSql } from "../types/common.js";
