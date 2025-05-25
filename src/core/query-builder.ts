@@ -868,7 +868,21 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       );
     });
     const orderedKeys = Array.from(allKeys).sort();
-    const columns = orderedKeys.map((col) => `"${col}"`).join(", ");
+    const columns = orderedKeys
+      .map((tsKey) => {
+        const columnConfig = this._targetTable!.columns[tsKey] as ColumnConfig<
+          any,
+          any
+        >;
+        if (!columnConfig)
+          throw new Error(
+            `Column config not found for key ${tsKey} in table ${
+              this._targetTable!.tableName
+            }`
+          );
+        return `"${columnConfig.name}"`;
+      })
+      .join(", ");
 
     const valuePlaceholders = processedInsertData
       .map((record) => {
@@ -904,8 +918,18 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           .map(([alias, fieldSpec]) => {
             // fieldSpec is ReturningColumnSpec<TTable>
             if (typeof fieldSpec === "string") {
-              // It's a column name string
-              return `"${fieldSpec}" AS "${alias}"`;
+              // It's a TypeScript key string, used as alias
+              const tsKey = fieldSpec as string;
+              const columnConfig = this._targetTable!.columns[
+                tsKey
+              ] as ColumnConfig<any, any>;
+              if (!columnConfig)
+                throw new Error(
+                  `Column config not found for returning key ${tsKey} in table ${
+                    this._targetTable!.tableName
+                  }`
+                );
+              return `"${columnConfig.name}" AS "${alias}"`;
             } else if ("_isSQL" in fieldSpec) {
               // It's an SQL object
               return `${(fieldSpec as SQL).toSqlString(
@@ -976,7 +1000,21 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       );
     });
     const orderedKeys = Array.from(allKeys).sort();
-    const columns = orderedKeys.map((col) => `\`${col}\``).join(", ");
+    const columns = orderedKeys
+      .map((tsKey) => {
+        const columnConfig = this._targetTable!.columns[tsKey] as ColumnConfig<
+          any,
+          any
+        >;
+        if (!columnConfig)
+          throw new Error(
+            `Column config not found for key ${tsKey} in table ${
+              this._targetTable!.tableName
+            }`
+          );
+        return `\`${columnConfig.name}\``;
+      })
+      .join(", ");
 
     const valuePlaceholders = processedInsertData
       .map((record) => {
@@ -1012,7 +1050,17 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           .map(([alias, fieldSpec]) => {
             // fieldSpec is ReturningColumnSpec<TTable>
             if (typeof fieldSpec === "string") {
-              return `\`${fieldSpec}\` AS \`${alias}\``;
+              const tsKey = fieldSpec as string;
+              const columnConfig = this._targetTable!.columns[
+                tsKey
+              ] as ColumnConfig<any, any>;
+              if (!columnConfig)
+                throw new Error(
+                  `Column config not found for returning key ${tsKey} in table ${
+                    this._targetTable!.tableName
+                  }`
+                );
+              return `\`${columnConfig.name}\` AS \`${alias}\``;
             } else if ("_isSQL" in fieldSpec) {
               return `${(fieldSpec as SQL).toSqlString(
                 "spanner",
@@ -1044,15 +1092,26 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       throw new Error("SET values not provided for UPDATE.");
 
     const setParts = Object.entries(this._updateSetValues)
-      .map(([column, value]) => {
+      .map(([tsKey, value]) => {
+        const columnConfig = this._targetTable!.columns[tsKey] as ColumnConfig<
+          any,
+          any
+        >;
+        if (!columnConfig)
+          throw new Error(
+            `Column config not found for key ${tsKey} in table ${
+              this._targetTable!.tableName
+            }`
+          );
+        const sqlColumnName = columnConfig.name;
         if (typeof value === "object" && value !== null && "_isSQL" in value) {
-          return `"${column}" = ${(value as SQL).toSqlString(
+          return `"${sqlColumnName}" = ${(value as SQL).toSqlString(
             "postgres",
             paramIndexState,
             aliasMap
           )}`;
         }
-        return `"${column}" = $${paramIndexState.value++}`;
+        return `"${sqlColumnName}" = $${paramIndexState.value++}`;
       })
       .join(", ");
     const whereClause = this.buildWhereClause(
@@ -1069,7 +1128,17 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
         const returningColumns = Object.entries(this._returningClause)
           .map(([alias, fieldSpec]) => {
             if (typeof fieldSpec === "string") {
-              return `"${fieldSpec}" AS "${alias}"`;
+              const tsKey = fieldSpec as string;
+              const columnConfig = this._targetTable!.columns[
+                tsKey
+              ] as ColumnConfig<any, any>;
+              if (!columnConfig)
+                throw new Error(
+                  `Column config not found for returning key ${tsKey} in table ${
+                    this._targetTable!.tableName
+                  }`
+                );
+              return `"${columnConfig.name}" AS "${alias}"`;
             } else if ("_isSQL" in fieldSpec) {
               return `${(fieldSpec as SQL).toSqlString(
                 "postgres",
@@ -1100,15 +1169,26 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     if (!this._updateSetValues)
       throw new Error("SET values not provided for UPDATE.");
     const setParts = Object.entries(this._updateSetValues)
-      .map(([column, value]) => {
+      .map(([tsKey, value]) => {
+        const columnConfig = this._targetTable!.columns[tsKey] as ColumnConfig<
+          any,
+          any
+        >;
+        if (!columnConfig)
+          throw new Error(
+            `Column config not found for key ${tsKey} in table ${
+              this._targetTable!.tableName
+            }`
+          );
+        const sqlColumnName = columnConfig.name;
         if (typeof value === "object" && value !== null && "_isSQL" in value) {
-          return `\`${column}\` = ${(value as SQL).toSqlString(
+          return `\`${sqlColumnName}\` = ${(value as SQL).toSqlString(
             "spanner",
             paramIndexState,
             aliasMap
           )}`;
         }
-        return `\`${column}\` = @p${paramIndexState.value++}`;
+        return `\`${sqlColumnName}\` = @p${paramIndexState.value++}`;
       })
       .join(", ");
     const whereClause = this.buildWhereClause(
@@ -1125,7 +1205,17 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
         const returningColumns = Object.entries(this._returningClause)
           .map(([alias, fieldSpec]) => {
             if (typeof fieldSpec === "string") {
-              return `\`${fieldSpec}\` AS \`${alias}\``;
+              const tsKey = fieldSpec as string;
+              const columnConfig = this._targetTable!.columns[
+                tsKey
+              ] as ColumnConfig<any, any>;
+              if (!columnConfig)
+                throw new Error(
+                  `Column config not found for returning key ${tsKey} in table ${
+                    this._targetTable!.tableName
+                  }`
+                );
+              return `\`${columnConfig.name}\` AS \`${alias}\``;
             } else if ("_isSQL" in fieldSpec) {
               return `${(fieldSpec as SQL).toSqlString(
                 "spanner",
@@ -1167,7 +1257,17 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
         const returningColumns = Object.entries(this._returningClause)
           .map(([alias, fieldSpec]) => {
             if (typeof fieldSpec === "string") {
-              return `"${fieldSpec}" AS "${alias}"`;
+              const tsKey = fieldSpec as string;
+              const columnConfig = this._targetTable!.columns[
+                tsKey
+              ] as ColumnConfig<any, any>;
+              if (!columnConfig)
+                throw new Error(
+                  `Column config not found for returning key ${tsKey} in table ${
+                    this._targetTable!.tableName
+                  }`
+                );
+              return `"${columnConfig.name}" AS "${alias}"`;
             } else if ("_isSQL" in fieldSpec) {
               return `${(fieldSpec as SQL).toSqlString(
                 "postgres",
@@ -1209,7 +1309,17 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
         const returningColumns = Object.entries(this._returningClause)
           .map(([alias, fieldSpec]) => {
             if (typeof fieldSpec === "string") {
-              return `\`${fieldSpec}\` AS \`${alias}\``;
+              const tsKey = fieldSpec as string;
+              const columnConfig = this._targetTable!.columns[
+                tsKey
+              ] as ColumnConfig<any, any>;
+              if (!columnConfig)
+                throw new Error(
+                  `Column config not found for returning key ${tsKey} in table ${
+                    this._targetTable!.tableName
+                  }`
+                );
+              return `\`${columnConfig.name}\` AS \`${alias}\``;
             } else if ("_isSQL" in fieldSpec) {
               return `${(fieldSpec as SQL).toSqlString(
                 "spanner",
