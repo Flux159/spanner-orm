@@ -11,45 +11,16 @@ export type OnDeleteAction =
 
 export interface ForeignKeyConfig {
   // Using a function to avoid circular dependencies and ensure table is defined
-  referencesFn: () => ColumnConfig<any, any, any>; // Function that returns the target column config
+  referencesFn: () => ColumnConfig<any, any>; // Function that returns the target column config
   onDelete?: OnDeleteAction;
   // Internally resolved fields after all tables are processed by DDL generator:
   // _referencedTableName?: string;
   // _referencedColumnName?: string;
 }
 
-// Define the abstract ORM column types
-export type OrmColumnType =
-  | "uuid"
-  | "text"
-  | "string" // Generic text, often maps to TEXT or VARCHAR
-  | "varchar"
-  | "char"
-  | "json"
-  | "jsonb"
-  | "int"
-  | "integer"
-  | "smallint"
-  | "bigint"
-  | "float" // Typically single-precision
-  | "double" // Typically double-precision
-  | "decimal" // For exact numeric values
-  | "numeric" // Synonym for decimal
-  | "boolean"
-  | "date" // Date without time
-  | "datetime" // Date with time, often maps to TIMESTAMP
-  | "timestamp" // Timestamp with or without time zone
-  | "time" // Time without date
-  | "binary"
-  | "bytes"; // Byte array
-
-export interface ColumnConfig<
-  T,
-  TName extends string = string,
-  TType extends OrmColumnType = OrmColumnType
-> {
+export interface ColumnConfig<T, TName extends string = string> {
   name: TName;
-  type: TType; // Use the more specific OrmColumnType
+  type: string; // Abstract type, e.g., 'text', 'integer', 'timestamp'
   dialectTypes: {
     postgres: string; // e.g., 'TEXT', 'INTEGER', 'TIMESTAMP WITH TIME ZONE'
     spanner: string; // e.g., 'STRING', 'INT64', 'TIMESTAMP'
@@ -104,19 +75,12 @@ export type Table<
 };
 
 // Utility type to infer the TS type from a ColumnConfig
-export type InferColumnType<
-  C extends ColumnConfig<unknown, string, OrmColumnType>
-> = C["default"] extends undefined
-  ? C["notNull"] extends true
-    ? NonNullable<
-        C extends ColumnConfig<infer T, string, OrmColumnType> ? T : never
-      >
-    :
-        | (C extends ColumnConfig<infer T, string, OrmColumnType> ? T : never)
-        | null
-  : NonNullable<
-      C extends ColumnConfig<infer T, string, OrmColumnType> ? T : never
-    >;
+export type InferColumnType<C extends ColumnConfig<unknown, string>> =
+  C["default"] extends undefined
+    ? C["notNull"] extends true
+      ? NonNullable<C extends ColumnConfig<infer T, string> ? T : never>
+      : (C extends ColumnConfig<infer T, string> ? T : never) | null
+    : NonNullable<C extends ColumnConfig<infer T, string> ? T : never>;
 
 // Utility type to infer the TS type for a whole table
 // Note: This infers from the .columns property, which is correct as it holds the full column definitions.
@@ -216,7 +180,7 @@ export type ShapedResultItem<
 
 // --- Function Descriptors ---
 export type FunctionArg =
-  | ColumnConfig<any, any, any>
+  | ColumnConfig<any, any>
   | SQL
   | string
   | number
@@ -371,7 +335,7 @@ export function sql(strings: TemplateStringsArray, ...values: unknown[]): SQL {
             typeof (value as any).dialectTypes === "object"
           ) {
             // It's a ColumnConfig, interpolate its name as an identifier
-            const colConfig = value as ColumnConfig<any, any, any>;
+            const colConfig = value as ColumnConfig<any, any>;
             const colName = colConfig.name;
             const originalTableNameFromCol = colConfig._tableName; // Table name from column's context
             let tableQualifier: string | undefined = originalTableNameFromCol;
@@ -571,10 +535,7 @@ export interface PreparedQuery<
 // --- Types for RETURNING clause ---
 export type ReturningColumnSpec<
   TTable extends TableConfig<any, any> | Table<any, any>
-> =
-  | SQL
-  | ColumnConfig<any, any, any>
-  | Extract<keyof TTable["columns"], string>;
+> = SQL | ColumnConfig<any, any> | Extract<keyof TTable["columns"], string>;
 
 export type ReturningObject<
   TTable extends TableConfig<any, any> | Table<any, any>

@@ -13,7 +13,6 @@ import type {
   Table, // Added
   TypedIncludeRelationOptions, // Added
   EnhancedIncludeClauseEntry, // Added
-  OrmColumnType, // Added for Spanner type mapping
   // ReturningColumnSpec, // Not directly used as type annotation here
 } from "../types/common.js";
 import { sql } from "../types/common.js";
@@ -44,12 +43,6 @@ type InsertData<TTable extends TableConfig<any, any>> =
 type UpdateData<TTable extends TableConfig<any, any>> = {
   [K in keyof InferModelType<TTable>]?: InferModelType<TTable>[K] | SQL;
 };
-
-// For collecting parameters with their potential column configuration
-interface ParameterWithValueAndConfig {
-  value: unknown;
-  columnConfig?: ColumnConfig<any, any>; // Optional, as not all params have a direct column source
-}
 
 export class QueryBuilder<TTable extends TableConfig<any, any>> {
   private _operationType?: OperationType;
@@ -1217,17 +1210,11 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     if (!this._targetTable) throw new Error("Target table not set for UPDATE.");
     if (!this._updateSetValues)
       throw new Error("SET values not provided for UPDATE.");
-
-    const sortedUpdateKeys = Object.keys(this._updateSetValues).sort();
-
-    const setParts = sortedUpdateKeys
-      .map((tsKey) => {
-        const value =
-          this._updateSetValues![tsKey as keyof typeof this._updateSetValues];
+    const setParts = Object.entries(this._updateSetValues)
+      .map(([tsKey, value]) => {
         const columnConfig = this._targetTable!.columns[tsKey] as ColumnConfig<
           any,
-          any,
-          OrmColumnType
+          any
         >;
         if (!columnConfig)
           throw new Error(
@@ -1498,20 +1485,19 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
   }
 
   getBoundParameters(dialect: Dialect): unknown[] | Record<string, unknown> {
-    const allParamsWithConfig: ParameterWithValueAndConfig[] = [];
-
+    const allParams: unknown[] = [];
     if (this._operationType === "select" && this._selectedFields) {
+      // Parameters from explicitly selected SQL fields
       Object.values(this._selectedFields).forEach((field) => {
         if (typeof field === "object" && field !== null && "_isSQL" in field) {
-          (field as SQL)
-            .getValues(dialect)
-            .forEach((val) =>
-              allParamsWithConfig.push({ value: val, columnConfig: undefined })
-            );
+          allParams.push(...(field as SQL).getValues(dialect));
         }
       });
+      // Parameters from included fields (though typically columns, could be SQL in future)
+      // For now, selectedFieldsFromIncludes in buildSelect methods only adds ColumnConfig,
+      // so no parameters from there yet. If SQL objects were allowed in include.select,
+      // they would need to be processed here or their params collected during buildSelect.
     }
-
     if (
       this._operationType === "insert" &&
       this._insertValues &&
@@ -1525,16 +1511,11 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       } else {
         processedInsertDataForParams = [{ ...this._insertValues }];
       }
-
       for (const record of processedInsertDataForParams) {
         for (const [columnName, columnConfigUnk] of Object.entries(
           this._targetTable.columns
         )) {
-          const columnConfig = columnConfigUnk as ColumnConfig<
-            any,
-            any,
-            OrmColumnType
-          >;
+          const columnConfig = columnConfigUnk as ColumnConfig<any, any>;
           if (record[columnName as keyof typeof record] === undefined) {
             if (typeof columnConfig.default === "function") {
               (record as Record<string, any>)[columnName] = (
@@ -1554,66 +1535,42 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           }
         }
       }
-
       const allKeysForParams = new Set<string>();
       processedInsertDataForParams.forEach((record) => {
         Object.keys(record as Record<string, any>).forEach((key) =>
           allKeysForParams.add(key)
         );
       });
-      const orderedColumnTsKeys = Array.from(allKeysForParams).sort();
-
+      const orderedColumnNames = Array.from(allKeysForParams).sort(); // These are the TS keys
       for (const record of processedInsertDataForParams) {
-        for (const tsKey of orderedColumnTsKeys) {
-          const value = (record as Record<string, any>)[tsKey];
-          const columnConfig = this._targetTable.columns[tsKey] as ColumnConfig<
-            any,
-            any,
-            OrmColumnType
-          >;
+        for (const tsKey of orderedColumnNames) {
+          // Iterate using the TS key from orderedColumnNames
+          const value = (record as Record<string, any>)[tsKey]; // Get value using TS key
 
           if (value === undefined) {
-            allParamsWithConfig.push({ value: null, columnConfig });
+            // If the TS key is not in the current record, or its value is undefined
+            allParams.push(null); // Supply null for this parameter
           } else if (
             typeof value === "object" &&
             value !== null &&
             (value as SQL)._isSQL === true
           ) {
-            (value as SQL).getValues(dialect).forEach((val) =>
-              allParamsWithConfig.push({
-                value: val,
-                columnConfig: undefined,
-              })
-            ); // SQL parts don't have a single columnConfig
+            allParams.push(...(value as SQL).getValues(dialect));
           } else {
-            allParamsWithConfig.push({ value, columnConfig });
+            allParams.push(value);
           }
         }
       }
     }
-
     if (this._operationType === "update" && this._updateSetValues) {
-      const sortedUpdateKeys = Object.keys(this._updateSetValues).sort();
-      for (const tsKey of sortedUpdateKeys) {
-        const value =
-          this._updateSetValues[tsKey as keyof typeof this._updateSetValues];
-        const columnConfig = this._targetTable!.columns[tsKey] as ColumnConfig<
-          any,
-          any,
-          OrmColumnType
-        >;
+      for (const value of Object.values(this._updateSetValues)) {
         if (typeof value === "object" && value !== null && "_isSQL" in value) {
-          (value as SQL)
-            .getValues(dialect)
-            .forEach((val) =>
-              allParamsWithConfig.push({ value: val, columnConfig: undefined })
-            );
+          allParams.push(...(value as SQL).getValues(dialect));
         } else {
-          allParamsWithConfig.push({ value, columnConfig });
+          allParams.push(value);
         }
       }
     }
-
     if (this._conditions) {
       for (const condition of this._conditions) {
         if (
@@ -1621,25 +1578,16 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           condition !== null &&
           "_isSQL" in condition
         ) {
-          (condition as SQL)
-            .getValues(dialect)
-            .forEach((val) =>
-              allParamsWithConfig.push({ value: val, columnConfig: undefined })
-            );
+          allParams.push(...(condition as SQL).getValues(dialect));
         }
       }
     }
-
     if (this._joins) {
+      // Includes joins from .include()
       for (const join of this._joins) {
-        join.onCondition
-          .getValues(dialect)
-          .forEach((val) =>
-            allParamsWithConfig.push({ value: val, columnConfig: undefined })
-          );
+        allParams.push(...join.onCondition.getValues(dialect));
       }
     }
-
     if (this._orderBy) {
       for (const orderItem of this._orderBy) {
         if (
@@ -1647,15 +1595,10 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           orderItem.field !== null &&
           "_isSQL" in orderItem.field
         ) {
-          (orderItem.field as SQL)
-            .getValues(dialect)
-            .forEach((val) =>
-              allParamsWithConfig.push({ value: val, columnConfig: undefined })
-            );
+          allParams.push(...(orderItem.field as SQL).getValues(dialect));
         }
       }
     }
-
     if (this._groupBy) {
       for (const groupItem of this._groupBy) {
         if (
@@ -1663,37 +1606,23 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           groupItem !== null &&
           "_isSQL" in groupItem
         ) {
-          (groupItem as SQL)
-            .getValues(dialect)
-            .forEach((val) =>
-              allParamsWithConfig.push({ value: val, columnConfig: undefined })
-            );
+          allParams.push(...(groupItem as SQL).getValues(dialect));
         }
       }
     }
-
+    // New logic for Spanner:
     if (dialect === "spanner") {
       const spannerParams: Record<string, unknown> = {};
-      allParamsWithConfig.forEach((paramItem, index) => {
-        let spannerValue = paramItem.value;
-        if (
-          paramItem.value === null &&
-          paramItem.columnConfig &&
-          paramItem.columnConfig.type
-        ) {
-          const spannerType = this.getSpannerPhysicalType(
-            paramItem.columnConfig.type
-          );
-          if (spannerType) {
-            spannerValue = { value: null, type: spannerType };
-          }
-        }
-        spannerParams[`p${index + 1}`] = spannerValue;
+      allParams.forEach((value, index) => {
+        // Spanner uses @p1, @p2, etc. for named parameters in the SQL string
+        // The object keys here are for the client library, which might map them.
+        // The @ prefix is part of the SQL string, not the param object key itself.
+        spannerParams[`p${index + 1}`] = value;
       });
       return spannerParams;
     }
 
-    return allParamsWithConfig.map((p) => p.value);
+    return allParams;
   }
 
   private addJoin(
@@ -1786,52 +1715,5 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
 
   leftJoinRelation(relationName: string): this {
     return this.joinRelation(relationName, "LEFT");
-  }
-
-  // Helper function to map ORM column types to Spanner physical types
-  private getSpannerPhysicalType(
-    columnType: OrmColumnType
-  ): string | undefined {
-    // Based on https://cloud.google.com/spanner/docs/data-types#sql-standard-data-types
-    // and typical ORM to Spanner mappings.
-    switch (columnType) {
-      case "uuid":
-      case "text":
-      case "string": // Assuming 'string' is a generic text type
-      case "varchar":
-      case "char":
-      case "json": // JSON is often stored as STRING in Spanner
-      case "jsonb": // Same as JSON for Spanner
-        return "STRING";
-      case "int":
-      case "integer":
-      case "smallint":
-      case "bigint": // All integer types map to INT64
-        return "INT64";
-      case "float":
-      case "double":
-      case "decimal": // Numeric/Decimal types map to NUMERIC or FLOAT64. FLOAT64 is simpler.
-      case "numeric":
-        return "FLOAT64"; // Or "NUMERIC" for exact precision
-      case "boolean":
-        return "BOOL";
-      case "date":
-        return "DATE";
-      case "datetime":
-      case "timestamp": // Both map to TIMESTAMP
-        return "TIMESTAMP";
-      case "binary":
-      case "bytes":
-        return "BYTES";
-      // Add other mappings as necessary based on your OrmColumnType definitions
-      default:
-        // If the type is unknown or doesn't have a direct Spanner mapping,
-        // returning undefined means the Spanner client library will infer.
-        // This might be okay for non-null values but problematic for nulls.
-        console.warn(
-          `QueryBuilder: Unmapped ORM column type "${columnType}" for Spanner. Type inference will be used.`
-        );
-        return undefined;
-    }
   }
 }
