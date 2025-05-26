@@ -1033,6 +1033,9 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     if (!this._insertValues) throw new Error("Values not set for INSERT.");
 
     let processedInsertData: Partial<InferModelType<TTable>>[];
+    const isSingleInsert =
+      !Array.isArray(this._insertValues) || this._insertValues.length === 1;
+
     if (Array.isArray(this._insertValues)) {
       processedInsertData = this._insertValues.map((record) => ({ ...record }));
     } else {
@@ -1041,6 +1044,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     if (processedInsertData.length === 0)
       throw new Error("No values provided for INSERT.");
 
+    // Apply defaults first
     for (const record of processedInsertData) {
       for (const [columnName, columnConfigUnk] of Object.entries(
         this._targetTable.columns
@@ -1063,36 +1067,46 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
         }
       }
     }
-    const allKeys = new Set<string>();
-    processedInsertData.forEach((record) => {
-      Object.keys(record as Record<string, any>).forEach((key) =>
-        allKeys.add(key)
-      );
-    });
-    const orderedKeys = Array.from(allKeys).sort();
-    const columns = orderedKeys
-      .map((tsKey) => {
-        const columnConfig = this._targetTable!.columns[tsKey] as ColumnConfig<
-          any,
-          any
-        >;
-        if (!columnConfig)
-          throw new Error(
-            `Column config not found for key ${tsKey} in table ${
-              this._targetTable!.tableName
-            }`
-          );
-        return `\`${columnConfig.name}\``;
-      })
-      .join(", ");
 
-    const valuePlaceholders = processedInsertData
-      .map((record) => {
-        const orderedValues = orderedKeys.map(
-          (key) => (record as Record<string, any>)[key]
-        );
-        return `(${orderedValues
-          .map((val) => {
+    // Determine columns and placeholders
+    let columnsSql: string;
+    let valuePlaceholdersSql: string;
+
+    if (isSingleInsert && processedInsertData.length > 0) {
+      const singleRecord = processedInsertData[0];
+      // Filter out null and undefined values from the single record for SQL generation
+      const nonNullKeys = Object.keys(singleRecord as Record<string, any>)
+        .filter((key) => {
+          const val = (singleRecord as Record<string, any>)[key];
+          return val !== null && val !== undefined;
+        })
+        .sort();
+
+      if (nonNullKeys.length === 0) {
+        // If all values are null (after defaults), generate an empty column/value list
+        // This leads to `INSERT INTO \`table\` () VALUES ()`, which Spanner rejects.
+        // This is per the requirement to not correctly support this edge case for now.
+        columnsSql = "";
+        valuePlaceholdersSql = "()";
+      } else {
+        columnsSql = nonNullKeys
+          .map((tsKey) => {
+            const columnConfig = this._targetTable!.columns[
+              tsKey
+            ] as ColumnConfig<any, any>;
+            if (!columnConfig)
+              throw new Error(
+                `Column config not found for key ${tsKey} in table ${
+                  this._targetTable!.tableName
+                }`
+              );
+            return `\`${columnConfig.name}\``;
+          })
+          .join(", ");
+
+        valuePlaceholdersSql = `(${nonNullKeys
+          .map((key) => {
+            const val = (singleRecord as Record<string, any>)[key];
             if (
               typeof val === "object" &&
               val !== null &&
@@ -1107,10 +1121,58 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
             return `@p${paramIndexState.value++}`;
           })
           .join(", ")})`;
-      })
-      .join(", ");
+      }
+    } else {
+      // Existing logic for Postgres or Spanner bulk inserts
+      const allKeys = new Set<string>();
+      processedInsertData.forEach((record) => {
+        Object.keys(record as Record<string, any>).forEach((key) =>
+          allKeys.add(key)
+        );
+      });
+      const orderedKeys = Array.from(allKeys).sort();
 
-    let sql = `INSERT INTO \`${this._targetTable.tableName}\` (${columns}) VALUES ${valuePlaceholders}`;
+      columnsSql = orderedKeys
+        .map((tsKey) => {
+          const columnConfig = this._targetTable!.columns[
+            tsKey
+          ] as ColumnConfig<any, any>;
+          if (!columnConfig)
+            throw new Error(
+              `Column config not found for key ${tsKey} in table ${
+                this._targetTable!.tableName
+              }`
+            );
+          return `\`${columnConfig.name}\``;
+        })
+        .join(", ");
+
+      valuePlaceholdersSql = processedInsertData
+        .map((record) => {
+          const orderedValues = orderedKeys.map(
+            (key) => (record as Record<string, any>)[key]
+          );
+          return `(${orderedValues
+            .map((val) => {
+              if (
+                typeof val === "object" &&
+                val !== null &&
+                (val as SQL)._isSQL === true
+              ) {
+                return (val as SQL).toSqlString(
+                  "spanner",
+                  paramIndexState,
+                  aliasMap
+                );
+              }
+              return `@p${paramIndexState.value++}`;
+            })
+            .join(", ")})`;
+        })
+        .join(", ");
+    }
+
+    let sql = `INSERT INTO \`${this._targetTable.tableName}\` (${columnsSql}) VALUES ${valuePlaceholdersSql}`;
     if (this._returningClause) {
       if (this._returningClause === true) {
         sql += ` THEN RETURN *`;
@@ -1535,6 +1597,9 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       this._targetTable
     ) {
       let processedInsertDataForParams: Partial<InferModelType<TTable>>[];
+      const isSingleInsert =
+        !Array.isArray(this._insertValues) || this._insertValues.length === 1;
+
       if (Array.isArray(this._insertValues)) {
         processedInsertDataForParams = this._insertValues.map((record) => ({
           ...record,
@@ -1543,6 +1608,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
         processedInsertDataForParams = [{ ...this._insertValues }];
       }
 
+      // Apply defaults
       for (const record of processedInsertDataForParams) {
         for (const [columnName, columnConfigUnk] of Object.entries(
           this._targetTable.columns
@@ -1568,23 +1634,49 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
         }
       }
 
-      const allKeysForParams = new Set<string>();
-      processedInsertDataForParams.forEach((record) => {
-        Object.keys(record as Record<string, any>).forEach((key) =>
-          allKeysForParams.add(key)
-        );
-      });
-      const orderedColumnNames = Array.from(allKeysForParams).sort();
+      // Get all keys that will be part of the insert, potentially filtered for Spanner single inserts
+      let keysForParameterExtraction: string[];
+
+      if (
+        dialect === "spanner" &&
+        isSingleInsert &&
+        processedInsertDataForParams.length > 0
+      ) {
+        const singleRecord = processedInsertDataForParams[0];
+        keysForParameterExtraction = Object.keys(
+          singleRecord as Record<string, any>
+        )
+          .filter((key) => {
+            const val = (singleRecord as Record<string, any>)[key];
+            return val !== null && val !== undefined;
+          })
+          .sort();
+      } else {
+        const allKeys = new Set<string>();
+        processedInsertDataForParams.forEach((record) => {
+          Object.keys(record as Record<string, any>).forEach((key) =>
+            allKeys.add(key)
+          );
+        });
+        keysForParameterExtraction = Array.from(allKeys).sort();
+      }
 
       for (const record of processedInsertDataForParams) {
-        for (const tsKey of orderedColumnNames) {
+        for (const tsKey of keysForParameterExtraction) {
+          // Use the potentially filtered keys
           const value = (record as Record<string, any>)[tsKey];
+          // For Spanner single inserts, nulls would have been filtered by keysForParameterExtraction.
+          // For other cases, value could be null here if it was explicitly set.
+          // Value could also be undefined if a key existed in one record of a bulk insert but not another;
+          // in such cases, it's treated as null for parameter purposes.
+
           const columnConfig = this._targetTable!.columns[
             tsKey
           ] as ColumnConfig<any, any>;
           const spannerType = columnConfig?.dialectTypes?.spanner;
 
           if (value === undefined) {
+            // Should ideally not happen if keys are derived from existing properties
             allParams.push(null);
             allSpannerTypes.push(spannerType);
           } else if (
@@ -1594,8 +1686,10 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           ) {
             const sqlValues = (value as SQL).getValues(dialect);
             allParams.push(...sqlValues);
+            // For SQL chunks, assume their types are handled by the SQL object itself or are not relevant for top-level hints
             sqlValues.forEach(() => allSpannerTypes.push(undefined));
           } else {
+            // If value is null here, it's either for non-Spanner-single-insert, or an explicit null not filtered.
             allParams.push(value);
             allSpannerTypes.push(spannerType);
           }
