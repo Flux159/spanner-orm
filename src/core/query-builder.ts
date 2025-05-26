@@ -335,18 +335,45 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       throw new Error("Operation type is undefined during prepare.");
     }
 
-    const params = this.getBoundParameters(dialect);
+    const { values: paramValues, spannerTypes: paramSpannerTypes } =
+      this.getBoundParametersAndTypes(dialect);
+
+    let finalParams: unknown[] | Record<string, unknown>;
+    let finalSpannerParamTypeHints: Record<string, string> | undefined;
+
+    if (dialect === "spanner") {
+      const spannerP: Record<string, unknown> = {};
+      const spannerTH: Record<string, string> = {};
+      paramValues.forEach((val, idx) => {
+        const pName = `p${idx + 1}`;
+        spannerP[pName] = val;
+        if (paramSpannerTypes && paramSpannerTypes[idx]) {
+          spannerTH[pName] = paramSpannerTypes[idx]!;
+        }
+      });
+      finalParams = spannerP;
+      finalSpannerParamTypeHints =
+        Object.keys(spannerTH).length > 0 ? spannerTH : undefined;
+    } else {
+      finalParams = paramValues;
+      finalSpannerParamTypeHints = undefined;
+    }
+
     if (this._debugMode) {
       console.log("--- SQL Query ---");
       console.log(sqlString);
       console.log("--- Parameters ---");
-      console.log(params);
+      console.log(finalParams);
+      if (finalSpannerParamTypeHints) {
+        console.log("--- Spanner Type Hints ---");
+        console.log(finalSpannerParamTypeHints);
+      }
       console.log("-----------------");
     }
 
     return {
       sql: sqlString,
-      parameters: params,
+      parameters: finalParams,
       dialect: dialect,
       action: this._operationType, // Add the action here
       includeClause:
@@ -357,6 +384,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           ? (this._selectedFields as any)
           : undefined, // Add selected fields
       returning: this._returningClause, // Add returning clause info
+      spannerParamTypeHints: finalSpannerParamTypeHints,
     };
   }
 
@@ -1484,20 +1512,23 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     return `GROUP BY ${groupByParts.join(", ")}`;
   }
 
-  getBoundParameters(dialect: Dialect): unknown[] | Record<string, unknown> {
+  private getBoundParametersAndTypes(dialect: Dialect): {
+    values: unknown[];
+    spannerTypes: (string | undefined)[];
+  } {
     const allParams: unknown[] = [];
+    const allSpannerTypes: (string | undefined)[] = [];
+
     if (this._operationType === "select" && this._selectedFields) {
-      // Parameters from explicitly selected SQL fields
       Object.values(this._selectedFields).forEach((field) => {
         if (typeof field === "object" && field !== null && "_isSQL" in field) {
-          allParams.push(...(field as SQL).getValues(dialect));
+          const sqlValues = (field as SQL).getValues(dialect);
+          allParams.push(...sqlValues);
+          sqlValues.forEach(() => allSpannerTypes.push(undefined));
         }
       });
-      // Parameters from included fields (though typically columns, could be SQL in future)
-      // For now, selectedFieldsFromIncludes in buildSelect methods only adds ColumnConfig,
-      // so no parameters from there yet. If SQL objects were allowed in include.select,
-      // they would need to be processed here or their params collected during buildSelect.
     }
+
     if (
       this._operationType === "insert" &&
       this._insertValues &&
@@ -1511,6 +1542,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       } else {
         processedInsertDataForParams = [{ ...this._insertValues }];
       }
+
       for (const record of processedInsertDataForParams) {
         for (const [columnName, columnConfigUnk] of Object.entries(
           this._targetTable.columns
@@ -1535,42 +1567,67 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           }
         }
       }
+
       const allKeysForParams = new Set<string>();
       processedInsertDataForParams.forEach((record) => {
         Object.keys(record as Record<string, any>).forEach((key) =>
           allKeysForParams.add(key)
         );
       });
-      const orderedColumnNames = Array.from(allKeysForParams).sort(); // These are the TS keys
+      const orderedColumnNames = Array.from(allKeysForParams).sort();
+
       for (const record of processedInsertDataForParams) {
         for (const tsKey of orderedColumnNames) {
-          // Iterate using the TS key from orderedColumnNames
-          const value = (record as Record<string, any>)[tsKey]; // Get value using TS key
+          const value = (record as Record<string, any>)[tsKey];
+          const columnConfig = this._targetTable!.columns[
+            tsKey
+          ] as ColumnConfig<any, any>;
+          const spannerType = columnConfig?.dialectTypes?.spanner;
 
           if (value === undefined) {
-            // If the TS key is not in the current record, or its value is undefined
-            allParams.push(null); // Supply null for this parameter
+            allParams.push(null);
+            allSpannerTypes.push(spannerType);
           } else if (
             typeof value === "object" &&
             value !== null &&
             (value as SQL)._isSQL === true
           ) {
-            allParams.push(...(value as SQL).getValues(dialect));
+            const sqlValues = (value as SQL).getValues(dialect);
+            allParams.push(...sqlValues);
+            sqlValues.forEach(() => allSpannerTypes.push(undefined));
           } else {
             allParams.push(value);
+            allSpannerTypes.push(spannerType);
           }
         }
       }
     }
-    if (this._operationType === "update" && this._updateSetValues) {
-      for (const value of Object.values(this._updateSetValues)) {
+
+    if (
+      this._operationType === "update" &&
+      this._updateSetValues &&
+      this._targetTable
+    ) {
+      // The order of parameters for UPDATE SET... needs to match the order in buildUpdateSpannerSQL
+      // which iterates Object.entries(this._updateSetValues)
+      for (const [tsKey, value] of Object.entries(this._updateSetValues)) {
+        const columnConfig = this._targetTable!.columns[tsKey] as ColumnConfig<
+          any,
+          any
+        >;
+        const spannerType = columnConfig?.dialectTypes?.spanner;
+
         if (typeof value === "object" && value !== null && "_isSQL" in value) {
-          allParams.push(...(value as SQL).getValues(dialect));
+          const sqlValues = (value as SQL).getValues(dialect);
+          allParams.push(...sqlValues);
+          sqlValues.forEach(() => allSpannerTypes.push(undefined));
         } else {
           allParams.push(value);
+          allSpannerTypes.push(spannerType);
         }
       }
     }
+
     if (this._conditions) {
       for (const condition of this._conditions) {
         if (
@@ -1578,16 +1635,21 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           condition !== null &&
           "_isSQL" in condition
         ) {
-          allParams.push(...(condition as SQL).getValues(dialect));
+          const sqlValues = (condition as SQL).getValues(dialect);
+          allParams.push(...sqlValues);
+          sqlValues.forEach(() => allSpannerTypes.push(undefined));
         }
       }
     }
+
     if (this._joins) {
-      // Includes joins from .include()
       for (const join of this._joins) {
-        allParams.push(...join.onCondition.getValues(dialect));
+        const sqlValues = join.onCondition.getValues(dialect);
+        allParams.push(...sqlValues);
+        sqlValues.forEach(() => allSpannerTypes.push(undefined));
       }
     }
+
     if (this._orderBy) {
       for (const orderItem of this._orderBy) {
         if (
@@ -1595,10 +1657,13 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           orderItem.field !== null &&
           "_isSQL" in orderItem.field
         ) {
-          allParams.push(...(orderItem.field as SQL).getValues(dialect));
+          const sqlValues = (orderItem.field as SQL).getValues(dialect);
+          allParams.push(...sqlValues);
+          sqlValues.forEach(() => allSpannerTypes.push(undefined));
         }
       }
     }
+
     if (this._groupBy) {
       for (const groupItem of this._groupBy) {
         if (
@@ -1606,23 +1671,13 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           groupItem !== null &&
           "_isSQL" in groupItem
         ) {
-          allParams.push(...(groupItem as SQL).getValues(dialect));
+          const sqlValues = (groupItem as SQL).getValues(dialect);
+          allParams.push(...sqlValues);
+          sqlValues.forEach(() => allSpannerTypes.push(undefined));
         }
       }
     }
-    // New logic for Spanner:
-    if (dialect === "spanner") {
-      const spannerParams: Record<string, unknown> = {};
-      allParams.forEach((value, index) => {
-        // Spanner uses @p1, @p2, etc. for named parameters in the SQL string
-        // The object keys here are for the client library, which might map them.
-        // The @ prefix is part of the SQL string, not the param object key itself.
-        spannerParams[`p${index + 1}`] = value;
-      });
-      return spannerParams;
-    }
-
-    return allParams;
+    return { values: allParams, spannerTypes: allSpannerTypes };
   }
 
   private addJoin(
