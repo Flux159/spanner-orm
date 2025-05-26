@@ -121,8 +121,12 @@ export async function recordMigrationApplied(
     dialect === "postgres"
       ? `INSERT INTO ${tableName} (name, dialect, applied_at) VALUES ($1, $2, ${appliedAtValue});`
       : `INSERT INTO ${tableName} (name, dialect, applied_at) VALUES (@p1, @p2, ${appliedAtValue});`;
+  const params =
+    dialect === "postgres"
+      ? [migrationName, dialect]
+      : { p1: migrationName, p2: dialect };
 
-  await executeSql(insertSql, [migrationName, dialect]);
+  await executeSql(insertSql, params);
 }
 
 /**
