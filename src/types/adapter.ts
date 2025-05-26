@@ -19,7 +19,10 @@ export interface Transaction {
   execute(
     sql: string,
     params?: unknown[],
-    spannerTypeHints?: Record<string, string>
+    spannerTypeHints?: Record<
+      string,
+      { code: string; arrayElementType?: { code: string } }
+    >
   ): Promise<number | AffectedRows>; // Changed to return affected rows/count
 
   /**
@@ -28,7 +31,10 @@ export interface Transaction {
   query<T extends QueryResultRow = QueryResultRow>(
     sql: string,
     params?: unknown[],
-    spannerTypeHints?: Record<string, string>
+    spannerTypeHints?: Record<
+      string,
+      { code: string; arrayElementType?: { code: string } }
+    >
   ): Promise<T[]>;
 
   /**
@@ -71,7 +77,10 @@ export interface DatabaseAdapter {
   execute(
     sql: string,
     params?: unknown[] | { [key: string]: string },
-    spannerTypeHints?: Record<string, string>
+    spannerTypeHints?: Record<
+      string,
+      { code: string; arrayElementType?: { code: string } }
+    >
   ): Promise<number | AffectedRows>; // Modified to return count/AffectedRows
 
   /**
@@ -83,7 +92,10 @@ export interface DatabaseAdapter {
   query<T extends QueryResultRow = QueryResultRow>(
     sql: string,
     params?: unknown[],
-    spannerTypeHints?: Record<string, string>
+    spannerTypeHints?: Record<
+      string,
+      { code: string; arrayElementType?: { code: string } }
+    >
   ): Promise<T[]>;
 
   /**
@@ -98,7 +110,10 @@ export interface DatabaseAdapter {
   executeAndReturnRows?<TResult extends QueryResultRow = QueryResultRow>(
     sql: string,
     params?: any, // Allows unknown[] for PG-like, Record<string, any> for Spanner
-    spannerTypeHints?: Record<string, string>
+    spannerTypeHints?: Record<
+      string,
+      { code: string; arrayElementType?: { code: string } }
+    >
   ): Promise<TResult[]>;
 
   /**
