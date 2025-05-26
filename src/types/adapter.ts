@@ -63,7 +63,10 @@ export interface DatabaseAdapter {
    * @param params Optional array of parameters for prepared statements.
    * @returns A promise that resolves to the number of affected rows or void.
    */
-  execute(sql: string, params?: unknown[]): Promise<number | AffectedRows>; // Modified to return count/AffectedRows
+  execute(
+    sql: string,
+    params?: unknown[] | { [key: string]: string }
+  ): Promise<number | AffectedRows>; // Modified to return count/AffectedRows
 
   /**
    * Executes a SQL query that returns rows.
@@ -107,7 +110,10 @@ export interface DatabaseAdapter {
    * @param params Optional array of parameters (often unused for DDL).
    * @returns A promise that resolves similarly to execute, often with a count of 0 for DDL.
    */
-  executeDDL?(sql: string, params?: unknown[]): Promise<number | AffectedRows>;
+  executeDDL?(
+    sql: string,
+    params?: unknown[] | { [key: string]: string }
+  ): Promise<number | AffectedRows>;
 }
 
 // Placeholder for connection options, to be defined per adapter

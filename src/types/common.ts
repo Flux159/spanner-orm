@@ -507,7 +507,7 @@ export interface SchemaDiff {
 // The executeSql function should align with DatabaseAdapter['execute']
 export type MigrationExecuteSql = (
   sql: string,
-  params?: unknown[]
+  params?: unknown[] | { [key: string]: string }
 ) => Promise<number | import("./adapter.js").AffectedRows>;
 
 export type MigrationExecutor = (
