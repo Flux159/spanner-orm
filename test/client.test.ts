@@ -182,7 +182,8 @@ describe("OrmClient & ExecutableQuery", () => {
         .limit(1);
       expect(mockAdapter.query).toHaveBeenCalledWith(
         mockSelectPreparedQuery.sql,
-        mockSelectPreparedQuery.parameters
+        mockSelectPreparedQuery.parameters,
+        undefined // Expect spannerParamTypeHints to be undefined
       );
       expect(users).toEqual([{ id: 1, name: "Test User" }]);
     });
@@ -238,7 +239,8 @@ describe("OrmClient & ExecutableQuery", () => {
         .values({ name: "New User", email: "new@example.com" });
       expect(mockAdapter.execute).toHaveBeenCalledWith(
         mockInsertPreparedQuery.sql,
-        mockInsertPreparedQuery.parameters
+        mockInsertPreparedQuery.parameters,
+        undefined // Expect spannerParamTypeHints to be undefined
       );
       expect(result).toEqual({ count: 1 });
     });
@@ -263,7 +265,8 @@ describe("OrmClient & ExecutableQuery", () => {
         .where(mockSql);
       expect(mockAdapter.execute).toHaveBeenCalledWith(
         mockUpdatePreparedQuery.sql,
-        mockUpdatePreparedQuery.parameters
+        mockUpdatePreparedQuery.parameters,
+        undefined // Expect spannerParamTypeHints to be undefined
       );
       expect(result).toEqual({ count: 1 });
     });
@@ -285,7 +288,8 @@ describe("OrmClient & ExecutableQuery", () => {
       const result = await db.deleteFrom(usersTable).where(mockSql);
       expect(mockAdapter.execute).toHaveBeenCalledWith(
         mockDeletePreparedQuery.sql,
-        mockDeletePreparedQuery.parameters
+        mockDeletePreparedQuery.parameters,
+        undefined // Expect spannerParamTypeHints to be undefined
       );
       expect(result).toEqual({ count: 1 });
     });
@@ -301,9 +305,10 @@ describe("OrmClient & ExecutableQuery", () => {
       const mockRawData = [{ col: "value" }];
       (mockAdapter.query as vi.Mock).mockResolvedValue(mockRawData);
       const result = await db.raw(rawSqlInst);
-      expect(mockAdapter.query).toHaveBeenCalledWith("SELECT * FROM test_raw", [
-        42,
-      ]);
+      expect(mockAdapter.query).toHaveBeenCalledWith(
+        "SELECT * FROM test_raw",
+        [42] // paramsForAdapter
+      );
       expect(result).toEqual(mockRawData);
     });
   });
@@ -447,7 +452,8 @@ describe("ExecutableQuery with RETURNING", () => {
     expect(mockQueryBuilderInstance.returning).toHaveBeenCalledWith(undefined); // or true / "*" depending on default
     expect(mockAdapterReturning.query).toHaveBeenCalledWith(
       mockInsertReturningPreparedQuery.sql,
-      mockInsertReturningPreparedQuery.parameters
+      mockInsertReturningPreparedQuery.parameters,
+      undefined // Expect spannerParamTypeHints to be undefined
     );
     expect(mockAdapterReturning.execute).not.toHaveBeenCalled();
     expect(result).toEqual(returnedData);
@@ -492,7 +498,8 @@ describe("ExecutableQuery with RETURNING", () => {
     });
     expect(mockAdapterReturning.query).toHaveBeenCalledWith(
       mockUpdateReturningPreparedQuery.sql,
-      mockUpdateReturningPreparedQuery.parameters
+      mockUpdateReturningPreparedQuery.parameters,
+      undefined // Expect spannerParamTypeHints to be undefined
     );
     expect(mockAdapterReturning.execute).not.toHaveBeenCalled();
     expect(result).toEqual(returnedData);
@@ -524,7 +531,8 @@ describe("ExecutableQuery with RETURNING", () => {
     expect(mockQueryBuilderInstance.returning).toHaveBeenCalledWith(true);
     expect(mockAdapterReturning.query).toHaveBeenCalledWith(
       mockDeleteReturningPreparedQuery.sql,
-      mockDeleteReturningPreparedQuery.parameters
+      mockDeleteReturningPreparedQuery.parameters,
+      undefined // Expect spannerParamTypeHints to be undefined
     );
     expect(mockAdapterReturning.execute).not.toHaveBeenCalled();
     expect(result).toEqual(returnedData);
@@ -551,7 +559,8 @@ describe("ExecutableQuery with RETURNING", () => {
     expect(mockQueryBuilderInstance.returning).not.toHaveBeenCalled();
     expect(mockAdapterReturning.execute).toHaveBeenCalledWith(
       mockInsertPreparedQuery.sql,
-      mockInsertPreparedQuery.parameters
+      mockInsertPreparedQuery.parameters,
+      undefined // Expect spannerParamTypeHints to be undefined
     );
     expect(mockAdapterReturning.query).not.toHaveBeenCalled();
     expect(result).toEqual({ count: 1 });
