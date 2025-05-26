@@ -283,9 +283,16 @@ export class SpannerAdapter implements DatabaseAdapter {
       // Use runTransactionAsync to ensure a read-write transaction
       return await db.runTransactionAsync(
         async (transaction: SpannerNativeTransaction) => {
-          // Use transaction.run() for DML with THEN RETURN
-          const [rows] = await transaction.run({ sql, params, json: true });
-          return rows as TResult[];
+          try {
+            // Use transaction.run() for DML with THEN RETURN
+            const [rows] = await transaction.run({ sql, params, json: true });
+            await transaction.commit();
+            return rows as TResult[];
+          } catch (err) {
+            console.error("Error during transaction:", err);
+            await transaction.rollback();
+            throw err;
+          }
         }
       );
     } catch (error) {
