@@ -530,6 +530,12 @@ export interface PreparedQuery<
   // Potentially add selectedFields map here if needed for more advanced shaping or type inference
   fields?: SelectFields<TPrimaryTable>; // Added to carry selected fields info
   returning?: ReturningObject<TPrimaryTable> | true; // For INSERT/UPDATE/DELETE RETURNING
+  /**
+   * For Spanner, an object mapping parameter names (e.g., "p1", "p2") to their
+   * Spanner type codes (e.g., "STRING", "INT64").
+   * This is used for the `types` option in Spanner's `run` or `runUpdate` calls.
+   */
+  spannerParamTypeHints?: Record<string, string>;
 }
 
 // --- Types for RETURNING clause ---

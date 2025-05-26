@@ -468,7 +468,8 @@ describe("QueryBuilder Multi-Value Insert with Optional Fields", () => {
 
     // Directly test getBoundParameters logic
     qbComments.insert(commentsTable).values(insertData);
-    const parameters = qbComments.getBoundParameters("postgres");
+    const preparedPg = qbComments.prepare("postgres");
+    const parameters = preparedPg.parameters as unknown[];
 
     // Expected order of keys after processing defaults and sorting:
     // content, createdAt, entityType, parentId, rootId, userId
@@ -525,10 +526,9 @@ describe("QueryBuilder Multi-Value Insert with Optional Fields", () => {
       },
     ];
     qbComments.insert(commentsTable).values(insertData);
-    const parameters = qbComments.getBoundParameters("spanner") as Record<
-      string,
-      unknown
-    >;
+    const preparedSpanner = qbComments.prepare("spanner");
+    const parameters = preparedSpanner.parameters as Record<string, unknown>;
+    const typeHints = preparedSpanner.spannerParamTypeHints;
 
     // Expected order: content, createdAt, entityType, parentId, rootId, userId
     expect(Object.keys(parameters).length).toBe(2 * 5); // 2 rows, 5 bind parameters each
@@ -548,10 +548,54 @@ describe("QueryBuilder Multi-Value Insert with Optional Fields", () => {
     expect(parameters.p9).toBe(200); // rootId
     expect(parameters.p10).toBe(2); // userId
 
-    const preparedQuery = qbComments.prepare("spanner");
-    expect(preparedQuery.sql).toBe(
+    // Check type hints
+    expect(typeHints?.p1).toBe("STRING(MAX)"); // content
+    expect(typeHints?.p2).toBe("STRING(MAX)"); // entityType
+    expect(typeHints?.p3).toBe("INT64"); // parentId
+    expect(typeHints?.p4).toBe("INT64"); // rootId
+    expect(typeHints?.p5).toBe("INT64"); // userId
+    expect(typeHints?.p6).toBe("STRING(MAX)"); // content
+    expect(typeHints?.p7).toBe("STRING(MAX)"); // entityType
+    expect(typeHints?.p8).toBe("INT64"); // parentId
+    expect(typeHints?.p9).toBe("INT64"); // rootId
+    expect(typeHints?.p10).toBe("INT64"); // userId
+
+    expect(preparedSpanner.sql).toBe(
       "INSERT INTO `comments` (`content`, `created_at`, `entity_type`, `parent_id`, `root_id`, `user_id`) VALUES (@p1, CURRENT_TIMESTAMP, @p2, @p3, @p4, @p5), (@p6, CURRENT_TIMESTAMP, @p7, @p8, @p9, @p10)"
     );
+  });
+
+  it("Spanner: should generate correct type hints for INSERT with null values", () => {
+    const qb = new QueryBuilder<typeof commentsTable>();
+    const insertData = {
+      content: "Test comment with nulls",
+      userId: 123, // Assuming userId is INT64 in Spanner based on integer()
+      rootId: 456, // Assuming rootId is INT64
+      entityType: "post", // STRING(MAX)
+      parentId: null, // INT64 (nullable)
+      // createdAt is default
+    };
+    qb.insert(commentsTable).values(insertData);
+    const preparedQuery = qb.prepare("spanner");
+
+    // Order of keys in 'comments' schema for params: content, entityType, parentId, rootId, userId
+    // (createdAt is default, id is PK)
+    // params: "Test comment with nulls", "post", null, 456, 123
+    expect(preparedQuery.parameters).toEqual({
+      p1: "Test comment with nulls", // content
+      p2: "post", // entityType
+      p3: null, // parentId
+      p4: 456, // rootId
+      p5: 123, // userId
+    });
+
+    expect(preparedQuery.spannerParamTypeHints).toEqual({
+      p1: "STRING(MAX)", // content
+      p2: "STRING(MAX)", // entityType
+      p3: "INT64", // parentId (even if null, type is known)
+      p4: "INT64", // rootId
+      p5: "INT64", // userId
+    });
   });
 });
 

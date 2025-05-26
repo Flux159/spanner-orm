@@ -137,7 +137,8 @@ export class SpannerAdapter implements DatabaseAdapter {
 
   async execute(
     sql: string,
-    params?: Record<string, any>
+    params?: Record<string, any>,
+    spannerTypeHints?: Record<string, string>
   ): Promise<number | AffectedRows> {
     const db = this.ensureConnected(); // Relies on connect() having awaited this.ready
     try {
@@ -146,7 +147,11 @@ export class SpannerAdapter implements DatabaseAdapter {
       const rowCount = await db.runTransactionAsync(
         async (transaction: SpannerNativeTransaction) => {
           try {
-            const [count] = await transaction.runUpdate({ sql, params });
+            const [count] = await transaction.runUpdate({
+              sql,
+              params,
+              types: spannerTypeHints,
+            });
             await transaction.commit();
             return count;
           } catch (err) {
@@ -219,7 +224,8 @@ export class SpannerAdapter implements DatabaseAdapter {
 
   async query<TResult extends AdapterQueryResultRow = AdapterQueryResultRow>(
     sql: string,
-    params?: Record<string, any>
+    params?: Record<string, any>,
+    spannerTypeHints?: Record<string, string>
   ): Promise<TResult[]> {
     const db = this.ensureConnected(); // Relies on connect() having awaited this.ready
     try {
@@ -227,6 +233,7 @@ export class SpannerAdapter implements DatabaseAdapter {
         sql,
         params,
         json: true,
+        types: spannerTypeHints,
       });
       return rows as TResult[];
     } catch (error) {
@@ -258,7 +265,8 @@ export class SpannerAdapter implements DatabaseAdapter {
 
       const rawResults = await this.query<AdapterQueryResultRow>(
         preparedQuery.sql,
-        spannerParams
+        spannerParams,
+        preparedQuery.spannerParamTypeHints
       );
 
       if (preparedQuery.includeClause && preparedQuery.primaryTable) {
@@ -282,7 +290,8 @@ export class SpannerAdapter implements DatabaseAdapter {
     TResult extends AdapterQueryResultRow = AdapterQueryResultRow
   >(
     sql: string,
-    params?: Record<string, any> // Spanner expects Record<string, any>
+    params?: Record<string, any>, // Spanner expects Record<string, any>
+    spannerTypeHints?: Record<string, string>
   ): Promise<TResult[]> {
     const db = this.ensureConnected();
     try {
@@ -291,7 +300,12 @@ export class SpannerAdapter implements DatabaseAdapter {
         async (transaction: SpannerNativeTransaction) => {
           try {
             // Use transaction.run() for DML with THEN RETURN
-            const [rows] = await transaction.run({ sql, params, json: true });
+            const [rows] = await transaction.run({
+              sql,
+              params,
+              json: true,
+              types: spannerTypeHints,
+            });
             await transaction.commit();
             return rows as TResult[];
           } catch (err) {
@@ -395,18 +409,28 @@ export class SpannerAdapter implements DatabaseAdapter {
     return db.runTransactionAsync(
       async (gcpTransaction: SpannerNativeTransaction) => {
         const txExecutor: OrmTransaction = {
-          execute: async (cmdSql, cmdParams) => {
+          execute: async (
+            cmdSql,
+            cmdParams,
+            cmdSpannerTypeHints?: Record<string, string>
+          ) => {
             const [rowCount] = await gcpTransaction.runUpdate({
               sql: cmdSql,
               params: cmdParams as Record<string, any> | undefined,
+              types: cmdSpannerTypeHints,
             });
             return { count: rowCount };
           },
-          query: async (querySql, queryParams) => {
+          query: async (
+            querySql,
+            queryParams,
+            querySpannerTypeHints?: Record<string, string>
+          ) => {
             const [rows] = await gcpTransaction.run({
               sql: querySql,
               params: queryParams as Record<string, any> | undefined,
               json: true,
+              types: querySpannerTypeHints,
             });
             return rows as any[];
           },

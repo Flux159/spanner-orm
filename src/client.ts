@@ -254,7 +254,8 @@ export class ExecutableQuery<
         executionPromise = this.client.adapter.query(
           preparedQuery.sql,
           // Parameters are passed directly; adapter handles array vs object
-          preparedQuery.parameters as any // Cast to any to satisfy adapter.query, which might expect unknown[]
+          preparedQuery.parameters as any, // Cast to any to satisfy adapter.query, which might expect unknown[]
+          preparedQuery.spannerParamTypeHints
         );
         if (preparedQuery.includeClause && preparedQuery.primaryTable) {
           executionPromise = executionPromise.then((rawData) =>
@@ -273,13 +274,15 @@ export class ExecutableQuery<
           if (typeof this.client.adapter.executeAndReturnRows === "function") {
             executionPromise = this.client.adapter.executeAndReturnRows(
               preparedQuery.sql,
-              preparedQuery.parameters as any // Pass parameters directly
+              preparedQuery.parameters as any, // Pass parameters directly
+              preparedQuery.spannerParamTypeHints
             );
           } else {
             // Fallback for adapters without executeAndReturnRows
             executionPromise = this.client.adapter.query(
               preparedQuery.sql,
-              preparedQuery.parameters as any // Pass parameters directly
+              preparedQuery.parameters as any, // Pass parameters directly
+              preparedQuery.spannerParamTypeHints
             );
           }
           // Here, TResult should ideally be Array<InferReturningType<TPrimaryTable, TReturning>>
@@ -288,7 +291,11 @@ export class ExecutableQuery<
         } else {
           // Original behavior: get affected rows count
           executionPromise = this.client.adapter
-            .execute(preparedQuery.sql, preparedQuery.parameters as any) // Cast to any
+            .execute(
+              preparedQuery.sql,
+              preparedQuery.parameters as any,
+              preparedQuery.spannerParamTypeHints
+            ) // Cast to any
             .then((res: number | AffectedRows) => ({
               count:
                 typeof res === "number"
@@ -525,10 +532,16 @@ export class OrmClient {
     // Create a new adapter instance that uses the transaction's query/execute methods
     const txAdapter: DatabaseAdapter = {
       ...this.adapter, // Copy other properties like dialect
-      query: (sqlQuery: string, params?: unknown[]) =>
-        tx.query(sqlQuery, params),
-      execute: (sqlQuery: string, params?: unknown[]) =>
-        tx.execute(sqlQuery, params),
+      query: (
+        sqlQuery: string,
+        params?: unknown[],
+        spannerTypeHints?: Record<string, string>
+      ) => tx.query(sqlQuery, params, spannerTypeHints),
+      execute: (
+        sqlQuery: string,
+        params?: unknown[],
+        spannerTypeHints?: Record<string, string>
+      ) => tx.execute(sqlQuery, params, spannerTypeHints),
       // Prevent nested transactions on this specific adapter instance
       beginTransaction: undefined,
     };
