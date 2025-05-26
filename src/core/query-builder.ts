@@ -931,14 +931,30 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       }
     }
 
-    const allKeys = new Set<string>();
+    // Determine the superset of all non-null columns across all records
+    const allNonNullKeys = new Set<string>();
     processedInsertData.forEach((record) => {
-      Object.keys(record as Record<string, any>).forEach((key) =>
-        allKeys.add(key)
-      );
+      Object.keys(record).forEach((key) => {
+        if ((record as Record<string, any>)[key] !== null) {
+          allNonNullKeys.add(key);
+        }
+      });
     });
-    const orderedKeys = Array.from(allKeys).sort();
-    const columns = orderedKeys
+
+    const columnsToInsert = Array.from(allNonNullKeys).sort();
+
+    if (columnsToInsert.length === 0) {
+      // This means all records had only null values or were empty.
+      // PostgreSQL supports `INSERT INTO ... DEFAULT VALUES`
+      // However, our current logic expects at least one column.
+      // For now, let's throw an error, this might need refinement
+      // if `INSERT ... DEFAULT VALUES` is a desired feature.
+      throw new Error(
+        "INSERT operation results in no columns to insert after filtering nulls across all records. Ensure at least one non-null value in at least one record, or handle DEFAULT VALUES explicitly."
+      );
+    }
+
+    const columnsSql = columnsToInsert
       .map((tsKey) => {
         const columnConfig = this._targetTable!.columns[tsKey] as ColumnConfig<
           any,
@@ -956,29 +972,30 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
 
     const valuePlaceholders = processedInsertData
       .map((record) => {
-        const orderedValues = orderedKeys.map(
-          (key) => (record as Record<string, any>)[key]
-        );
-        return `(${orderedValues
-          .map((val) => {
-            if (
-              typeof val === "object" &&
-              val !== null &&
-              (val as SQL)._isSQL === true
-            ) {
-              return (val as SQL).toSqlString(
-                "postgres",
-                paramIndexState,
-                aliasMap
-              );
-            }
-            return `$${paramIndexState.value++}`;
-          })
-          .join(", ")})`;
+        const recordValues = columnsToInsert.map((tsKey) => {
+          const val = (record as Record<string, any>)[tsKey];
+          // For PostgreSQL, if a column is part of the insert (superset) but null for this row,
+          // we will now use a parameter placeholder and bind null, similar to Spanner.
+          // This aligns with tests expecting parameters for such nulls.
+          // The previous "DEFAULT" keyword approach is changed.
+          if (
+            typeof val === "object" &&
+            val !== null && // Ensure val is not null before checking _isSQL
+            (val as SQL)._isSQL === true
+          ) {
+            return (val as SQL).toSqlString(
+              "postgres",
+              paramIndexState,
+              aliasMap
+            );
+          }
+          return `$${paramIndexState.value++}`;
+        });
+        return `(${recordValues.join(", ")})`;
       })
       .join(", ");
 
-    let sql = `INSERT INTO "${this._targetTable.tableName}" (${columns}) VALUES ${valuePlaceholders}`;
+    let sql = `INSERT INTO "${this._targetTable.tableName}" (${columnsSql}) VALUES ${valuePlaceholders}`;
     if (this._returningClause) {
       if (this._returningClause === true) {
         sql += ` RETURNING *`;
@@ -1063,14 +1080,25 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
         }
       }
     }
-    const allKeys = new Set<string>();
+    // Determine the superset of all non-null columns across all records
+    const allNonNullKeysSpanner = new Set<string>();
     processedInsertData.forEach((record) => {
-      Object.keys(record as Record<string, any>).forEach((key) =>
-        allKeys.add(key)
-      );
+      Object.keys(record).forEach((key) => {
+        if ((record as Record<string, any>)[key] !== null) {
+          allNonNullKeysSpanner.add(key);
+        }
+      });
     });
-    const orderedKeys = Array.from(allKeys).sort();
-    const columns = orderedKeys
+
+    const columnsToInsertSpanner = Array.from(allNonNullKeysSpanner).sort();
+
+    if (columnsToInsertSpanner.length === 0) {
+      throw new Error(
+        "INSERT operation results in no columns to insert after filtering nulls across all records for Spanner. Ensure at least one non-null value in at least one record."
+      );
+    }
+
+    const columnsSqlSpanner = columnsToInsertSpanner
       .map((tsKey) => {
         const columnConfig = this._targetTable!.columns[tsKey] as ColumnConfig<
           any,
@@ -1088,29 +1116,49 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
 
     const valuePlaceholders = processedInsertData
       .map((record) => {
-        const orderedValues = orderedKeys.map(
-          (key) => (record as Record<string, any>)[key]
-        );
-        return `(${orderedValues
-          .map((val) => {
-            if (
-              typeof val === "object" &&
-              val !== null &&
-              (val as SQL)._isSQL === true
-            ) {
-              return (val as SQL).toSqlString(
-                "spanner",
-                paramIndexState,
-                aliasMap
-              );
-            }
-            return `@p${paramIndexState.value++}`;
-          })
-          .join(", ")})`;
+        const recordValues = columnsToInsertSpanner.map((tsKey) => {
+          const val = (record as Record<string, any>)[tsKey];
+          if (val === null || val === undefined) {
+            // Spanner uses NULL for missing values in INSERT, not DEFAULT keyword in VALUES list
+            // However, the goal is to not send a param. This implies the column should be omitted
+            // if all records have it as null. But if it's in columnsToInsertSpanner,
+            // it means at least one record has it non-null.
+            // For Spanner, if a column is in the column list, a value must be provided.
+            // This means we *must* send NULL if the column is part of the insert statement for this row.
+            // This contradicts "don't have a param for it".
+            // The current filtering of columnsToInsertSpanner to only non-null across all rows handles this.
+            // If a column is in columnsToInsertSpanner, it means it's non-null in at least one row.
+            // For rows where it IS null, we must provide an explicit NULL.
+            // This means the original premise "if the value is null, then we shouldn't add it to our generated sql and we shouldn't have a param for it"
+            // is hard to reconcile with multi-value inserts where a column might be null in one row but not another,
+            // if we want a single INSERT statement.
+            // The current code (before this change) based columns on first record.
+            // New strategy: columns are superset. If a row has null for a superset column, send NULL.
+            // This means we WILL have a param for it, but its value will be null.
+            // This is a deviation from the "don't send param for null" if we interpret that strictly.
+            // Let's assume for now that if a column is part of the INSERT (due to being non-null in at least one row),
+            // then all rows must provide a value or placeholder for it.
+            // If the user truly means "never send a param for any null, even in multi-row inserts where the column is present",
+            // then multi-row inserts with varying nulls cannot be done in a single statement.
+
+            // Reverting to: if a value is null for a column that IS being inserted, it becomes a NULL parameter.
+            // The column itself is only included if it's non-null in at least one record.
+            return `@p${paramIndexState.value++}`; // This will bind to an actual null value later
+          }
+          if (typeof val === "object" && (val as SQL)._isSQL === true) {
+            return (val as SQL).toSqlString(
+              "spanner",
+              paramIndexState,
+              aliasMap
+            );
+          }
+          return `@p${paramIndexState.value++}`;
+        });
+        return `(${recordValues.join(", ")})`;
       })
       .join(", ");
 
-    let sql = `INSERT INTO \`${this._targetTable.tableName}\` (${columns}) VALUES ${valuePlaceholders}`;
+    let sql = `INSERT INTO \`${this._targetTable.tableName}\` (${columnsSqlSpanner}) VALUES ${valuePlaceholders}`;
     if (this._returningClause) {
       if (this._returningClause === true) {
         sql += ` THEN RETURN *`;
@@ -1162,6 +1210,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       throw new Error("SET values not provided for UPDATE.");
 
     const setParts = Object.entries(this._updateSetValues)
+      .filter(([, value]) => value !== null) // Filter out null values
       .map(([tsKey, value]) => {
         const columnConfig = this._targetTable!.columns[tsKey] as ColumnConfig<
           any,
@@ -1181,9 +1230,19 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
             aliasMap
           )}`;
         }
+        // Value here is guaranteed not to be null due to the filter above
         return `"${sqlColumnName}" = $${paramIndexState.value++}`;
       })
       .join(", ");
+
+    if (!setParts) {
+      // This means all values in _updateSetValues were null.
+      // Depending on desired behavior, this could be an error, a no-op, or require specific handling.
+      // For now, let's throw an error if no non-null updates are specified.
+      throw new Error(
+        "UPDATE operation results in no columns to update after filtering nulls. Provide at least one non-null value."
+      );
+    }
     const whereClause = this.buildWhereClause(
       "postgres",
       paramIndexState,
@@ -1239,6 +1298,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     if (!this._updateSetValues)
       throw new Error("SET values not provided for UPDATE.");
     const setParts = Object.entries(this._updateSetValues)
+      .filter(([, value]) => value !== null) // Filter out null values
       .map(([tsKey, value]) => {
         const columnConfig = this._targetTable!.columns[tsKey] as ColumnConfig<
           any,
@@ -1258,9 +1318,16 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
             aliasMap
           )}`;
         }
+        // Value here is guaranteed not to be null
         return `\`${sqlColumnName}\` = @p${paramIndexState.value++}`;
       })
       .join(", ");
+
+    if (!setParts) {
+      throw new Error(
+        "UPDATE operation results in no columns to update after filtering nulls for Spanner. Provide at least one non-null value."
+      );
+    }
     const whereClause = this.buildWhereClause(
       "spanner",
       paramIndexState,
@@ -1568,32 +1635,50 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
         }
       }
 
-      const allKeysForParams = new Set<string>();
+      // For INSERT, parameters are collected for the superset of non-null columns.
+      const allNonNullKeysForParams = new Set<string>();
       processedInsertDataForParams.forEach((record) => {
-        Object.keys(record as Record<string, any>).forEach((key) =>
-          allKeysForParams.add(key)
-        );
+        Object.keys(record).forEach((key) => {
+          if ((record as Record<string, any>)[key] !== null) {
+            allNonNullKeysForParams.add(key);
+          }
+        });
       });
-      const orderedColumnNames = Array.from(allKeysForParams).sort();
+      // For Spanner, if a column is present in any record (even if null), it should be part of the column list
+      // if it's non-null in at least one other record.
+      // The actual parameter value will be null.
+      if (dialect === "spanner") {
+        processedInsertDataForParams.forEach((record) => {
+          Object.keys(record).forEach((key) => {
+            allNonNullKeysForParams.add(key); // Add all keys present in any record for Spanner
+          });
+        });
+      }
+
+      const columnsToInsertForParams = Array.from(
+        allNonNullKeysForParams
+      ).sort();
 
       for (const record of processedInsertDataForParams) {
-        for (const tsKey of orderedColumnNames) {
+        for (const tsKey of columnsToInsertForParams) {
           const value = (record as Record<string, any>)[tsKey];
           const columnConfig = this._targetTable!.columns[
             tsKey
           ] as ColumnConfig<any, any>;
           const spannerType = columnConfig?.dialectTypes?.spanner;
 
-          if (value === undefined) {
+          if (value === null || value === undefined) {
+            // If a column is part of the superset (columnsToInsertForParams),
+            // a value or NULL must be provided for it for both dialects.
             allParams.push(null);
             allSpannerTypes.push(spannerType);
           } else if (
             typeof value === "object" &&
-            value !== null &&
             (value as SQL)._isSQL === true
           ) {
             const sqlValues = (value as SQL).getValues(dialect);
             allParams.push(...sqlValues);
+            // Assuming SQL fragments don't have specific spanner types for their internal values
             sqlValues.forEach(() => allSpannerTypes.push(undefined));
           } else {
             allParams.push(value);
@@ -1608,9 +1693,12 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       this._updateSetValues &&
       this._targetTable
     ) {
-      // The order of parameters for UPDATE SET... needs to match the order in buildUpdateSpannerSQL
-      // which iterates Object.entries(this._updateSetValues)
+      // For UPDATE, parameters are collected only for non-null values
       for (const [tsKey, value] of Object.entries(this._updateSetValues)) {
+        if (value === null) {
+          // Skip null values
+          continue;
+        }
         const columnConfig = this._targetTable!.columns[tsKey] as ColumnConfig<
           any,
           any
@@ -1618,6 +1706,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
         const spannerType = columnConfig?.dialectTypes?.spanner;
 
         if (typeof value === "object" && value !== null && "_isSQL" in value) {
+          // value is not null here
           const sqlValues = (value as SQL).getValues(dialect);
           allParams.push(...sqlValues);
           sqlValues.forEach(() => allSpannerTypes.push(undefined));

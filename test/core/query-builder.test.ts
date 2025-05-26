@@ -479,7 +479,8 @@ describe("QueryBuilder Multi-Value Insert with Optional Fields", () => {
     // Row 2: content, createdAt (default), entityType, parentId (1), rootId, userId
     // Row 3: content, createdAt (default), entityType, parentId (null), rootId, userId
 
-    expect(parameters.length).toBe(3 * 5); // 3 rows, 5 bind parameters each (createdAt is embedded)
+    console.log(parameters);
+    expect(parameters.length).toBe(15); // 3 rows, 5 bind parameters each (createdAt is embedded)
 
     // Check parameters for the first row (5 params: content, entityType, parentId, rootId, userId)
     expect(parameters[0]).toBe("Comment 1"); // content
