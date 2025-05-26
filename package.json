@@ -1,6 +1,6 @@
 {
   "name": "spanner-orm",
-  "version": "0.0.35",
+  "version": "0.0.36",
   "description": "A simple ORM for Google Cloud Spanner and Postgres",
   "main": "dist/index.js",
   "type": "module",
