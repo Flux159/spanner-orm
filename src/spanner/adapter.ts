@@ -285,6 +285,7 @@ export class SpannerAdapter implements DatabaseAdapter {
         async (transaction: SpannerNativeTransaction) => {
           // Use transaction.run() for DML with THEN RETURN
           const [rows] = await transaction.run({ sql, params, json: true });
+          await transaction.commit();
           return rows as TResult[];
         }
       );
