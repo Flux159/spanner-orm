@@ -1484,7 +1484,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     return `GROUP BY ${groupByParts.join(", ")}`;
   }
 
-  getBoundParameters(dialect: Dialect): unknown[] {
+  getBoundParameters(dialect: Dialect): unknown[] | Record<string, unknown> {
     const allParams: unknown[] = [];
     if (this._operationType === "select" && this._selectedFields) {
       // Parameters from explicitly selected SQL fields
@@ -1610,6 +1610,18 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
         }
       }
     }
+    // New logic for Spanner:
+    if (dialect === "spanner") {
+      const spannerParams: Record<string, unknown> = {};
+      allParams.forEach((value, index) => {
+        // Spanner uses @p1, @p2, etc. for named parameters in the SQL string
+        // The object keys here are for the client library, which might map them.
+        // The @ prefix is part of the SQL string, not the param object key itself.
+        spannerParams[`p${index + 1}`] = value;
+      });
+      return spannerParams;
+    }
+
     return allParams;
   }
 

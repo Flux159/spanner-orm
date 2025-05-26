@@ -203,9 +203,16 @@ export class PgliteAdapter implements DatabaseAdapter {
   ): Promise<any[]> {
     await this.ready;
     try {
+      // PGlite expects parameters as an array.
+      // If preparedQuery.parameters is an object, it's an issue for PGlite.
+      // However, this adapter is for 'postgres' dialect, so parameters should be an array.
+      // We cast to unknown[] to satisfy the PGlite .query method signature.
+      // A runtime check could be added if cross-dialect parameter types were a concern here.
+      const paramsForPglite = preparedQuery.parameters as unknown[];
+
       const rawResults = await this.query<AdapterQueryResultRow>(
         preparedQuery.sql,
-        preparedQuery.parameters
+        paramsForPglite
       );
 
       if (preparedQuery.includeClause && preparedQuery.primaryTable) {

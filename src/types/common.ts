@@ -522,7 +522,7 @@ export interface PreparedQuery<
   TInclude extends EnhancedIncludeClause | undefined = undefined
 > {
   sql: string;
-  parameters: unknown[];
+  parameters: unknown[] | Record<string, unknown>;
   dialect: Dialect;
   action: "select" | "insert" | "update" | "delete"; // Added action
   includeClause?: TInclude; // Updated to use EnhancedIncludeClause

@@ -133,9 +133,13 @@ export class PostgresAdapter implements DatabaseAdapter {
   ): Promise<any[]> {
     await this.ready;
     try {
+      // pg adapter expects parameters as an array.
+      // Similar to PgliteAdapter, assert that parameters are unknown[] for the pg Pool.query method.
+      const paramsForPg = preparedQuery.parameters as unknown[];
+
       const rawResults = await this.query<AdapterQueryResultRow>( // Use the existing query method
         preparedQuery.sql,
-        preparedQuery.parameters
+        paramsForPg
       );
 
       if (preparedQuery.includeClause && preparedQuery.primaryTable) {
