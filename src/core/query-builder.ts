@@ -1249,7 +1249,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     const whereClause = this.buildWhereClause(
       "postgres",
       paramIndexState,
-      aliasMap
+      this._joins.length > 0 ? aliasMap : new Map()
     );
     let sql =
       `UPDATE "${this._targetTable.tableName}" SET ${setParts} ${whereClause}`.trim();
@@ -1326,7 +1326,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     const whereClause = this.buildWhereClause(
       "spanner",
       paramIndexState,
-      aliasMap
+      this._joins.length > 0 ? aliasMap : new Map()
     );
     let sql =
       `UPDATE \`${this._targetTable.tableName}\` SET ${setParts} ${whereClause}`.trim();
@@ -1378,7 +1378,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     const whereClause = this.buildWhereClause(
       "postgres",
       paramIndexState,
-      aliasMap
+      this._joins.length > 0 ? aliasMap : new Map()
     );
     let sql =
       `DELETE FROM "${this._targetTable.tableName}" ${whereClause}`.trim();
@@ -1430,7 +1430,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     const whereClause = this.buildWhereClause(
       "spanner",
       paramIndexState,
-      aliasMap
+      this._joins.length > 0 ? aliasMap : new Map()
     );
     let sql =
       `DELETE FROM \`${this._targetTable.tableName}\` ${whereClause}`.trim();
