@@ -270,11 +270,18 @@ export class ExecutableQuery<
       case "update":
       case "delete":
         if (preparedQuery.returning) {
-          // If returning clause is present, use adapter.query to get rows back
-          executionPromise = this.client.adapter.query(
-            preparedQuery.sql,
-            preparedQuery.parameters as any // Cast to any
-          );
+          if (typeof this.client.adapter.executeAndReturnRows === "function") {
+            executionPromise = this.client.adapter.executeAndReturnRows(
+              preparedQuery.sql,
+              preparedQuery.parameters as any // Pass parameters directly
+            );
+          } else {
+            // Fallback for adapters without executeAndReturnRows
+            executionPromise = this.client.adapter.query(
+              preparedQuery.sql,
+              preparedQuery.parameters as any // Pass parameters directly
+            );
+          }
           // Here, TResult should ideally be Array<InferReturningType<TPrimaryTable, TReturning>>
           // For now, it will be Array<InferModelType<TPrimaryTable>> or Array<Partial<...>>
           // based on the ExecutableQuery's TResult generic.

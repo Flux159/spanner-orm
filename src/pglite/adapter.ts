@@ -121,6 +121,16 @@ export class PgliteAdapter implements DatabaseAdapter {
     }
   }
 
+  async executeAndReturnRows<
+    TResult extends AdapterQueryResultRow = AdapterQueryResultRow
+  >(
+    sql: string,
+    params?: unknown[] // PGlite expects unknown[]
+  ): Promise<TResult[]> {
+    // For PGLite, the standard query method can handle DML with RETURNING.
+    return this.query(sql, params);
+  }
+
   async beginTransaction(): Promise<Transaction> {
     await this.ready;
     // PGlite's transaction model is callback-based.
