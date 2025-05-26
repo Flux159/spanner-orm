@@ -126,6 +126,9 @@ export async function recordMigrationApplied(
       ? [migrationName, dialect]
       : { p1: migrationName, p2: dialect };
 
+  console.log("Recording migration run");
+  console.log(insertSql, params);
+
   await executeSql(insertSql, params);
 }
 
