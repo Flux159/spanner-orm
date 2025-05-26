@@ -279,27 +279,27 @@ describe("QueryBuilder SQL Generation with Aliasing", () => {
     });
   });
 
-  describe("UPDATE Statements with Aliasing", () => {
-    it("PostgreSQL: should generate UPDATE statement with SET and WHERE using alias", () => {
+  describe("UPDATE Statements (No Joins - No Alias in WHERE)", () => {
+    it("PostgreSQL: should generate UPDATE statement with SET and WHERE (no alias)", () => {
       const preparedQuery = qb
         .update(usersTable)
         .set({ age: 31, email: "john.new@example.com" })
         .where(sql`${usersTable.columns.id} = ${1}`)
         .prepare("postgres");
       expect(preparedQuery.sql).toBe(
-        'UPDATE "users" SET "age" = $1, "email" = $2 WHERE "t1"."id" = $3'
+        'UPDATE "users" SET "age" = $1, "email" = $2 WHERE "users"."id" = $3'
       );
       expect(preparedQuery.parameters).toEqual([31, "john.new@example.com", 1]);
     });
 
-    it("Spanner: should generate UPDATE statement with SET and WHERE using alias", () => {
+    it("Spanner: should generate UPDATE statement with SET and WHERE (no alias)", () => {
       const preparedQuery = qb
         .update(usersTable)
         .set({ name: "Updated Name" })
         .where(sql`${usersTable.columns.email} = ${"old@example.com"}`)
         .prepare("spanner");
       expect(preparedQuery.sql).toBe(
-        "UPDATE `users` SET `name` = @p1 WHERE `t1`.`email` = @p2"
+        "UPDATE `users` SET `name` = @p1 WHERE `users`.`email` = @p2"
       );
       expect(preparedQuery.parameters).toEqual({
         p1: "Updated Name",
@@ -307,43 +307,43 @@ describe("QueryBuilder SQL Generation with Aliasing", () => {
       });
     });
 
-    it("PostgreSQL: should generate UPDATE statement with SQL in SET using alias", () => {
+    it("PostgreSQL: should generate UPDATE statement with SQL in SET (no alias in WHERE)", () => {
       const preparedQuery = qb
         .update(usersTable)
-        .set({ age: sql`${usersTable.columns.age} + ${1}` })
+        .set({ age: sql`${usersTable.columns.age} + ${1}` }) // Alias 't1' is expected in SET for column refs
         .where(sql`${usersTable.columns.id} = ${10}`)
         .prepare("postgres");
       expect(preparedQuery.sql).toBe(
-        'UPDATE "users" SET "age" = "t1"."age" + $1 WHERE "t1"."id" = $2'
+        'UPDATE "users" SET "age" = "t1"."age" + $1 WHERE "users"."id" = $2'
       );
       expect(preparedQuery.parameters).toEqual([1, 10]);
     });
   });
 
-  describe("DELETE Statements with Aliasing", () => {
-    it("PostgreSQL: should generate DELETE statement with WHERE using alias", () => {
+  describe("DELETE Statements (No Joins - No Alias in WHERE)", () => {
+    it("PostgreSQL: should generate DELETE statement with WHERE (no alias)", () => {
       const preparedQuery = qb
         .deleteFrom(usersTable)
         .where(sql`${usersTable.columns.age} < ${18}`)
         .prepare("postgres");
       expect(preparedQuery.sql).toBe(
-        'DELETE FROM "users" WHERE "t1"."age" < $1'
+        'DELETE FROM "users" WHERE "users"."age" < $1'
       );
       expect(preparedQuery.parameters).toEqual([18]);
     });
 
-    it("Spanner: should generate DELETE statement with WHERE using alias", () => {
+    it("Spanner: should generate DELETE statement with WHERE (no alias)", () => {
       const preparedQuery = qb
         .deleteFrom(usersTable)
         .where(sql`${usersTable.columns.email} = ${"spam@example.com"}`)
         .prepare("spanner");
       expect(preparedQuery.sql).toBe(
-        "DELETE FROM `users` WHERE `t1`.`email` = @p1"
+        "DELETE FROM `users` WHERE `users`.`email` = @p1"
       );
       expect(preparedQuery.parameters).toEqual({ p1: "spam@example.com" });
     });
 
-    it("PostgreSQL: should generate DELETE statement without WHERE (no alias needed for table name)", () => {
+    it("PostgreSQL: should generate DELETE statement without WHERE (no alias needed for table name, as before)", () => {
       const preparedQuery = qb.deleteFrom(usersTable).prepare("postgres");
       expect(preparedQuery.sql).toBe('DELETE FROM "users"');
       expect(preparedQuery.parameters).toEqual([]);
@@ -839,7 +839,7 @@ describe("QueryBuilder Spanner Single Insert Null Handling", () => {
         userId: 10,
         rootId: 100,
         entityType: "post",
-        parentId: null,
+        parentId: undefined,
       })
       .prepare("postgres");
     // Order: content, createdAt(SQL), entityType, id, parentId, rootId, userId
@@ -907,7 +907,7 @@ describe("QueryBuilder RETURNING clause", () => {
         .returning()
         .prepare("postgres");
       expect(prepared.sql).toBe(
-        'UPDATE "users" SET "age" = $1 WHERE "t1"."id" = $2 RETURNING *'
+        'UPDATE "users" SET "age" = $1 WHERE "users"."id" = $2 RETURNING *'
       );
       expect(prepared.parameters).toEqual([30, 1]);
       expect(prepared.returning).toBe(true);
@@ -921,7 +921,7 @@ describe("QueryBuilder RETURNING clause", () => {
         .returning({ name: usersTable.columns.name })
         .prepare("postgres");
       expect(prepared.sql).toBe(
-        'UPDATE "users" SET "name" = $1 WHERE "t1"."id" = $2 RETURNING "name" AS "name"'
+        'UPDATE "users" SET "name" = $1 WHERE "users"."id" = $2 RETURNING "name" AS "name"'
       );
       expect(prepared.parameters).toEqual(["New Name", 2]);
     });
@@ -933,7 +933,7 @@ describe("QueryBuilder RETURNING clause", () => {
         .returning(true)
         .prepare("postgres");
       expect(prepared.sql).toBe(
-        'DELETE FROM "users" WHERE "t1"."id" = $1 RETURNING *'
+        'DELETE FROM "users" WHERE "users"."id" = $1 RETURNING *'
       );
       expect(prepared.parameters).toEqual([3]);
     });
@@ -948,7 +948,7 @@ describe("QueryBuilder RETURNING clause", () => {
         })
         .prepare("postgres");
       expect(prepared.sql).toBe(
-        'DELETE FROM "users" WHERE "t1"."email" = $1 RETURNING "id" AS "deletedId", "email" AS "oldEmail"'
+        'DELETE FROM "users" WHERE "users"."email" = $1 RETURNING "id" AS "deletedId", "email" AS "oldEmail"'
       );
     });
   });
@@ -989,7 +989,7 @@ describe("QueryBuilder RETURNING clause", () => {
         .returning()
         .prepare("spanner");
       expect(prepared.sql).toBe(
-        "UPDATE `users` SET `age` = @p1 WHERE `t1`.`id` = @p2 THEN RETURN *"
+        "UPDATE `users` SET `age` = @p1 WHERE `users`.`id` = @p2 THEN RETURN *"
       );
     });
 
@@ -1004,7 +1004,7 @@ describe("QueryBuilder RETURNING clause", () => {
         })
         .prepare("spanner");
       expect(prepared.sql).toBe(
-        "UPDATE `users` SET `name` = @p1 WHERE `t1`.`id` = @p2 THEN RETURN `name` AS `name`, `age` AS `age`"
+        "UPDATE `users` SET `name` = @p1 WHERE `users`.`id` = @p2 THEN RETURN `name` AS `name`, `age` AS `age`"
       );
     });
 
@@ -1015,7 +1015,7 @@ describe("QueryBuilder RETURNING clause", () => {
         .returning(true)
         .prepare("spanner");
       expect(prepared.sql).toBe(
-        "DELETE FROM `users` WHERE `t1`.`id` = @p1 THEN RETURN *"
+        "DELETE FROM `users` WHERE `users`.`id` = @p1 THEN RETURN *"
       );
     });
 
@@ -1026,7 +1026,7 @@ describe("QueryBuilder RETURNING clause", () => {
         .returning({ id: usersTable.columns.id })
         .prepare("spanner");
       expect(prepared.sql).toBe(
-        "DELETE FROM `users` WHERE `t1`.`email` = @p1 THEN RETURN `id` AS `id`"
+        "DELETE FROM `users` WHERE `users`.`email` = @p1 THEN RETURN `id` AS `id`"
       );
     });
   });
