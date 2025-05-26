@@ -578,24 +578,283 @@ describe("QueryBuilder Multi-Value Insert with Optional Fields", () => {
     qb.insert(commentsTable).values(insertData);
     const preparedQuery = qb.prepare("spanner");
 
-    // Order of keys in 'comments' schema for params: content, entityType, parentId, rootId, userId
-    // (createdAt is default, id is PK)
-    // params: "Test comment with nulls", "post", null, 456, 123
+    // parentId is null and should be excluded for Spanner single inserts.
+    // createdAt has a default (CURRENT_TIMESTAMP) and is included in SQL directly.
+    // Expected order of non-null, non-SQL-default keys for params: content, entityType, rootId, userId
+    expect(preparedQuery.sql).toBe(
+      "INSERT INTO `comments` (`content`, `created_at`, `entity_type`, `root_id`, `user_id`) VALUES (@p1, CURRENT_TIMESTAMP, @p2, @p3, @p4)"
+    );
+
     expect(preparedQuery.parameters).toEqual({
       p1: "Test comment with nulls", // content
       p2: "post", // entityType
-      p3: null, // parentId
-      p4: 456, // rootId
-      p5: 123, // userId
+      p3: 456, // rootId
+      p4: 123, // userId
     });
 
     expect(preparedQuery.spannerParamTypeHints).toEqual({
       p1: "STRING(MAX)", // content
       p2: "STRING(MAX)", // entityType
-      p3: "INT64", // parentId (even if null, type is known)
-      p4: "INT64", // rootId
-      p5: "INT64", // userId
+      p3: "INT64", // rootId
+      p4: "INT64", // userId
     });
+  });
+});
+
+describe("QueryBuilder Spanner Single Insert Null Handling", () => {
+  const usersTableNoDefaults = table("users_no_defaults", {
+    id: integer("id").primaryKey(),
+    name: text("name").notNull(),
+    email: text("email"), // Nullable by default (no .notNull())
+    age: integer("age"), // Nullable by default (no .notNull())
+  });
+
+  // beforeEach(() => {
+  // qbUsers = new QueryBuilder<typeof usersTable>(); // This was unused
+  // });
+
+  it("Spanner single insert: should exclude omitted (undefined) and null values from SQL, params, and typeHints", () => {
+    const qb = new QueryBuilder<typeof usersTableNoDefaults>();
+    // Test with 'email' omitted (becomes undefined)
+    const preparedQueryUndefined = qb
+      .insert(usersTableNoDefaults)
+      .values({
+        id: 1,
+        name: "Test User Undefined",
+        // email is omitted
+        age: 30,
+      })
+      .prepare("spanner");
+
+    expect(preparedQueryUndefined.sql).toBe(
+      "INSERT INTO `users_no_defaults` (`age`, `id`, `name`) VALUES (@p1, @p2, @p3)"
+    );
+    expect(preparedQueryUndefined.parameters).toEqual({
+      p1: 30,
+      p2: 1,
+      p3: "Test User Undefined",
+    });
+    expect(preparedQueryUndefined.spannerParamTypeHints).toEqual({
+      p1: "INT64",
+      p2: "INT64",
+      p3: "STRING(MAX)",
+    });
+
+    // Test with 'email' explicitly null (using commentsTable as parentId is correctly typed for null)
+    const qbComments = new QueryBuilder<typeof commentsTable>();
+    const preparedQueryNull = qbComments
+      .insert(commentsTable)
+      .values({
+        id: 1,
+        content: "Comment with null parent",
+        userId: 10,
+        rootId: 100,
+        entityType: "post",
+        parentId: null, // This field in commentsTable schema accepts null
+      })
+      .prepare("spanner");
+    // createdAt will be defaulted by SQL, parentId (null) will be excluded
+    expect(preparedQueryNull.sql).toBe(
+      "INSERT INTO `comments` (`content`, `created_at`, `entity_type`, `id`, `root_id`, `user_id`) VALUES (@p1, CURRENT_TIMESTAMP, @p2, @p3, @p4, @p5)"
+    );
+    expect(preparedQueryNull.parameters).toEqual({
+      p1: "Comment with null parent",
+      p2: "post",
+      p3: 1,
+      p4: 100,
+      p5: 10,
+    });
+    expect(preparedQueryNull.spannerParamTypeHints).toEqual({
+      p1: "STRING(MAX)",
+      p2: "STRING(MAX)",
+      p3: "INT64",
+      p4: "INT64",
+      p5: "INT64",
+    });
+  });
+
+  it("Spanner single insert: all nullable fields omitted or null, non-nullable fields provided", () => {
+    const qb = new QueryBuilder<typeof usersTableNoDefaults>();
+    // email and age are omitted
+    const preparedQueryOmitted = qb
+      .insert(usersTableNoDefaults)
+      .values({
+        id: 2,
+        name: "Only Name",
+      })
+      .prepare("spanner");
+
+    expect(preparedQueryOmitted.sql).toBe(
+      "INSERT INTO `users_no_defaults` (`id`, `name`) VALUES (@p1, @p2)"
+    );
+    expect(preparedQueryOmitted.parameters).toEqual({
+      p1: 2,
+      p2: "Only Name",
+    });
+    expect(preparedQueryOmitted.spannerParamTypeHints).toEqual({
+      p1: "INT64",
+      p2: "STRING(MAX)",
+    });
+  });
+
+  it("Spanner single insert: if all explicitly provided values (excl PKs/defaults) become null/undefined, generates specific SQL", () => {
+    const allNullableTable = table("all_nullable", {
+      id: integer("id").primaryKey(), // PK, usually not omitted/null
+      field1: text("field1"), // Nullable by default
+      field2: integer("field2"), // Nullable by default
+    });
+    const qb = new QueryBuilder<typeof allNullableTable>();
+    // field1 and field2 are omitted
+    const preparedQueryOmitted = qb
+      .insert(allNullableTable)
+      .values({
+        id: 1,
+      })
+      .prepare("spanner");
+
+    expect(preparedQueryOmitted.sql).toBe(
+      "INSERT INTO `all_nullable` (`id`) VALUES (@p1)"
+    );
+    expect(preparedQueryOmitted.parameters).toEqual({ p1: 1 });
+    expect(preparedQueryOmitted.spannerParamTypeHints).toEqual({ p1: "INT64" });
+
+    // Test case for "INSERT INTO table () VALUES ()"
+    // This requires a table where all columns are nullable (including PK for this test)
+    // and all are effectively null/undefined.
+    const allEffectivelyNullTable = table("all_effectively_null", {
+      id: integer("id"), // Not PK, nullable by default
+      field1: text("field1"),
+      field2: integer("field2"),
+    });
+    const qb2 = new QueryBuilder<typeof allEffectivelyNullTable>();
+    const preparedQueryAllOmitted = qb2
+      .insert(allEffectivelyNullTable)
+      .values({}) // All fields omitted
+      .prepare("spanner");
+
+    // Since createdAt is not in this table, and all fields are omitted (undefined)
+    // and no other defaults apply to make them non-null, this should result in empty lists.
+    expect(preparedQueryAllOmitted.sql).toBe(
+      "INSERT INTO `all_effectively_null` () VALUES ()"
+    );
+    expect(preparedQueryAllOmitted.parameters).toEqual({});
+    expect(preparedQueryAllOmitted.spannerParamTypeHints).toEqual(undefined);
+  });
+
+  it("Spanner bulk insert: should include null values and undefined (as null)", () => {
+    // Using commentsTable as parentId is known to accept null and other fields can be omitted
+    const qbComments = new QueryBuilder<typeof commentsTable>();
+    const preparedQuery = qbComments
+      .insert(commentsTable)
+      .values([
+        {
+          // First record: parentId is explicitly null
+          id: 1,
+          content: "Bulk Comment 1",
+          userId: 101,
+          rootId: 201,
+          entityType: "post",
+          parentId: undefined,
+        },
+        {
+          // Second record: parentId is omitted (will become undefined, then null for params)
+          id: 2,
+          content: "Bulk Comment 2",
+          userId: 102,
+          rootId: 202,
+          entityType: "comment",
+          // parentId is omitted
+        },
+      ])
+      .prepare("spanner");
+
+    // For bulk inserts, all columns from the union of keys are included.
+    // createdAt has a default and is part of the SQL.
+    // Expected order of keys for params: content, entityType, id, parentId, rootId, userId
+    expect(preparedQuery.sql).toBe(
+      "INSERT INTO `comments` (`content`, `created_at`, `entity_type`, `id`, `parent_id`, `root_id`, `user_id`) VALUES (@p1, CURRENT_TIMESTAMP, @p2, @p3, @p4, @p5, @p6), (@p7, CURRENT_TIMESTAMP, @p8, @p9, @p10, @p11, @p12)"
+    );
+
+    expect(preparedQuery.parameters).toEqual({
+      p1: "Bulk Comment 1", // content1
+      p2: "post", // entityType1
+      p3: 1, // id1
+      p4: null, // parentId1 (explicitly null)
+      p5: 201, // rootId1
+      p6: 101, // userId1
+      p7: "Bulk Comment 2", // content2
+      p8: "comment", // entityType2
+      p9: 2, // id2
+      p10: null, // parentId2 (omitted -> undefined -> null for params)
+      p11: 202, // rootId2
+      p12: 102, // userId2
+    });
+
+    expect(preparedQuery.spannerParamTypeHints).toEqual({
+      p1: "STRING(MAX)", // content1
+      p2: "STRING(MAX)", // entityType1
+      p3: "INT64", // id1
+      p4: "INT64", // parentId1
+      p5: "INT64", // rootId1
+      p6: "INT64", // userId1
+      p7: "STRING(MAX)", // content2
+      p8: "STRING(MAX)", // entityType2
+      p9: "INT64", // id2
+      p10: "INT64", // parentId2
+      p11: "INT64", // rootId2
+      p12: "INT64", // userId2
+    });
+  });
+
+  it("PostgreSQL single insert: should still include null values and undefined (as null)", () => {
+    const qb = new QueryBuilder<typeof usersTableNoDefaults>();
+    // Test with email omitted
+    const preparedQueryUndefined = qb
+      .insert(usersTableNoDefaults)
+      .values({
+        id: 1,
+        name: "Test User PG Undefined",
+        // email is omitted
+        age: 30,
+      })
+      .prepare("postgres");
+
+    // Order: age, email, id, name. Omitted email becomes null.
+    expect(preparedQueryUndefined.sql).toBe(
+      'INSERT INTO "users_no_defaults" ("age", "id", "name") VALUES ($1, $2, $3)'
+    );
+    expect(preparedQueryUndefined.parameters).toEqual([
+      30,
+      1,
+      "Test User PG Undefined",
+    ]);
+
+    // Test with email explicitly null (using commentsTable for its parentId)
+    const qbComments = new QueryBuilder<typeof commentsTable>();
+    const preparedQueryNull = qbComments
+      .insert(commentsTable)
+      .values({
+        id: 1,
+        content: "Comment with null parent PG",
+        userId: 10,
+        rootId: 100,
+        entityType: "post",
+        parentId: null,
+      })
+      .prepare("postgres");
+    // Order: content, createdAt(SQL), entityType, id, parentId, rootId, userId
+    // Params: content, entityType, id, parentId, rootId, userId
+    expect(preparedQueryNull.sql).toBe(
+      'INSERT INTO "comments" ("content", "created_at", "entity_type", "id", "parent_id", "root_id", "user_id") VALUES ($1, CURRENT_TIMESTAMP, $2, $3, $4, $5, $6)'
+    );
+    expect(preparedQueryNull.parameters).toEqual([
+      "Comment with null parent PG",
+      "post",
+      1,
+      null,
+      100,
+      10,
+    ]);
   });
 });
 
