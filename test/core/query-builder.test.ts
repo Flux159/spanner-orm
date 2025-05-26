@@ -1,6 +1,13 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { QueryBuilder } from "../../src/core/query-builder.js";
-import { table, text, integer, timestamp } from "../../src/core/schema.js";
+import {
+  table,
+  text,
+  integer,
+  timestamp,
+  uuid,
+  boolean,
+} from "../../src/core/schema.js";
 import { sql } from "../../src/types/common.js";
 import {
   count,
@@ -39,6 +46,16 @@ const commentsTable = table("comments", {
   entityType: text("entity_type").notNull(), // e.g., 'post', 'another_comment'
   parentId: integer("parent_id").references(() => commentsTable.columns.id), // Self-referencing for replies
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+const nullableValuesTestTable = table("nullable_values_test", {
+  id: integer("id").primaryKey(),
+  name: text("name").notNull(),
+  nullableUuid: uuid("nullable_uuid"),
+  nullableText: text("nullable_text"),
+  nullableInt: integer("nullable_int"),
+  nullableBool: boolean("nullable_bool"),
+  nullableTimestamp: timestamp("nullable_timestamp"),
 });
 
 describe("QueryBuilder SQL Generation with Aliasing", () => {
@@ -351,6 +368,118 @@ describe("QueryBuilder SQL Generation with Aliasing", () => {
   });
 });
 
+describe("QueryBuilder Spanner Nullable Types", () => {
+  let qbNullable: QueryBuilder<typeof nullableValuesTestTable>;
+
+  beforeEach(() => {
+    qbNullable = new QueryBuilder<typeof nullableValuesTestTable>();
+  });
+
+  it("Spanner: INSERT should correctly format various explicit null types", () => {
+    const preparedQuery = qbNullable
+      .insert(nullableValuesTestTable)
+      .values({
+        id: 1,
+        name: "Test Nulls",
+        nullableUuid: null,
+        nullableText: null,
+        nullableInt: null,
+        nullableBool: null,
+        nullableTimestamp: null,
+      })
+      .prepare("spanner");
+
+    const params = preparedQuery.parameters as Record<string, any>;
+    // Order of keys in params: id, name, nullableBool, nullableInt, nullableText, nullableTimestamp, nullableUuid
+    expect(params.p1).toBe(1); // id
+    expect(params.p2).toBe("Test Nulls"); // name
+    expect(params.p3).toEqual({ value: null, type: "BOOL" }); // nullableBool
+    expect(params.p4).toEqual({ value: null, type: "INT64" }); // nullableInt
+    expect(params.p5).toEqual({ value: null, type: "STRING" }); // nullableText
+    expect(params.p6).toEqual({ value: null, type: "TIMESTAMP" }); // nullableTimestamp
+    expect(params.p7).toEqual({ value: null, type: "STRING" }); // nullableUuid
+
+    expect(preparedQuery.sql).toBe(
+      "INSERT INTO `nullable_values_test` (`id`, `name`, `nullable_bool`, `nullable_int`, `nullable_text`, `nullable_timestamp`, `nullable_uuid`) VALUES (@p1, @p2, @p3, @p4, @p5, @p6, @p7)"
+    );
+  });
+
+  it("Spanner: UPDATE should correctly format various explicit null types in SET clause", () => {
+    const preparedQuery = qbNullable
+      .update(nullableValuesTestTable)
+      .set({
+        nullableUuid: null,
+        nullableText: null,
+        nullableInt: null,
+        nullableBool: null,
+        nullableTimestamp: null,
+      })
+      .where(sql`${nullableValuesTestTable.columns.id} = ${1}`)
+      .prepare("spanner");
+
+    const params = preparedQuery.parameters as Record<string, any>;
+    // Order of keys in params from SET: nullableBool, nullableInt, nullableText, nullableTimestamp, nullableUuid, then from WHERE
+    expect(params.p1).toEqual({ value: null, type: "BOOL" });
+    expect(params.p2).toEqual({ value: null, type: "INT64" });
+    expect(params.p3).toEqual({ value: null, type: "STRING" });
+    expect(params.p4).toEqual({ value: null, type: "TIMESTAMP" });
+    expect(params.p5).toEqual({ value: null, type: "STRING" });
+    expect(params.p6).toBe(1); // From WHERE clause
+
+    expect(preparedQuery.sql).toBe(
+      "UPDATE `nullable_values_test` SET `nullable_bool` = @p1, `nullable_int` = @p2, `nullable_text` = @p3, `nullable_timestamp` = @p4, `nullable_uuid` = @p5 WHERE `t1`.`id` = @p6"
+    );
+  });
+
+  it("Spanner: INSERT should handle a mix of null and non-null values for nullable fields", () => {
+    const testDate = new Date();
+    const preparedQuery = qbNullable
+      .insert(nullableValuesTestTable)
+      .values({
+        id: 2,
+        name: "Test Mix",
+        nullableUuid: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+        nullableText: null, // Null
+        nullableInt: 123,
+        nullableBool: null, // Null
+        nullableTimestamp: testDate,
+      })
+      .prepare("spanner");
+
+    const params = preparedQuery.parameters as Record<string, any>;
+    // Order: id, name, nullableBool, nullableInt, nullableText, nullableTimestamp, nullableUuid
+    expect(params.p1).toBe(2);
+    expect(params.p2).toBe("Test Mix");
+    expect(params.p3).toEqual({ value: null, type: "BOOL" }); // nullableBool
+    expect(params.p4).toBe(123); // nullableInt
+    expect(params.p5).toEqual({ value: null, type: "STRING" }); // nullableText
+    expect(params.p6).toBe(testDate); // nullableTimestamp
+    expect(params.p7).toBe("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"); // nullableUuid
+  });
+
+  it("Spanner: UPDATE should handle a mix of null and non-null values for nullable fields in SET", () => {
+    const testUuid = "b1eebc99-9c0b-4ef8-bb6d-6bb9bd380a22";
+    const preparedQuery = qbNullable
+      .update(nullableValuesTestTable)
+      .set({
+        nullableText: "Not Null Anymore",
+        nullableInt: null, // Set to null
+        nullableUuid: testUuid,
+        nullableBool: true,
+      })
+      .where(sql`${nullableValuesTestTable.columns.id} = ${2}`)
+      .prepare("spanner");
+
+    const params = preparedQuery.parameters as Record<string, any>;
+    // Order from SET: nullableBool, nullableInt, nullableText, nullableUuid, then from WHERE
+    expect(params.p1).toBe(true); // nullableBool
+    expect(params.p2).toEqual({ value: null, type: "INT64" }); // nullableInt
+    expect(params.p3).toBe("Not Null Anymore"); // nullableText
+    expect(params.p4).toBe(testUuid); // nullableUuid
+    expect(params.p5).toBe(2); // id from WHERE
+  });
+});
+
 describe("QueryBuilder Debug Method", () => {
   let qb: QueryBuilder<typeof usersTable>;
 
@@ -537,7 +666,7 @@ describe("QueryBuilder Multi-Value Insert with Optional Fields", () => {
     // Parameters are p1-p5 for row 1, p6-p10 for row 2
     expect(parameters.p1).toBe("Comment 1 Spanner"); // content
     expect(parameters.p2).toBe("post"); // entityType
-    expect(parameters.p3).toBe(null); // parentId
+    expect(parameters.p3).toEqual({ value: null, type: "INT64" }); // parentId - now expects typed null
     expect(parameters.p4).toBe(200); // rootId
     expect(parameters.p5).toBe(1); // userId
 
