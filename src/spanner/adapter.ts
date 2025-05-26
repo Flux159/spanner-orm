@@ -13,6 +13,8 @@ import type {
 type SpannerClientClassType = typeof import("@google-cloud/spanner").Spanner;
 // Type for Spanner instance
 type SpannerClientInstanceType = import("@google-cloud/spanner").Spanner;
+// Import IType and TypeCode for precise type hinting
+import { google } from "@google-cloud/spanner/build/protos/protos.js";
 
 import type {
   DatabaseAdapter,
@@ -23,6 +25,121 @@ import type {
 } from "../types/adapter.js";
 import type { PreparedQuery, TableConfig } from "../types/common.js"; // Corrected path
 import { shapeResults } from "../core/result-shaper.js"; // Corrected path
+
+// Helper function to map DDL type strings to Spanner TypeCodes
+function mapDdlTypeToSpannerCode(ddlType: string): string {
+  const upperType = ddlType.toUpperCase();
+  if (
+    upperType.startsWith("STRING") ||
+    upperType === "TEXT" ||
+    upperType === "UUID" ||
+    upperType.startsWith("VARCHAR")
+  ) {
+    return "STRING";
+  }
+  if (
+    upperType.startsWith("INT") ||
+    upperType === "BIGINT" ||
+    upperType === "INTEGER" ||
+    upperType === "SERIAL" ||
+    upperType === "BIGSERIAL" ||
+    upperType === "SMALLINT" ||
+    upperType === "INT64"
+  ) {
+    return "INT64";
+  }
+  if (upperType === "BOOLEAN" || upperType === "BOOL") {
+    return "BOOL";
+  }
+  if (
+    upperType.startsWith("FLOAT") ||
+    upperType === "DOUBLE" ||
+    upperType === "REAL" ||
+    upperType === "DOUBLE PRECISION" ||
+    upperType === "FLOAT64"
+  ) {
+    return "FLOAT64";
+  }
+  if (upperType.startsWith("NUMERIC") || upperType.startsWith("DECIMAL")) {
+    return "NUMERIC";
+  }
+  if (upperType === "DATE") {
+    return "DATE";
+  }
+  if (upperType.startsWith("TIMESTAMP")) {
+    // Covers TIMESTAMP and TIMESTAMPTZ
+    return "TIMESTAMP";
+  }
+  if (upperType.startsWith("JSON")) {
+    // Covers JSON and JSONB
+    return "JSON";
+  }
+  if (upperType === "BYTES" || upperType === "BYTEA") {
+    return "BYTES";
+  }
+  // If the type is already a valid Spanner TypeCode, pass it through.
+  // This handles cases where the hint might already be in the correct format.
+  const validSpannerTypeCodes = [
+    "STRING",
+    "INT64",
+    "BOOL",
+    "FLOAT64",
+    "TIMESTAMP",
+    "DATE",
+    "BYTES",
+    "ARRAY",
+    "STRUCT",
+    "NUMERIC",
+    "JSON",
+  ];
+  if (validSpannerTypeCodes.includes(upperType)) {
+    return upperType;
+  }
+
+  console.warn(
+    `Unknown DDL type for Spanner mapping: ${ddlType}. Defaulting to STRING.`
+  );
+  return "STRING";
+}
+
+// Helper function to transform DDL hints to Spanner paramTypes object
+function transformDdlHintsToParamTypes(
+  ddlHints?: Record<string, string>
+): Record<string, google.spanner.v1.Type> | undefined {
+  if (!ddlHints) {
+    return undefined;
+  }
+  const paramTypes: Record<string, google.spanner.v1.Type> = {};
+  for (const key in ddlHints) {
+    if (Object.prototype.hasOwnProperty.call(ddlHints, key)) {
+      const typeCodeString = mapDdlTypeToSpannerCode(ddlHints[key]);
+      // Ensure the mapped code is compatible with google.spanner.v1.TypeCode
+      // The string values like "STRING", "INT64" are valid keys for TypeCode enum.
+      const typeCode =
+        google.spanner.v1.TypeCode[
+          typeCodeString as keyof typeof google.spanner.v1.TypeCode
+        ];
+
+      if (typeCode === undefined) {
+        console.warn(
+          `SpannerAdapter: Unrecognized type code string '${typeCodeString}' for param '${key}'. Defaulting to STRING.`
+        );
+        paramTypes[key] = google.spanner.v1.Type.create({
+          code: google.spanner.v1.TypeCode.STRING,
+          arrayElementType: null,
+          structType: null,
+        });
+      } else {
+        paramTypes[key] = google.spanner.v1.Type.create({
+          code: typeCode,
+          arrayElementType: null, // Assuming scalar types for now
+          structType: null, // Assuming scalar types for now
+        });
+      }
+    }
+  }
+  return paramTypes;
+}
 
 export interface SpannerConnectionOptions extends ConnectionOptions {
   projectId: string;
@@ -150,7 +267,7 @@ export class SpannerAdapter implements DatabaseAdapter {
             const [count] = await transaction.runUpdate({
               sql,
               params,
-              types: spannerTypeHints,
+              paramTypes: transformDdlHintsToParamTypes(spannerTypeHints),
             });
             await transaction.commit();
             return count;
@@ -233,7 +350,7 @@ export class SpannerAdapter implements DatabaseAdapter {
         sql,
         params,
         json: true,
-        types: spannerTypeHints,
+        paramTypes: transformDdlHintsToParamTypes(spannerTypeHints),
       });
       return rows as TResult[];
     } catch (error) {
@@ -304,7 +421,7 @@ export class SpannerAdapter implements DatabaseAdapter {
               sql,
               params,
               json: true,
-              types: spannerTypeHints,
+              paramTypes: transformDdlHintsToParamTypes(spannerTypeHints),
             });
             await transaction.commit();
             return rows as TResult[];
@@ -417,7 +534,7 @@ export class SpannerAdapter implements DatabaseAdapter {
             const [rowCount] = await gcpTransaction.runUpdate({
               sql: cmdSql,
               params: cmdParams as Record<string, any> | undefined,
-              types: cmdSpannerTypeHints,
+              paramTypes: transformDdlHintsToParamTypes(cmdSpannerTypeHints),
             });
             return { count: rowCount };
           },
@@ -430,7 +547,7 @@ export class SpannerAdapter implements DatabaseAdapter {
               sql: querySql,
               params: queryParams as Record<string, any> | undefined,
               json: true,
-              types: querySpannerTypeHints,
+              paramTypes: transformDdlHintsToParamTypes(querySpannerTypeHints),
             });
             return rows as any[];
           },
