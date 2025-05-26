@@ -25,6 +25,7 @@ export interface ColumnConfig<T, TName extends string = string> {
     postgres: string; // e.g., 'TEXT', 'INTEGER', 'TIMESTAMP WITH TIME ZONE'
     spanner: string; // e.g., 'STRING', 'INT64', 'TIMESTAMP'
   };
+  spannerQueryApiTypeCode?: string; // e.g., 'STRING', 'INT64', 'BOOL', 'TIMESTAMP', 'JSON', 'BYTES', 'DATE', 'FLOAT64', 'NUMERIC'
   notNull?: boolean;
   default?: T | (() => T) | SQL | { sql: string }; // Added SQL here, {sql: string} is for DDL representation of raw SQL
   primaryKey?: boolean; // For single column primary key
@@ -532,10 +533,13 @@ export interface PreparedQuery<
   returning?: ReturningObject<TPrimaryTable> | true; // For INSERT/UPDATE/DELETE RETURNING
   /**
    * For Spanner, an object mapping parameter names (e.g., "p1", "p2") to their
-   * Spanner type codes (e.g., "STRING", "INT64").
-   * This is used for the `types` option in Spanner's `run` or `runUpdate` calls.
+   * Spanner type codes (e.g., { code: "STRING" }, { code: "INT64" }).
+   * This is used for the `paramTypes` option in Spanner's `run` or `runUpdate` calls.
    */
-  spannerParamTypeHints?: Record<string, string>;
+  spannerParamTypeHints?: Record<
+    string,
+    { code: string; arrayElementType?: { code: string } }
+  >;
 }
 
 // --- Types for RETURNING clause ---

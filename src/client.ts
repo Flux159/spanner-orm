@@ -535,12 +535,18 @@ export class OrmClient {
       query: (
         sqlQuery: string,
         params?: unknown[],
-        spannerTypeHints?: Record<string, string>
+        spannerTypeHints?: Record<
+          string,
+          { code: string; arrayElementType?: { code: string } | undefined }
+        >
       ) => tx.query(sqlQuery, params, spannerTypeHints),
       execute: (
         sqlQuery: string,
         params?: unknown[],
-        spannerTypeHints?: Record<string, string>
+        spannerTypeHints?: Record<
+          string,
+          { code: string; arrayElementType?: { code: string } | undefined }
+        >
       ) => tx.execute(sqlQuery, params, spannerTypeHints),
       // Prevent nested transactions on this specific adapter instance
       beginTransaction: undefined,

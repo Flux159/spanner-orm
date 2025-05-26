@@ -29,16 +29,16 @@ const postsTable = table("posts", {
   title: text("title").notNull(),
   userId: integer("user_id").references(() => usersTable.columns.id),
   content: text("content"),
-});
+    });
 
-const commentsTable = table("comments", {
-  id: integer("id").primaryKey(), // Simplified: removed generatedAlwaysAsIdentity()
-  content: text("content").notNull(),
-  userId: integer("user_id").references(() => usersTable.columns.id),
-  rootId: integer("root_id").notNull(),
-  entityType: text("entity_type").notNull(), // e.g., 'post', 'another_comment'
-  parentId: integer("parent_id").references(() => commentsTable.columns.id), // Self-referencing for replies
-  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`),
+    expect(preparedQuery.spannerParamTypeHints).toEqual({
+      p1: { code: "STRING" }, // content
+      p2: { code: "STRING" }, // entityType
+      p3: { code: "INT64" },  // parentId (even if null, type is known)
+      p4: { code: "INT64" },  // rootId
+      p5: { code: "INT64" },  // userId
+    });
+  });
 });
 
 describe("QueryBuilder SQL Generation with Aliasing", () => {

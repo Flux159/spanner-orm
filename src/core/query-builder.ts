@@ -339,16 +339,19 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
       this.getBoundParametersAndTypes(dialect);
 
     let finalParams: unknown[] | Record<string, unknown>;
-    let finalSpannerParamTypeHints: Record<string, string> | undefined;
+    let finalSpannerParamTypeHints:
+      | Record<string, { code: string }>
+      | undefined; // Changed type
 
     if (dialect === "spanner") {
       const spannerP: Record<string, unknown> = {};
-      const spannerTH: Record<string, string> = {};
+      const spannerTH: Record<string, { code: string }> = {}; // Changed type
       paramValues.forEach((val, idx) => {
         const pName = `p${idx + 1}`;
         spannerP[pName] = val;
-        if (paramSpannerTypes && paramSpannerTypes[idx]) {
-          spannerTH[pName] = paramSpannerTypes[idx]!;
+        const typeCode = paramSpannerTypes[idx];
+        if (typeCode) {
+          spannerTH[pName] = { code: typeCode }; // Format as { code: 'TYPE_CODE' }
         }
       });
       finalParams = spannerP;
@@ -1582,11 +1585,12 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           const columnConfig = this._targetTable!.columns[
             tsKey
           ] as ColumnConfig<any, any>;
-          const spannerType = columnConfig?.dialectTypes?.spanner;
+          // Use spannerQueryApiTypeCode here
+          const spannerTypeCode = columnConfig?.spannerQueryApiTypeCode;
 
           if (value === undefined) {
             allParams.push(null);
-            allSpannerTypes.push(spannerType);
+            allSpannerTypes.push(spannerTypeCode);
           } else if (
             typeof value === "object" &&
             value !== null &&
@@ -1597,7 +1601,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
             sqlValues.forEach(() => allSpannerTypes.push(undefined));
           } else {
             allParams.push(value);
-            allSpannerTypes.push(spannerType);
+            allSpannerTypes.push(spannerTypeCode);
           }
         }
       }
@@ -1615,15 +1619,16 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
           any,
           any
         >;
-        const spannerType = columnConfig?.dialectTypes?.spanner;
+        // Use spannerQueryApiTypeCode here
+        const spannerTypeCode = columnConfig?.spannerQueryApiTypeCode;
 
         if (typeof value === "object" && value !== null && "_isSQL" in value) {
           const sqlValues = (value as SQL).getValues(dialect);
           allParams.push(...sqlValues);
-          sqlValues.forEach(() => allSpannerTypes.push(undefined));
+          sqlValues.forEach(() => allSpannerTypes.push(undefined)); // SQL types are not directly known here
         } else {
           allParams.push(value);
-          allSpannerTypes.push(spannerType);
+          allSpannerTypes.push(spannerTypeCode);
         }
       }
     }

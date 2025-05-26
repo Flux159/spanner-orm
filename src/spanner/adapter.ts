@@ -8,6 +8,7 @@ import type {
   // DatabaseAdminClient will be obtained via this.spannerClient.getDatabaseAdminClient()
   // google.longrunning.IOperation type will be inferred
 } from "@google-cloud/spanner";
+import { google } from "@google-cloud/spanner/build/protos/protos.js";
 
 // Type for the Spanner class constructor
 type SpannerClientClassType = typeof import("@google-cloud/spanner").Spanner;
@@ -138,7 +139,10 @@ export class SpannerAdapter implements DatabaseAdapter {
   async execute(
     sql: string,
     params?: Record<string, any>,
-    spannerTypeHints?: Record<string, string>
+    spannerTypeHints?: Record<
+      string,
+      { code: string; arrayElementType?: { code: string } }
+    >
   ): Promise<number | AffectedRows> {
     const db = this.ensureConnected(); // Relies on connect() having awaited this.ready
     try {
@@ -147,11 +151,32 @@ export class SpannerAdapter implements DatabaseAdapter {
       const rowCount = await db.runTransactionAsync(
         async (transaction: SpannerNativeTransaction) => {
           try {
-            const [count] = await transaction.runUpdate({
+            // Ensure the correct property name `paramTypes` is used for Spanner SDK
+            let actualParamTypes:
+              | { [k: string]: google.spanner.v1.Type }
+              | undefined = undefined;
+            if (spannerTypeHints) {
+              actualParamTypes = {};
+              for (const key in spannerTypeHints) {
+                if (
+                  Object.prototype.hasOwnProperty.call(spannerTypeHints, key)
+                ) {
+                  const hint = spannerTypeHints[key];
+                  actualParamTypes[key] = {
+                    code: google.spanner.v1.TypeCode[
+                      hint.code as keyof typeof google.spanner.v1.TypeCode
+                    ],
+                    // arrayElementType and structType would be handled here if we support them
+                  } as any;
+                }
+              }
+            }
+            const results = await transaction.runUpdate({
               sql,
               params,
-              types: spannerTypeHints,
+              paramTypes: actualParamTypes,
             });
+            const count = results[0];
             await transaction.commit();
             return count;
           } catch (err) {
@@ -225,15 +250,34 @@ export class SpannerAdapter implements DatabaseAdapter {
   async query<TResult extends AdapterQueryResultRow = AdapterQueryResultRow>(
     sql: string,
     params?: Record<string, any>,
-    spannerTypeHints?: Record<string, string>
+    spannerTypeHints?: Record<
+      string,
+      { code: string; arrayElementType?: { code: string } }
+    >
   ): Promise<TResult[]> {
     const db = this.ensureConnected(); // Relies on connect() having awaited this.ready
     try {
+      let actualParamTypes:
+        | { [k: string]: google.spanner.v1.Type }
+        | undefined = undefined;
+      if (spannerTypeHints) {
+        actualParamTypes = {};
+        for (const key in spannerTypeHints) {
+          if (Object.prototype.hasOwnProperty.call(spannerTypeHints, key)) {
+            const hint = spannerTypeHints[key];
+            actualParamTypes[key] = {
+              code: google.spanner.v1.TypeCode[
+                hint.code as keyof typeof google.spanner.v1.TypeCode
+              ],
+            } as any;
+          }
+        }
+      }
       const [rows] = await db.run({
         sql,
         params,
         json: true,
-        types: spannerTypeHints,
+        paramTypes: actualParamTypes,
       });
       return rows as TResult[];
     } catch (error) {
@@ -291,7 +335,10 @@ export class SpannerAdapter implements DatabaseAdapter {
   >(
     sql: string,
     params?: Record<string, any>, // Spanner expects Record<string, any>
-    spannerTypeHints?: Record<string, string>
+    spannerTypeHints?: Record<
+      string,
+      { code: string; arrayElementType?: { code: string } }
+    >
   ): Promise<TResult[]> {
     const db = this.ensureConnected();
     try {
@@ -300,12 +347,31 @@ export class SpannerAdapter implements DatabaseAdapter {
         async (transaction: SpannerNativeTransaction) => {
           try {
             // Use transaction.run() for DML with THEN RETURN
-            const [rows] = await transaction.run({
+            // Ensure the correct property name `paramTypes` is used for Spanner SDK
+            let actualParamTypesExecuteAndReturn:
+              | { [k: string]: google.spanner.v1.Type }
+              | undefined = undefined;
+            if (spannerTypeHints) {
+              actualParamTypesExecuteAndReturn = {};
+              for (const key in spannerTypeHints) {
+                if (
+                  Object.prototype.hasOwnProperty.call(spannerTypeHints, key)
+                ) {
+                  const hint = spannerTypeHints[key];
+                  actualParamTypesExecuteAndReturn[key] = {
+                    code: google.spanner.v1.TypeCode[
+                      hint.code as keyof typeof google.spanner.v1.TypeCode
+                    ],
+                  } as any;
+                }
+              }
+            }
+            const [rows] = (await transaction.run({
               sql,
               params,
               json: true,
-              types: spannerTypeHints,
-            });
+              paramTypes: actualParamTypesExecuteAndReturn,
+            })) as any as [TResult[]];
             await transaction.commit();
             return rows as TResult[];
           } catch (err) {
@@ -412,26 +478,71 @@ export class SpannerAdapter implements DatabaseAdapter {
           execute: async (
             cmdSql,
             cmdParams,
-            cmdSpannerTypeHints?: Record<string, string>
+            cmdSpannerTypeHints?: Record<
+              string,
+              { code: string; arrayElementType?: { code: string } }
+            >
           ) => {
-            const [rowCount] = await gcpTransaction.runUpdate({
+            let actualCmdParamTypes:
+              | { [k: string]: google.spanner.v1.Type }
+              | undefined = undefined;
+            if (cmdSpannerTypeHints) {
+              actualCmdParamTypes = {};
+              for (const key in cmdSpannerTypeHints) {
+                if (
+                  Object.prototype.hasOwnProperty.call(cmdSpannerTypeHints, key)
+                ) {
+                  const hint = cmdSpannerTypeHints[key];
+                  actualCmdParamTypes[key] = {
+                    code: google.spanner.v1.TypeCode[
+                      hint.code as keyof typeof google.spanner.v1.TypeCode
+                    ],
+                  } as any;
+                }
+              }
+            }
+            const [rowCount] = (await gcpTransaction.runUpdate({
               sql: cmdSql,
               params: cmdParams as Record<string, any> | undefined,
-              types: cmdSpannerTypeHints,
-            });
+              paramTypes: actualCmdParamTypes,
+            })) as [number];
             return { count: rowCount };
           },
           query: async (
             querySql,
             queryParams,
-            querySpannerTypeHints?: Record<string, string>
+            querySpannerTypeHints?: Record<
+              string,
+              { code: string; arrayElementType?: { code: string } }
+            >
           ) => {
-            const [rows] = await gcpTransaction.run({
+            let actualQueryParamTypes:
+              | { [k: string]: google.spanner.v1.Type }
+              | undefined = undefined;
+            if (querySpannerTypeHints) {
+              actualQueryParamTypes = {};
+              for (const key in querySpannerTypeHints) {
+                if (
+                  Object.prototype.hasOwnProperty.call(
+                    querySpannerTypeHints,
+                    key
+                  )
+                ) {
+                  const hint = querySpannerTypeHints[key];
+                  actualQueryParamTypes[key] = {
+                    code: google.spanner.v1.TypeCode[
+                      hint.code as keyof typeof google.spanner.v1.TypeCode
+                    ],
+                  } as any;
+                }
+              }
+            }
+            const [rows] = (await gcpTransaction.run({
               sql: querySql,
               params: queryParams as Record<string, any> | undefined,
               json: true,
-              types: querySpannerTypeHints,
-            });
+              paramTypes: actualQueryParamTypes,
+            })) as any[];
             return rows as any[];
           },
           commit: async () => {

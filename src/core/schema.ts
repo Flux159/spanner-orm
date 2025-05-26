@@ -142,6 +142,7 @@ class TextColumnBuilder<TName extends string> extends BaseColumnBuilder<
 > {
   constructor(name: TName) {
     super(name, "text", { postgres: "TEXT", spanner: "STRING(MAX)" }); // Changed for Spanner
+    this.config.spannerQueryApiTypeCode = "STRING";
   }
 }
 
@@ -163,6 +164,7 @@ class VarcharColumnBuilder<TName extends string> extends BaseColumnBuilder<
     } else {
       this.config.dialectTypes.spanner = `STRING(MAX)`; // Spanner convention for unbounded string
     }
+    this.config.spannerQueryApiTypeCode = "STRING";
   }
 }
 
@@ -172,6 +174,7 @@ class IntegerColumnBuilder<TName extends string> extends BaseColumnBuilder<
 > {
   constructor(name: TName) {
     super(name, "integer", { postgres: "INTEGER", spanner: "INT64" });
+    this.config.spannerQueryApiTypeCode = "INT64";
   }
 }
 
@@ -181,6 +184,7 @@ class BooleanColumnBuilder<TName extends string> extends BaseColumnBuilder<
 > {
   constructor(name: TName) {
     super(name, "boolean", { postgres: "BOOLEAN", spanner: "BOOL" });
+    this.config.spannerQueryApiTypeCode = "BOOL";
   }
 }
 
@@ -195,6 +199,7 @@ class TimestampColumnBuilder<TName extends string> extends BaseColumnBuilder<
       postgres: "TIMESTAMP WITH TIME ZONE",
       spanner: "TIMESTAMP",
     });
+    this.config.spannerQueryApiTypeCode = "TIMESTAMP";
   }
 }
 
@@ -204,6 +209,7 @@ class JsonbColumnBuilder<
 > extends BaseColumnBuilder<TJsonType, TName> {
   constructor(name: TName) {
     super(name, "jsonb", { postgres: "JSONB", spanner: "JSON" }); // Spanner has a JSON type
+    this.config.spannerQueryApiTypeCode = "JSON";
   }
 }
 
