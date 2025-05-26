@@ -253,7 +253,8 @@ export class ExecutableQuery<
       case "select":
         executionPromise = this.client.adapter.query(
           preparedQuery.sql,
-          preparedQuery.parameters
+          // Parameters are passed directly; adapter handles array vs object
+          preparedQuery.parameters as any // Cast to any to satisfy adapter.query, which might expect unknown[]
         );
         if (preparedQuery.includeClause && preparedQuery.primaryTable) {
           executionPromise = executionPromise.then((rawData) =>
@@ -272,7 +273,7 @@ export class ExecutableQuery<
           // If returning clause is present, use adapter.query to get rows back
           executionPromise = this.client.adapter.query(
             preparedQuery.sql,
-            preparedQuery.parameters
+            preparedQuery.parameters as any // Cast to any
           );
           // Here, TResult should ideally be Array<InferReturningType<TPrimaryTable, TReturning>>
           // For now, it will be Array<InferModelType<TPrimaryTable>> or Array<Partial<...>>
@@ -280,7 +281,7 @@ export class ExecutableQuery<
         } else {
           // Original behavior: get affected rows count
           executionPromise = this.client.adapter
-            .execute(preparedQuery.sql, preparedQuery.parameters)
+            .execute(preparedQuery.sql, preparedQuery.parameters as any) // Cast to any
             .then((res: number | AffectedRows) => ({
               count:
                 typeof res === "number"
@@ -327,10 +328,20 @@ export class ExecutableRawQuery<TResult = any[]> {
     // If a raw query is known not to return results (e.g., raw DDL),
     // the user should handle it or we might need a `executeRaw` on OrmClient.
     // SQL interface has toSqlString and getValues methods
+    // The SQL interface's getValues currently returns unknown[].
+    // Adapters need to handle this. PG-like adapters expect unknown[].
+    // Spanner adapter might expect Record<string, unknown>.
+    // For raw queries, we'll pass what getValues provides.
+    // If Spanner adapter's query/execute methods are strict about Record<string, unknown>,
+    // then raw SQL with parameters for Spanner might need a different handling
+    // or the SQL.getValues() needs to be dialect-aware for its return type.
+    // For now, assume adapter.query can handle unknown[] for raw queries.
+    const paramsForAdapter = this.sqlTemplate.getValues(this.client.dialect);
+
     return this.client.adapter
       .query(
         this.sqlTemplate.toSqlString(this.client.dialect),
-        this.sqlTemplate.getValues(this.client.dialect)
+        paramsForAdapter as any // Cast to any to satisfy adapter methods
       )
       .then(onFulfilled as any, onRejected); // Cast onFulfilled due to TResult vs QueryResultRow[]
   }
@@ -342,10 +353,34 @@ export class ExecutableRawQuery<TResult = any[]> {
   }
 
   // Utility to get SQL and parameters
-  getQueryParts(): { sql: string; parameters: unknown[] } {
+  getQueryParts(): {
+    sql: string;
+    parameters: unknown[] | Record<string, unknown>;
+  } {
+    // SQL.getValues() returns unknown[]. If dialect is spanner, this might be an issue
+    // if the expectation is Record<string, unknown> for display/debugging.
+    // However, for execution, the adapter will handle it.
+    // For consistency in what this method returns for "parameters",
+    // we might need SQL.getValues to be more flexible or this method to adapt.
+    // For now, returning what SQL.getValues gives.
+    const rawParams = this.sqlTemplate.getValues(this.client.dialect);
+    if (this.client.dialect === "spanner") {
+      // Convert array to Spanner-like object for display consistency if desired,
+      // but SQL.getValues() itself doesn't do this.
+      // This is more about what getQueryParts() should show.
+      // Let's return the object form for Spanner for clarity.
+      const spannerParams: Record<string, unknown> = {};
+      (rawParams as unknown[]).forEach((val, idx) => {
+        spannerParams[`p${idx + 1}`] = val;
+      });
+      return {
+        sql: this.sqlTemplate.toSqlString(this.client.dialect),
+        parameters: spannerParams,
+      };
+    }
     return {
       sql: this.sqlTemplate.toSqlString(this.client.dialect),
-      parameters: this.sqlTemplate.getValues(this.client.dialect) || [],
+      parameters: rawParams || [],
     };
   }
 }

@@ -272,10 +272,10 @@ describe("QueryBuilder SQL Generation with Aliasing", () => {
       expect(preparedQuery.sql).toBe(
         "INSERT INTO `users` (`created_at`, `email`, `name`) VALUES (CURRENT_TIMESTAMP, @p1, @p2)"
       );
-      expect(preparedQuery.parameters).toEqual([
-        "jane@example.com",
-        "Jane Doe",
-      ]);
+      expect(preparedQuery.parameters).toEqual({
+        p1: "jane@example.com",
+        p2: "Jane Doe",
+      });
     });
   });
 
@@ -301,10 +301,10 @@ describe("QueryBuilder SQL Generation with Aliasing", () => {
       expect(preparedQuery.sql).toBe(
         "UPDATE `users` SET `name` = @p1 WHERE `t1`.`email` = @p2"
       );
-      expect(preparedQuery.parameters).toEqual([
-        "Updated Name",
-        "old@example.com",
-      ]);
+      expect(preparedQuery.parameters).toEqual({
+        p1: "Updated Name",
+        p2: "old@example.com",
+      });
     });
 
     it("PostgreSQL: should generate UPDATE statement with SQL in SET using alias", () => {
@@ -340,7 +340,7 @@ describe("QueryBuilder SQL Generation with Aliasing", () => {
       expect(preparedQuery.sql).toBe(
         "DELETE FROM `users` WHERE `t1`.`email` = @p1"
       );
-      expect(preparedQuery.parameters).toEqual(["spam@example.com"]);
+      expect(preparedQuery.parameters).toEqual({ p1: "spam@example.com" });
     });
 
     it("PostgreSQL: should generate DELETE statement without WHERE (no alias needed for table name)", () => {
@@ -525,24 +525,28 @@ describe("QueryBuilder Multi-Value Insert with Optional Fields", () => {
       },
     ];
     qbComments.insert(commentsTable).values(insertData);
-    const parameters = qbComments.getBoundParameters("spanner");
+    const parameters = qbComments.getBoundParameters("spanner") as Record<
+      string,
+      unknown
+    >;
 
     // Expected order: content, createdAt, entityType, parentId, rootId, userId
-    expect(parameters.length).toBe(2 * 5); // 2 rows, 5 bind parameters each
+    expect(Object.keys(parameters).length).toBe(2 * 5); // 2 rows, 5 bind parameters each
 
     // Row 1 (5 params: content, entityType, parentId, rootId, userId)
-    expect(parameters[0]).toBe("Comment 1 Spanner");
-    expect(parameters[1]).toBe("post"); // entityType
-    expect(parameters[2]).toBe(null); // parentId
-    expect(parameters[3]).toBe(200); // rootId
-    expect(parameters[4]).toBe(1); // userId
+    // Parameters are p1-p5 for row 1, p6-p10 for row 2
+    expect(parameters.p1).toBe("Comment 1 Spanner"); // content
+    expect(parameters.p2).toBe("post"); // entityType
+    expect(parameters.p3).toBe(null); // parentId
+    expect(parameters.p4).toBe(200); // rootId
+    expect(parameters.p5).toBe(1); // userId
 
     // Row 2
-    expect(parameters[5]).toBe("Reply to Comment 1 Spanner");
-    expect(parameters[6]).toBe("post"); // entityType
-    expect(parameters[7]).toBe(10); // parentId
-    expect(parameters[8]).toBe(200); // rootId
-    expect(parameters[9]).toBe(2); // userId
+    expect(parameters.p6).toBe("Reply to Comment 1 Spanner"); // content
+    expect(parameters.p7).toBe("post"); // entityType
+    expect(parameters.p8).toBe(10); // parentId
+    expect(parameters.p9).toBe(200); // rootId
+    expect(parameters.p10).toBe(2); // userId
 
     const preparedQuery = qbComments.prepare("spanner");
     expect(preparedQuery.sql).toBe(
@@ -657,7 +661,7 @@ describe("QueryBuilder RETURNING clause", () => {
       expect(prepared.sql).toBe(
         "INSERT INTO `users` (`age`, `created_at`, `name`) VALUES (@p1, CURRENT_TIMESTAMP, @p2) THEN RETURN *"
       );
-      expect(prepared.parameters).toEqual([40, "Spanner User"]);
+      expect(prepared.parameters).toEqual({ p1: 40, p2: "Spanner User" });
     });
 
     it("should generate INSERT ... THEN RETURN specific columns", () => {
@@ -769,7 +773,7 @@ describe("QueryBuilder JOIN Operations with Aliasing", () => {
     expect(preparedQuery.sql).toBe(
       "SELECT `t1`.`name` AS `userName`, `t2`.`title` AS `postTitle` FROM `users` AS `t1` INNER JOIN `posts` AS `t2` ON `t1`.`id` = `t2`.`user_id` WHERE `t1`.`age` > @p1"
     );
-    expect(preparedQuery.parameters).toEqual([30]);
+    expect(preparedQuery.parameters).toEqual({ p1: 30 });
   });
 
   it("PostgreSQL: should generate LEFT JOIN with table aliases", () => {
@@ -1066,7 +1070,7 @@ describe("QueryBuilder String Matching Functions with Aliasing", () => {
     expect(preparedQuery.sql).toBe(
       "SELECT `t1`.`name` AS `name` FROM `users` AS `t1` WHERE REGEXP_CONTAINS(`t1`.`name`, @p1)"
     );
-    expect(preparedQuery.parameters).toEqual(["(?i)^Test.*"]);
+    expect(preparedQuery.parameters).toEqual({ p1: "(?i)^Test.*" });
   });
   it("PostgreSQL: regexpContains with aliased column", () => {
     const preparedQuery = qb

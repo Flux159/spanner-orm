@@ -234,11 +234,20 @@ export class SpannerAdapter implements DatabaseAdapter {
   ): Promise<any[]> {
     // ensureConnected will be called by this.query
     try {
-      const spannerParams: Record<string, any> = {};
+      let spannerParams: Record<string, any> | undefined;
+
       if (preparedQuery.parameters) {
-        preparedQuery.parameters.forEach((val, i) => {
-          spannerParams[`p${i + 1}`] = val; // Spanner uses @p1, @p2 etc.
-        });
+        if (Array.isArray(preparedQuery.parameters)) {
+          // If it's an array (e.g., from raw SQL or a misconfigured call), convert it
+          spannerParams = {};
+          preparedQuery.parameters.forEach((val, i) => {
+            spannerParams![`p${i + 1}`] = val;
+          });
+        } else {
+          // If it's already an object (Record<string, unknown>), use it directly
+          // Cast to Record<string, any> as Spanner client expects `any` for values
+          spannerParams = preparedQuery.parameters as Record<string, any>;
+        }
       }
 
       const rawResults = await this.query<AdapterQueryResultRow>(
