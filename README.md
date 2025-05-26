@@ -9,7 +9,7 @@ Read the published docs [here](https://flux159.github.io/spanner-orm) to get sta
 
 ## Key Requirements & Design Goals
 
-`spanner-orm` is built to address the following key requirements for developers working with PostgreSQL and Google Spanner:
+`spanner-orm` is built to address the following key requirements for developers working with PostgreSQL and Google Spanner :
 
 - **Single Object Model for PostgreSQL & Spanner:** Supports both postgres & google spanner with a single object model, inspired by Drizzle. This allows you to define your schema once and use it across both database systems.
 - **Cross-Dialect Migrations:** Produces migrations for both postgres & spanner that can be run via a migrate command or via cli (specifically, the `spanner-orm-cli migrate` command), and also programmatically.
