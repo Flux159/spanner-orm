@@ -10,8 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      # pages: write
-      # id-token: write
+      pages: write
+      id-token: write
     concurrency:
       group: "pages"
       cancel-in-progress: false
@@ -54,6 +54,6 @@ jobs:
           # If your docs:build script outputs to 'website/public_docs', change this path
           path: ./website/public
 
-      # - name: Deploy to GitHub Pages
-      #   id: deployment
-      #   uses: actions/deploy-pages@v4
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
