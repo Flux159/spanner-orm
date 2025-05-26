@@ -537,7 +537,7 @@ describe("QueryBuilder Multi-Value Insert with Optional Fields", () => {
     // Parameters are p1-p5 for row 1, p6-p10 for row 2
     expect(parameters.p1).toBe("Comment 1 Spanner"); // content
     expect(parameters.p2).toBe("post"); // entityType
-    expect(parameters.p3).toBe(null); // parentId
+    expect(parameters.p3).toEqual({ value: null, type: "INT64" }); // parentId - now expects typed null
     expect(parameters.p4).toBe(200); // rootId
     expect(parameters.p5).toBe(1); // userId
 
