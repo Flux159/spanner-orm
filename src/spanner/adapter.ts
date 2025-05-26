@@ -145,9 +145,15 @@ export class SpannerAdapter implements DatabaseAdapter {
       // The result of runTransactionAsync is the result of its callback.
       const rowCount = await db.runTransactionAsync(
         async (transaction: SpannerNativeTransaction) => {
-          const [count] = await transaction.runUpdate({ sql, params });
-          // No explicit commit needed here, runTransactionAsync handles it.
-          return count;
+          try {
+            const [count] = await transaction.runUpdate({ sql, params });
+            await transaction.commit();
+            return count;
+          } catch (err) {
+            console.error("Error during transaction:", err);
+            await transaction.rollback();
+            throw err;
+          }
         }
       );
       return { count: typeof rowCount === "number" ? rowCount : 0 };
