@@ -156,6 +156,16 @@ export class PostgresAdapter implements DatabaseAdapter {
     }
   }
 
+  async executeAndReturnRows<
+    TResult extends AdapterQueryResultRow = AdapterQueryResultRow
+  >(
+    sql: string,
+    params?: unknown[] // pg adapter expects unknown[]
+  ): Promise<TResult[]> {
+    // For PostgreSQL, the standard query method can handle DML with RETURNING.
+    return this.query(sql, params);
+  }
+
   async beginTransaction(): Promise<Transaction> {
     await this.ready;
     const client: PoolClient = await this.pool.connect();

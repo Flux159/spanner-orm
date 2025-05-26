@@ -80,6 +80,20 @@ export interface DatabaseAdapter {
   ): Promise<T[]>;
 
   /**
+   * Executes a DML statement (INSERT, UPDATE, DELETE) and returns the affected/returned rows.
+   * This is particularly useful for statements with RETURNING or THEN RETURN clauses.
+   * Optional: Adapters can implement this if they have a distinct way to handle DML-with-returning
+   * versus standard queries. If not implemented, the ORM might fall back to using the `query` method.
+   * @param sql The SQL string to execute.
+   * @param params Optional parameters, which can be an array or an object map.
+   * @returns A promise that resolves to an array of result rows.
+   */
+  executeAndReturnRows?<TResult extends QueryResultRow = QueryResultRow>(
+    sql: string,
+    params?: any // Allows unknown[] for PG-like, Record<string, any> for Spanner
+  ): Promise<TResult[]>;
+
+  /**
    * Executes a prepared query, potentially with result shaping if includes are present.
    * @param preparedQuery The PreparedQuery object from QueryBuilder.
    * @returns A promise that resolves to an array of result rows, possibly shaped.

@@ -272,6 +272,31 @@ export class SpannerAdapter implements DatabaseAdapter {
     }
   }
 
+  async executeAndReturnRows<
+    TResult extends AdapterQueryResultRow = AdapterQueryResultRow
+  >(
+    sql: string,
+    params?: Record<string, any> // Spanner expects Record<string, any>
+  ): Promise<TResult[]> {
+    const db = this.ensureConnected();
+    try {
+      // Use runTransactionAsync to ensure a read-write transaction
+      return await db.runTransactionAsync(
+        async (transaction: SpannerNativeTransaction) => {
+          // Use transaction.run() for DML with THEN RETURN
+          const [rows] = await transaction.run({ sql, params, json: true });
+          return rows as TResult[];
+        }
+      );
+    } catch (error) {
+      console.error(
+        "Error executing DML and returning rows with Spanner adapter:",
+        error
+      );
+      throw error;
+    }
+  }
+
   async beginTransaction(): Promise<OrmTransaction> {
     const db = this.ensureConnected(); // Relies on connect() having awaited this.ready
     // Spanner's transactions are typically managed via runTransactionAsync.
