@@ -452,13 +452,22 @@ export class SpannerAdapter implements DatabaseAdapter {
         async (transaction: SpannerNativeTransaction) => {
           try {
             // Use transaction.run() for DML with THEN RETURN
+            const paramTypes = transformDdlHintsToParamTypes(
+              spannerTypeHints
+            ) as any;
+            const types = transformDdlHintsToTypes(spannerTypeHints);
+            console.log("Before running execute and return rows...");
+            console.log(sql);
+            console.log(params);
+            console.log(types);
+            console.log(paramTypes);
+
             const [rows] = await transaction.run({
               sql,
               params,
               json: true,
-              paramTypes: transformDdlHintsToParamTypes(
-                spannerTypeHints
-              ) as any,
+              types,
+              paramTypes,
             });
             await transaction.commit();
             return rows as TResult[];
