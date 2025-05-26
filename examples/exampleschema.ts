@@ -11,7 +11,7 @@ import {
   index,
   uniqueIndex,
   sql,
-} from "./dist/index.js"; // Adjust import path as per your project structure
+} from "../dist/index.js"; // Adjust import path as per your project structure
 // No need to import crypto here if uuid() handles it internally via $defaultFn
 
 // --- Define a placeholder 'users' table for demonstrating references ---

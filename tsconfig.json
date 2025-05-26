@@ -23,7 +23,7 @@
     "node_modules",
     "dist",
     "test",
-    "blahschema.ts",
+    "examples",
     "spanner-orm-migrations"
   ]
 }
