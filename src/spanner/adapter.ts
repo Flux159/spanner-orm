@@ -18,16 +18,16 @@ type SpannerClientInstanceType = import("@google-cloud/spanner").Spanner;
 
 // Local interface to represent the structure of google.spanner.v1.IType
 // This helps with type checking without needing a direct runtime import of 'google'.
-interface SpannerParamType {
-  code: string | number; // Corresponds to google.spanner.v1.TypeCode
-  arrayElementType?: SpannerParamType | null; // Corresponds to google.spanner.v1.IType
-  structType?: {
-    fields: Array<{
-      name?: string | null;
-      type?: SpannerParamType | null; // Corresponds to google.spanner.v1.IType
-    }>;
-  } | null; // Corresponds to google.spanner.v1.IStructType
-}
+// interface SpannerParamType {
+//   code: string | number; // Corresponds to google.spanner.v1.TypeCode
+//   arrayElementType?: SpannerParamType | null; // Corresponds to google.spanner.v1.IType
+//   structType?: {
+//     fields: Array<{
+//       name?: string | null;
+//       type?: SpannerParamType | null; // Corresponds to google.spanner.v1.IType
+//     }>;
+//   } | null; // Corresponds to google.spanner.v1.IStructType
+// }
 
 import type {
   DatabaseAdapter,
@@ -40,121 +40,121 @@ import type { PreparedQuery, TableConfig } from "../types/common.js"; // Correct
 import { shapeResults } from "../core/result-shaper.js"; // Corrected path
 
 // Helper function to map DDL type strings to Spanner TypeCodes
-function mapDdlTypeToSpannerCode(ddlType: string): string {
-  const upperType = ddlType.toUpperCase();
-  if (
-    upperType.startsWith("STRING") ||
-    upperType === "TEXT" ||
-    upperType === "UUID" ||
-    upperType.startsWith("VARCHAR")
-  ) {
-    return "STRING";
-  }
-  if (
-    upperType.startsWith("INT") ||
-    upperType === "BIGINT" ||
-    upperType === "INTEGER" ||
-    upperType === "SERIAL" ||
-    upperType === "BIGSERIAL" ||
-    upperType === "SMALLINT" ||
-    upperType === "INT64"
-  ) {
-    return "INT64";
-  }
-  if (upperType === "BOOLEAN" || upperType === "BOOL") {
-    return "BOOL";
-  }
-  if (
-    upperType.startsWith("FLOAT") ||
-    upperType === "DOUBLE" ||
-    upperType === "REAL" ||
-    upperType === "DOUBLE PRECISION" ||
-    upperType === "FLOAT64"
-  ) {
-    return "FLOAT64";
-  }
-  if (upperType.startsWith("NUMERIC") || upperType.startsWith("DECIMAL")) {
-    return "NUMERIC";
-  }
-  if (upperType === "DATE") {
-    return "DATE";
-  }
-  if (upperType.startsWith("TIMESTAMP")) {
-    // Covers TIMESTAMP and TIMESTAMPTZ
-    return "TIMESTAMP";
-  }
-  if (upperType.startsWith("JSON")) {
-    // Covers JSON and JSONB
-    return "JSON";
-  }
-  if (upperType === "BYTES" || upperType === "BYTEA") {
-    return "BYTES";
-  }
-  // If the type is already a valid Spanner TypeCode, pass it through.
-  // This handles cases where the hint might already be in the correct format.
-  const validSpannerTypeCodes = [
-    "STRING",
-    "INT64",
-    "BOOL",
-    "FLOAT64",
-    "TIMESTAMP",
-    "DATE",
-    "BYTES",
-    "ARRAY",
-    "STRUCT",
-    "NUMERIC",
-    "JSON",
-  ];
-  if (validSpannerTypeCodes.includes(upperType)) {
-    return upperType;
-  }
+// function mapDdlTypeToSpannerCode(ddlType: string): string {
+//   const upperType = ddlType.toUpperCase();
+//   if (
+//     upperType.startsWith("STRING") ||
+//     upperType === "TEXT" ||
+//     upperType === "UUID" ||
+//     upperType.startsWith("VARCHAR")
+//   ) {
+//     return "STRING";
+//   }
+//   if (
+//     upperType.startsWith("INT") ||
+//     upperType === "BIGINT" ||
+//     upperType === "INTEGER" ||
+//     upperType === "SERIAL" ||
+//     upperType === "BIGSERIAL" ||
+//     upperType === "SMALLINT" ||
+//     upperType === "INT64"
+//   ) {
+//     return "INT64";
+//   }
+//   if (upperType === "BOOLEAN" || upperType === "BOOL") {
+//     return "BOOL";
+//   }
+//   if (
+//     upperType.startsWith("FLOAT") ||
+//     upperType === "DOUBLE" ||
+//     upperType === "REAL" ||
+//     upperType === "DOUBLE PRECISION" ||
+//     upperType === "FLOAT64"
+//   ) {
+//     return "FLOAT64";
+//   }
+//   if (upperType.startsWith("NUMERIC") || upperType.startsWith("DECIMAL")) {
+//     return "NUMERIC";
+//   }
+//   if (upperType === "DATE") {
+//     return "DATE";
+//   }
+//   if (upperType.startsWith("TIMESTAMP")) {
+//     // Covers TIMESTAMP and TIMESTAMPTZ
+//     return "TIMESTAMP";
+//   }
+//   if (upperType.startsWith("JSON")) {
+//     // Covers JSON and JSONB
+//     return "JSON";
+//   }
+//   if (upperType === "BYTES" || upperType === "BYTEA") {
+//     return "BYTES";
+//   }
+//   // If the type is already a valid Spanner TypeCode, pass it through.
+//   // This handles cases where the hint might already be in the correct format.
+//   const validSpannerTypeCodes = [
+//     "STRING",
+//     "INT64",
+//     "BOOL",
+//     "FLOAT64",
+//     "TIMESTAMP",
+//     "DATE",
+//     "BYTES",
+//     "ARRAY",
+//     "STRUCT",
+//     "NUMERIC",
+//     "JSON",
+//   ];
+//   if (validSpannerTypeCodes.includes(upperType)) {
+//     return upperType;
+//   }
 
-  console.warn(
-    `Unknown DDL type for Spanner mapping: ${ddlType}. Defaulting to STRING.`
-  );
-  return "STRING";
-}
+//   console.warn(
+//     `Unknown DDL type for Spanner mapping: ${ddlType}. Defaulting to STRING.`
+//   );
+//   return "STRING";
+// }
 
 // Helper function to transform DDL hints to Spanner paramTypes object
-function transformDdlHintsToParamTypes(
-  ddlHints?: Record<string, string>
-): Record<string, SpannerParamType> | undefined {
-  if (!ddlHints) {
-    return undefined;
-  }
-  const paramTypes: Record<string, SpannerParamType> = {};
-  for (const key in ddlHints) {
-    if (Object.prototype.hasOwnProperty.call(ddlHints, key)) {
-      const typeCodeString = mapDdlTypeToSpannerCode(ddlHints[key]);
-      // Construct an object conforming to our local SpannerParamType interface,
-      // which is structurally compatible with google.spanner.v1.IType.
-      paramTypes[key] = {
-        code: typeCodeString, // mapDdlTypeToSpannerCode returns a string like "STRING"
-        arrayElementType: null, // Assuming scalar types for now
-        structType: null, // Assuming scalar types for now
-      };
-    }
-  }
-  return paramTypes;
-}
+// function transformDdlHintsToParamTypes(
+//   ddlHints?: Record<string, string>
+// ): Record<string, SpannerParamType> | undefined {
+//   if (!ddlHints) {
+//     return undefined;
+//   }
+//   const paramTypes: Record<string, SpannerParamType> = {};
+//   for (const key in ddlHints) {
+//     if (Object.prototype.hasOwnProperty.call(ddlHints, key)) {
+//       const typeCodeString = mapDdlTypeToSpannerCode(ddlHints[key]);
+//       // Construct an object conforming to our local SpannerParamType interface,
+//       // which is structurally compatible with google.spanner.v1.IType.
+//       paramTypes[key] = {
+//         code: typeCodeString, // mapDdlTypeToSpannerCode returns a string like "STRING"
+//         arrayElementType: null, // Assuming scalar types for now
+//         structType: null, // Assuming scalar types for now
+//       };
+//     }
+//   }
+//   return paramTypes;
+// }
 
-function transformDdlHintsToTypes(
-  ddlHints?: Record<string, string>
-): Record<string, string> | undefined {
-  if (!ddlHints) {
-    return undefined;
-  }
-  const types: Record<string, string> = {};
-  for (const key in ddlHints) {
-    if (Object.prototype.hasOwnProperty.call(ddlHints, key)) {
-      const typeCodeString = mapDdlTypeToSpannerCode(ddlHints[key]);
-      // Construct an object conforming to our local SpannerParamType interface,
-      // which is structurally compatible with google.spanner.v1.IType.
-      types[key] = typeCodeString; // mapDdlTypeToSpannerCode returns a string like "STRING"
-    }
-  }
-  return types;
-}
+// function transformDdlHintsToTypes(
+//   ddlHints?: Record<string, string>
+// ): Record<string, string> | undefined {
+//   if (!ddlHints) {
+//     return undefined;
+//   }
+//   const types: Record<string, string> = {};
+//   for (const key in ddlHints) {
+//     if (Object.prototype.hasOwnProperty.call(ddlHints, key)) {
+//       const typeCodeString = mapDdlTypeToSpannerCode(ddlHints[key]);
+//       // Construct an object conforming to our local SpannerParamType interface,
+//       // which is structurally compatible with google.spanner.v1.IType.
+//       types[key] = typeCodeString; // mapDdlTypeToSpannerCode returns a string like "STRING"
+//     }
+//   }
+//   return types;
+// }
 
 export interface SpannerConnectionOptions extends ConnectionOptions {
   projectId: string;
@@ -270,7 +270,7 @@ export class SpannerAdapter implements DatabaseAdapter {
   async execute(
     sql: string,
     params?: Record<string, any>,
-    spannerTypeHints?: Record<string, string>
+    _spannerTypeHints?: Record<string, string>
   ): Promise<number | AffectedRows> {
     const db = this.ensureConnected(); // Relies on connect() having awaited this.ready
     try {
@@ -279,21 +279,21 @@ export class SpannerAdapter implements DatabaseAdapter {
       const rowCount = await db.runTransactionAsync(
         async (transaction: SpannerNativeTransaction) => {
           try {
-            const paramTypes = transformDdlHintsToParamTypes(
-              spannerTypeHints
-            ) as any;
-            const types = transformDdlHintsToTypes(spannerTypeHints);
-            console.log("Before running transaction runUpdate...");
-            console.log(sql);
-            console.log(params);
-            console.log(types);
-            console.log(paramTypes);
+            // const paramTypes = transformDdlHintsToParamTypes(
+            //   spannerTypeHints
+            // ) as any;
+            // const types = transformDdlHintsToTypes(spannerTypeHints);
+            // console.log("Before running transaction runUpdate...");
+            // console.log(sql);
+            // console.log(params);
+            // console.log(types);
+            // console.log(paramTypes);
 
             const [count] = await transaction.runUpdate({
               sql,
               params,
-              types,
-              paramTypes,
+              // types,
+              // paramTypes,
             });
             await transaction.commit();
             return count;
@@ -368,24 +368,24 @@ export class SpannerAdapter implements DatabaseAdapter {
   async query<TResult extends AdapterQueryResultRow = AdapterQueryResultRow>(
     sql: string,
     params?: Record<string, any>,
-    spannerTypeHints?: Record<string, string>
+    _spannerTypeHints?: Record<string, string>
   ): Promise<TResult[]> {
     const db = this.ensureConnected(); // Relies on connect() having awaited this.ready
     try {
-      const paramTypes = transformDdlHintsToParamTypes(spannerTypeHints) as any;
-      const types = transformDdlHintsToTypes(spannerTypeHints);
-      console.log("Before running transaction runUpdate...");
-      console.log(sql);
-      console.log(params);
-      console.log(types);
-      console.log(paramTypes);
+      // const paramTypes = transformDdlHintsToParamTypes(spannerTypeHints) as any;
+      // const types = transformDdlHintsToTypes(spannerTypeHints);
+      // console.log("Before running transaction runUpdate...");
+      // console.log(sql);
+      // console.log(params);
+      // console.log(types);
+      // console.log(paramTypes);
 
       const [rows] = await db.run({
         sql,
         params,
         json: true,
-        types,
-        paramTypes,
+        // types,
+        // paramTypes,
       });
       return rows as TResult[];
     } catch (error) {
@@ -443,7 +443,7 @@ export class SpannerAdapter implements DatabaseAdapter {
   >(
     sql: string,
     params?: Record<string, any>, // Spanner expects Record<string, any>
-    spannerTypeHints?: Record<string, string>
+    _spannerTypeHints?: Record<string, string>
   ): Promise<TResult[]> {
     const db = this.ensureConnected();
     try {
@@ -452,22 +452,22 @@ export class SpannerAdapter implements DatabaseAdapter {
         async (transaction: SpannerNativeTransaction) => {
           try {
             // Use transaction.run() for DML with THEN RETURN
-            const paramTypes = transformDdlHintsToParamTypes(
-              spannerTypeHints
-            ) as any;
-            const types = transformDdlHintsToTypes(spannerTypeHints);
-            console.log("Before running execute and return rows...");
-            console.log(sql);
-            console.log(params);
-            console.log(types);
-            console.log(paramTypes);
+            // const paramTypes = transformDdlHintsToParamTypes(
+            //   spannerTypeHints
+            // ) as any;
+            // const types = transformDdlHintsToTypes(spannerTypeHints);
+            // console.log("Before running execute and return rows...");
+            // console.log(sql);
+            // console.log(params);
+            // console.log(types);
+            // console.log(paramTypes);
 
             const [rows] = await transaction.run({
               sql,
               params,
               json: true,
-              types,
-              paramTypes,
+              // types,
+              // paramTypes,
             });
             await transaction.commit();
             return rows as TResult[];
@@ -576,23 +576,23 @@ export class SpannerAdapter implements DatabaseAdapter {
           execute: async (
             cmdSql,
             cmdParams,
-            cmdSpannerTypeHints?: Record<string, string>
+            _cmdSpannerTypeHints?: Record<string, string>
           ) => {
-            const paramTypes = transformDdlHintsToParamTypes(
-              cmdSpannerTypeHints
-            ) as any;
-            const types = transformDdlHintsToTypes(cmdSpannerTypeHints);
-            console.log("Before running gcp transaction runUpdate...");
-            console.log(cmdSql);
-            console.log(cmdParams);
-            console.log(types);
-            console.log(paramTypes);
+            // const paramTypes = transformDdlHintsToParamTypes(
+            //   cmdSpannerTypeHints
+            // ) as any;
+            // const types = transformDdlHintsToTypes(cmdSpannerTypeHints);
+            // console.log("Before running gcp transaction runUpdate...");
+            // console.log(cmdSql);
+            // console.log(cmdParams);
+            // console.log(types);
+            // console.log(paramTypes);
 
             const [rowCount] = await gcpTransaction.runUpdate({
               sql: cmdSql,
               params: cmdParams,
-              types,
-              paramTypes,
+              // types,
+              // paramTypes,
             });
 
             // const [rowCount] = await gcpTransaction.runUpdate({
@@ -607,24 +607,24 @@ export class SpannerAdapter implements DatabaseAdapter {
           query: async (
             querySql,
             queryParams,
-            querySpannerTypeHints?: Record<string, string>
+            _querySpannerTypeHints?: Record<string, string>
           ) => {
-            const paramTypes = transformDdlHintsToParamTypes(
-              querySpannerTypeHints
-            ) as any;
-            const types = transformDdlHintsToTypes(querySpannerTypeHints);
-            console.log("Before running gcp query transaction runUpdate...");
-            console.log(querySql);
-            console.log(queryParams);
-            console.log(types);
-            console.log(paramTypes);
+            // const paramTypes = transformDdlHintsToParamTypes(
+            //   querySpannerTypeHints
+            // ) as any;
+            // const types = transformDdlHintsToTypes(querySpannerTypeHints);
+            // console.log("Before running gcp query transaction runUpdate...");
+            // console.log(querySql);
+            // console.log(queryParams);
+            // console.log(types);
+            // console.log(paramTypes);
 
             const [rows] = await gcpTransaction.run({
               sql: querySql,
               params: queryParams,
               json: true,
-              types,
-              paramTypes,
+              // types,
+              // paramTypes,
             });
 
             // const [rows] = await gcpTransaction.run({
