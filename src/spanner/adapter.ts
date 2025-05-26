@@ -39,6 +39,125 @@ import type {
 import type { PreparedQuery, TableConfig } from "../types/common.js"; // Corrected path
 import { shapeResults } from "../core/result-shaper.js"; // Corrected path
 
+interface ProcessedInsertParts {
+  sql: string;
+  params?: Record<string, any>;
+  spannerTypeHints?: Record<string, string>;
+}
+
+function processInsertForNulls(
+  originalSql: string,
+  originalParams?: Record<string, any>,
+  originalSpannerTypeHints?: Record<string, string>
+): ProcessedInsertParts {
+  let sql = originalSql;
+  let params = originalParams ? { ...originalParams } : undefined;
+  let spannerTypeHints = originalSpannerTypeHints
+    ? { ...originalSpannerTypeHints }
+    : undefined;
+
+  if (
+    !sql.trim().toUpperCase().startsWith("INSERT INTO") ||
+    !params ||
+    Object.keys(params).length === 0
+  ) {
+    return { sql, params, spannerTypeHints };
+  }
+
+  const insertPattern =
+    /INSERT\s+INTO\s+[\w."]+\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)/i;
+  const match = sql.match(insertPattern);
+
+  if (!match || match.length < 3) {
+    return { sql, params, spannerTypeHints };
+  }
+
+  const originalColumnsPart = match[1];
+  const originalValuesPart = match[2];
+
+  const currentColumns = originalColumnsPart.split(",").map((s) => s.trim());
+  const currentValuePlaceholders = originalValuesPart
+    .split(",")
+    .map((s) => s.trim());
+
+  if (currentColumns.length !== currentValuePlaceholders.length) {
+    return { sql, params, spannerTypeHints };
+  }
+
+  const newColumns: string[] = [];
+  const newValuePlaceholders: string[] = [];
+  const newParams: Record<string, any> = {};
+  const newSpannerTypeHints: Record<string, string> | undefined =
+    spannerTypeHints ? {} : undefined;
+  let modified = false;
+
+  for (let i = 0; i < currentColumns.length; i++) {
+    const column = currentColumns[i];
+    const placeholder = currentValuePlaceholders[i];
+    const paramKey = placeholder.startsWith("@")
+      ? placeholder.substring(1)
+      : column;
+
+    if (params.hasOwnProperty(paramKey) && params[paramKey] === null) {
+      modified = true;
+    } else {
+      newColumns.push(column);
+      newValuePlaceholders.push(placeholder);
+      if (params.hasOwnProperty(paramKey)) {
+        newParams[paramKey] = params[paramKey];
+        if (
+          spannerTypeHints &&
+          spannerTypeHints.hasOwnProperty(paramKey) &&
+          newSpannerTypeHints
+        ) {
+          newSpannerTypeHints[paramKey] = spannerTypeHints[paramKey];
+        }
+      } else {
+        // If paramKey is from column name and not in params, it might be an SQL default or unprovided.
+        // This case should ideally not remove the column if it wasn't explicitly null.
+        // However, our logic is driven by `params[paramKey] === null`.
+        // If `params` doesn't have `paramKey`, it won't be `=== null`.
+      }
+    }
+  }
+
+  if (modified) {
+    if (newColumns.length > 0) {
+      const newColumnsStr = newColumns.join(", ");
+      const newValuePlaceholdersStr = newValuePlaceholders.join(", ");
+
+      const beforeColumnsIndex =
+        match.index! + match[0].indexOf(originalColumnsPart);
+      const afterColumnsBeforeValuesIndex =
+        beforeColumnsIndex + originalColumnsPart.length;
+      const valuesPartIndex =
+        match.index! + match[0].indexOf(originalValuesPart);
+      const afterValuesIndex = valuesPartIndex + originalValuesPart.length;
+
+      sql =
+        originalSql.substring(0, beforeColumnsIndex) +
+        newColumnsStr +
+        originalSql.substring(afterColumnsBeforeValuesIndex, valuesPartIndex) +
+        newValuePlaceholdersStr +
+        originalSql.substring(afterValuesIndex);
+
+      params = newParams;
+      spannerTypeHints = newSpannerTypeHints;
+    } else {
+      console.warn(
+        "SpannerAdapter: All columns in INSERT are null after filtering. Reverting to original SQL and params."
+      );
+      return {
+        sql: originalSql,
+        params: originalParams,
+        spannerTypeHints: originalSpannerTypeHints,
+      };
+    }
+  }
+
+  return { sql, params, spannerTypeHints };
+}
+
 // Helper function to map DDL type strings to Spanner TypeCodes
 function mapDdlTypeToSpannerCode(ddlType: string): string {
   const upperType = ddlType.toUpperCase();
@@ -268,11 +387,18 @@ export class SpannerAdapter implements DatabaseAdapter {
   }
 
   async execute(
-    sql: string,
-    params?: Record<string, any>,
-    spannerTypeHints?: Record<string, string>
+    originalSqlInput: string,
+    originalParamsInput?: Record<string, any>,
+    originalSpannerTypeHintsInput?: Record<string, string>
   ): Promise<number | AffectedRows> {
     const db = this.ensureConnected(); // Relies on connect() having awaited this.ready
+
+    const { sql, params, spannerTypeHints } = processInsertForNulls(
+      originalSqlInput,
+      originalParamsInput,
+      originalSpannerTypeHintsInput
+    );
+
     try {
       // Spanner's runUpdate returns an array where the first element is the affected row count.
       // The result of runTransactionAsync is the result of its callback.
@@ -283,11 +409,13 @@ export class SpannerAdapter implements DatabaseAdapter {
               spannerTypeHints
             ) as any;
             const types = transformDdlHintsToTypes(spannerTypeHints);
-            console.log("Before running transaction runUpdate...");
-            console.log(sql);
-            console.log(params);
-            console.log(types);
-            console.log(paramTypes);
+            console.log(
+              "SpannerAdapter: Executing (potentially modified for NULLs):"
+            );
+            console.log("SQL:", sql);
+            console.log("Params:", params);
+            console.log("Types:", types);
+            console.log("ParamTypes:", paramTypes);
 
             const [count] = await transaction.runUpdate({
               sql,
@@ -298,7 +426,7 @@ export class SpannerAdapter implements DatabaseAdapter {
             await transaction.commit();
             return count;
           } catch (err) {
-            console.error("Error during transaction:", err);
+            console.error("Error during Spanner transaction (execute):", err);
             await transaction.rollback();
             throw err;
           }
@@ -366,23 +494,27 @@ export class SpannerAdapter implements DatabaseAdapter {
   }
 
   async query<TResult extends AdapterQueryResultRow = AdapterQueryResultRow>(
-    sql: string,
-    params?: Record<string, any>,
-    spannerTypeHints?: Record<string, string>
+    sqlInput: string, // Renamed to avoid conflict if we ever process SELECTs
+    paramsInput?: Record<string, any>,
+    spannerTypeHintsInput?: Record<string, string>
   ): Promise<TResult[]> {
     const db = this.ensureConnected(); // Relies on connect() having awaited this.ready
     try {
-      const paramTypes = transformDdlHintsToParamTypes(spannerTypeHints) as any;
-      const types = transformDdlHintsToTypes(spannerTypeHints);
-      console.log("Before running transaction runUpdate...");
-      console.log(sql);
-      console.log(params);
-      console.log(types);
-      console.log(paramTypes);
+      // Null processing is typically for INSERTs, not SELECTs.
+      // So, we use inputs directly here.
+      const paramTypes = transformDdlHintsToParamTypes(
+        spannerTypeHintsInput
+      ) as any;
+      const types = transformDdlHintsToTypes(spannerTypeHintsInput);
+      console.log("SpannerAdapter: Executing query:");
+      console.log("SQL:", sqlInput);
+      console.log("Params:", paramsInput);
+      console.log("Types:", types);
+      console.log("ParamTypes:", paramTypes);
 
       const [rows] = await db.run({
-        sql,
-        params,
+        sql: sqlInput,
+        params: paramsInput,
         json: true,
         types,
         paramTypes,
@@ -398,19 +530,17 @@ export class SpannerAdapter implements DatabaseAdapter {
     preparedQuery: PreparedQuery<TTable>
   ): Promise<any[]> {
     // ensureConnected will be called by this.query
+    // Null processing is not applied here as queryPrepared is for SELECTs
     try {
       let spannerParams: Record<string, any> | undefined;
 
       if (preparedQuery.parameters) {
         if (Array.isArray(preparedQuery.parameters)) {
-          // If it's an array (e.g., from raw SQL or a misconfigured call), convert it
           spannerParams = {};
           preparedQuery.parameters.forEach((val, i) => {
             spannerParams![`p${i + 1}`] = val;
           });
         } else {
-          // If it's already an object (Record<string, unknown>), use it directly
-          // Cast to Record<string, any> as Spanner client expects `any` for values
           spannerParams = preparedQuery.parameters as Record<string, any>;
         }
       }
@@ -441,11 +571,18 @@ export class SpannerAdapter implements DatabaseAdapter {
   async executeAndReturnRows<
     TResult extends AdapterQueryResultRow = AdapterQueryResultRow
   >(
-    sql: string,
-    params?: Record<string, any>, // Spanner expects Record<string, any>
-    spannerTypeHints?: Record<string, string>
+    originalSqlInput: string,
+    originalParamsInput?: Record<string, any>,
+    originalSpannerTypeHintsInput?: Record<string, string>
   ): Promise<TResult[]> {
     const db = this.ensureConnected();
+
+    const { sql, params, spannerTypeHints } = processInsertForNulls(
+      originalSqlInput,
+      originalParamsInput,
+      originalSpannerTypeHintsInput
+    );
+
     try {
       // Use runTransactionAsync to ensure a read-write transaction
       return await db.runTransactionAsync(
@@ -456,11 +593,13 @@ export class SpannerAdapter implements DatabaseAdapter {
               spannerTypeHints
             ) as any;
             const types = transformDdlHintsToTypes(spannerTypeHints);
-            console.log("Before running execute and return rows...");
-            console.log(sql);
-            console.log(params);
-            console.log(types);
-            console.log(paramTypes);
+            console.log(
+              "SpannerAdapter: Executing and returning rows (potentially modified for NULLs):"
+            );
+            console.log("SQL:", sql);
+            console.log("Params:", params);
+            console.log("Types:", types);
+            console.log("ParamTypes:", paramTypes);
 
             const [rows] = await transaction.run({
               sql,
@@ -472,7 +611,10 @@ export class SpannerAdapter implements DatabaseAdapter {
             await transaction.commit();
             return rows as TResult[];
           } catch (err) {
-            console.error("Error during transaction:", err);
+            console.error(
+              "Error during Spanner transaction (executeAndReturnRows):",
+              err
+            );
             await transaction.rollback();
             throw err;
           }
@@ -574,19 +716,31 @@ export class SpannerAdapter implements DatabaseAdapter {
       async (gcpTransaction: SpannerNativeTransaction) => {
         const txExecutor: OrmTransaction = {
           execute: async (
-            cmdSql,
-            cmdParams,
-            cmdSpannerTypeHints?: Record<string, string>
+            originalCmdSql: string,
+            originalCmdParams?: Record<string, any>,
+            originalCmdSpannerTypeHints?: Record<string, string>
           ) => {
+            const {
+              sql: cmdSql,
+              params: cmdParams,
+              spannerTypeHints: cmdSpannerTypeHints,
+            } = processInsertForNulls(
+              originalCmdSql,
+              originalCmdParams,
+              originalCmdSpannerTypeHints
+            );
+
             const paramTypes = transformDdlHintsToParamTypes(
               cmdSpannerTypeHints
             ) as any;
             const types = transformDdlHintsToTypes(cmdSpannerTypeHints);
-            console.log("Before running gcp transaction runUpdate...");
-            console.log(cmdSql);
-            console.log(cmdParams);
-            console.log(types);
-            console.log(paramTypes);
+            console.log(
+              "SpannerAdapter Transaction: Executing (potentially modified for NULLs):"
+            );
+            console.log("SQL:", cmdSql);
+            console.log("Params:", cmdParams);
+            console.log("Types:", types);
+            console.log("ParamTypes:", paramTypes);
 
             const [rowCount] = await gcpTransaction.runUpdate({
               sql: cmdSql,
@@ -594,30 +748,22 @@ export class SpannerAdapter implements DatabaseAdapter {
               types,
               paramTypes,
             });
-
-            // const [rowCount] = await gcpTransaction.runUpdate({
-            //   sql: cmdSql,
-            //   params: cmdParams as Record<string, any> | undefined,
-            //   paramTypes: transformDdlHintsToParamTypes(
-            //     cmdSpannerTypeHints
-            //   ) as any,
-            // });
             return { count: rowCount };
           },
           query: async (
-            querySql,
+            querySql, // Not modified for nulls as it's a query
             queryParams,
-            querySpannerTypeHints?: Record<string, string>
+            querySpannerTypeHints
           ) => {
             const paramTypes = transformDdlHintsToParamTypes(
               querySpannerTypeHints
             ) as any;
             const types = transformDdlHintsToTypes(querySpannerTypeHints);
-            console.log("Before running gcp query transaction runUpdate...");
-            console.log(querySql);
-            console.log(queryParams);
-            console.log(types);
-            console.log(paramTypes);
+            console.log("SpannerAdapter Transaction: Executing query:");
+            console.log("SQL:", querySql);
+            console.log("Params:", queryParams);
+            console.log("Types:", types);
+            console.log("ParamTypes:", paramTypes);
 
             const [rows] = await gcpTransaction.run({
               sql: querySql,
@@ -626,15 +772,6 @@ export class SpannerAdapter implements DatabaseAdapter {
               types,
               paramTypes,
             });
-
-            // const [rows] = await gcpTransaction.run({
-            //   sql: querySql,
-            //   params: queryParams as Record<string, any> | undefined,
-            //   json: true,
-            //   paramTypes: transformDdlHintsToParamTypes(
-            //     querySpannerTypeHints
-            //   ) as any,
-            // });
             return rows as any[];
           },
           commit: async () => {
