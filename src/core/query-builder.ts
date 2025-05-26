@@ -1217,11 +1217,17 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     if (!this._targetTable) throw new Error("Target table not set for UPDATE.");
     if (!this._updateSetValues)
       throw new Error("SET values not provided for UPDATE.");
-    const setParts = Object.entries(this._updateSetValues)
-      .map(([tsKey, value]) => {
+
+    const sortedUpdateKeys = Object.keys(this._updateSetValues).sort();
+
+    const setParts = sortedUpdateKeys
+      .map((tsKey) => {
+        const value =
+          this._updateSetValues![tsKey as keyof typeof this._updateSetValues];
         const columnConfig = this._targetTable!.columns[tsKey] as ColumnConfig<
           any,
-          any
+          any,
+          OrmColumnType
         >;
         if (!columnConfig)
           throw new Error(
@@ -1587,7 +1593,10 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
     }
 
     if (this._operationType === "update" && this._updateSetValues) {
-      for (const [tsKey, value] of Object.entries(this._updateSetValues)) {
+      const sortedUpdateKeys = Object.keys(this._updateSetValues).sort();
+      for (const tsKey of sortedUpdateKeys) {
+        const value =
+          this._updateSetValues[tsKey as keyof typeof this._updateSetValues];
         const columnConfig = this._targetTable!.columns[tsKey] as ColumnConfig<
           any,
           any,
@@ -1670,7 +1679,7 @@ export class QueryBuilder<TTable extends TableConfig<any, any>> {
         if (
           paramItem.value === null &&
           paramItem.columnConfig &&
-          paramItem.columnConfig.type // Ensure type exists on columnConfig
+          paramItem.columnConfig.type
         ) {
           const spannerType = this.getSpannerPhysicalType(
             paramItem.columnConfig.type
