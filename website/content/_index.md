@@ -9,6 +9,10 @@ Inspired by Drizzle ORM, `spanner-orm` aims to provide a single, elegant object 
 
 Find it on NPM at https://www.npmjs.com/package/spanner-orm or on github at https://github.com/Flux159/spanner-orm/
 
+## Quickstart
+
+Read the [getting started doc](https://flux159.github.io/spanner-orm/docs/getting-started/).
+
 ## Key Requirements & Design Goals
 
 `spanner-orm` is built to address the following key requirements for developers working with PostgreSQL and Google Spanner:
