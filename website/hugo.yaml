@@ -16,10 +16,12 @@ markup:
   highlight:
     noClasses: false
 
+baseUrl: https://flux159.github.io/spanner-orm/
+
 menu:
   main:
     - name: Docs
-      pageRef: /docs
+      pageRef: docs
       weight: 1
     - name: Search
       weight: 4
@@ -38,8 +40,4 @@ params:
 
   footer:
     displayCopyright: false
-    displayPoweredBy: true
-
-  editURL:
-    enable: true
-    base: "https://github.com/imfing/hextra-starter-template/edit/main/content"
+    displayPoweredBy: false
