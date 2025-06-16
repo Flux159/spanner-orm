@@ -11,7 +11,7 @@ export {
   boolean,
   timestamp,
   // date, // Not exported from schema.ts
-  // json, // Not exported from schema.ts (jsonb is)
+  json,
   jsonb,
   uuid,
   // array, // Not exported from schema.ts
