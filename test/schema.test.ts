@@ -9,6 +9,7 @@ import {
   boolean,
   timestamp,
   jsonb,
+  json,
   sql,
   index,
   uniqueIndex,
@@ -26,6 +27,7 @@ describe("Schema Builder", () => {
         age: integer("age").default(0),
         isAdmin: boolean("is_admin").default(false),
         settings: jsonb("settings"),
+        metadata: json("metadata"),
         lastLogin: timestamp("last_login").default(sql`CURRENT_TIMESTAMP`),
         apiKey: varchar("api_key", { length: 64 }),
       },
@@ -75,6 +77,12 @@ describe("Schema Builder", () => {
     expect(users.columns.settings.dialectTypes.postgres).toBe("JSONB");
     expect(users.columns.settings.dialectTypes.spanner).toBe("JSON");
 
+    // Check metadata column
+    expect(users.columns.metadata.name).toBe("metadata");
+    expect(users.columns.metadata.type).toBe("json");
+    expect(users.columns.metadata.dialectTypes.postgres).toBe("JSON");
+    expect(users.columns.metadata.dialectTypes.spanner).toBe("JSON");
+
     // Check lastLogin column
     expect(users.columns.lastLogin.name).toBe("last_login");
     expect(users.columns.lastLogin.type).toBe("timestamp");
@@ -119,6 +127,7 @@ describe("Schema Builder", () => {
       age: 30,
       isAdmin: true,
       settings: { theme: "dark" },
+      metadata: { tags: ["a", "b"] },
       lastLogin: new Date(),
       apiKey: "secretkey",
     };

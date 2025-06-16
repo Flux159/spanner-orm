@@ -207,6 +207,15 @@ class JsonbColumnBuilder<
   }
 }
 
+class JsonColumnBuilder<
+  TName extends string,
+  TJsonType = unknown
+> extends BaseColumnBuilder<TJsonType, TName> {
+  constructor(name: TName) {
+    super(name, "json", { postgres: "JSON", spanner: "JSON" });
+  }
+}
+
 // --- Column Functions (User-facing API) ---
 
 export function text<TName extends string>(
@@ -245,6 +254,12 @@ export function jsonb<TName extends string, TJsonType = unknown>( // Changed any
   name: TName
 ): JsonbColumnBuilder<TName, TJsonType> {
   return new JsonbColumnBuilder<TName, TJsonType>(name);
+}
+
+export function json<TName extends string, TJsonType = unknown>(
+  name: TName
+): JsonColumnBuilder<TName, TJsonType> {
+  return new JsonColumnBuilder<TName, TJsonType>(name);
 }
 
 // --- Table Definition ---
