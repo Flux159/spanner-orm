@@ -6,7 +6,7 @@ export type OnDeleteAction =
   | "cascade"
   | "restrict"
   | "no action"
-  | "set null"
+  // | "set null" // Not supported in Spanner
   | "set default";
 
 export interface ForeignKeyConfig {
