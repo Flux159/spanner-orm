@@ -115,6 +115,29 @@ function mapDdlTypeToSpannerCode(ddlType: string): string {
   return "STRING";
 }
 
+// Helper function to map type string to Spanner TypeCode enum number
+function getSpannerTypeCodeEnum(typeString: string): number {
+  const typeCodeMap: Record<string, number> = {
+    'BOOL': 1,
+    'INT64': 2,
+    'FLOAT64': 3,
+    'TIMESTAMP': 4,
+    'DATE': 5,
+    'STRING': 6,
+    'BYTES': 7,
+    'ARRAY': 8,
+    'STRUCT': 9,
+    'NUMERIC': 10,
+    'JSON': 11,
+    'PROTO': 13,
+    'ENUM': 14,
+    'FLOAT32': 15,
+    'INTERVAL': 16,
+    'UUID': 17,
+  };
+  return typeCodeMap[typeString] || 6; // Default to STRING (6) if unknown
+}
+
 // Helper function to transform DDL hints to Spanner paramTypes object
 function transformDdlHintsToParamTypes(
   ddlHints?: Record<string, string>
@@ -129,7 +152,7 @@ function transformDdlHintsToParamTypes(
       // Construct an object conforming to our local SpannerParamType interface,
       // which is structurally compatible with google.spanner.v1.IType.
       paramTypes[key] = {
-        code: typeCodeString, // mapDdlTypeToSpannerCode returns a string like "STRING"
+        code: getSpannerTypeCodeEnum(typeCodeString), // Use numeric TypeCode enum value
         arrayElementType: null, // Assuming scalar types for now
         structType: null, // Assuming scalar types for now
       };
