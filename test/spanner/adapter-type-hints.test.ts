@@ -112,6 +112,8 @@ class TestableSpannerAdapter {
     if (!params) return undefined;
     
     const cleaned: Record<string, any> = {};
+    let hasKeys = false;
+    
     for (const key in params) {
       if (Object.prototype.hasOwnProperty.call(params, key)) {
         const hint = typeHints?.[key];
@@ -121,9 +123,12 @@ class TestableSpannerAdapter {
         } else {
           cleaned[key] = params[key];
         }
+        hasKeys = true;
       }
     }
-    return cleaned;
+    
+    // Return undefined if params is empty to avoid sending empty object to Spanner
+    return hasKeys ? cleaned : undefined;
   }
 
   // Helper function to automatically infer Spanner types from JavaScript values
@@ -213,9 +218,13 @@ class TestableSpannerAdapter {
     
     const queryOptions: any = {
       sql,
-      params: cleanedParams,
       json: true,
     };
+    
+    // Only add params if they exist
+    if (cleanedParams !== undefined) {
+      queryOptions.params = cleanedParams;
+    }
     
     // Add types if provided or inferred
     if (mergedHints) {
@@ -244,8 +253,12 @@ class TestableSpannerAdapter {
       async (transaction: any) => {
         const updateOptions: any = {
           sql,
-          params: cleanedParams,
         };
+        
+        // Only add params if they exist
+        if (cleanedParams !== undefined) {
+          updateOptions.params = cleanedParams;
+        }
         
         // Add types if provided or inferred
         if (mergedHints) {
@@ -278,9 +291,13 @@ class TestableSpannerAdapter {
       async (transaction: any) => {
         const queryOptions: any = {
           sql,
-          params: cleanedParams,
           json: true,
         };
+        
+        // Only add params if they exist
+        if (cleanedParams !== undefined) {
+          queryOptions.params = cleanedParams;
+        }
         
         // Add types if provided or inferred
         if (mergedHints) {
@@ -311,8 +328,12 @@ class TestableSpannerAdapter {
         const cleanedParams = this.cleanParamsForSpanner(paramsCmd, mergedHints);
         const updateOptions: any = {
           sql: sqlCmd,
-          params: cleanedParams,
         };
+        
+        // Only add params if they exist
+        if (cleanedParams !== undefined) {
+          updateOptions.params = cleanedParams;
+        }
         
         if (mergedHints) {
           updateOptions.types = mergedHints;
@@ -331,9 +352,13 @@ class TestableSpannerAdapter {
         const cleanedParams = this.cleanParamsForSpanner(paramsQuery, mergedHints);
         const queryOptions: any = {
           sql: sqlQuery,
-          params: cleanedParams,
           json: true,
         };
+        
+        // Only add params if they exist
+        if (cleanedParams !== undefined) {
+          queryOptions.params = cleanedParams;
+        }
         
         if (mergedHints) {
           queryOptions.types = mergedHints;
@@ -368,8 +393,12 @@ class TestableSpannerAdapter {
             const cleanedParams = this.cleanParamsForSpanner(cmdParams, mergedHints);
             const updateOptions: any = {
               sql: cmdSql,
-              params: cleanedParams,
             };
+            
+            // Only add params if they exist
+            if (cleanedParams !== undefined) {
+              updateOptions.params = cleanedParams;
+            }
             
             if (mergedHints) {
               updateOptions.types = mergedHints;
@@ -388,9 +417,13 @@ class TestableSpannerAdapter {
             const cleanedParams = this.cleanParamsForSpanner(queryParams, mergedHints);
             const queryOptions: any = {
               sql: querySql,
-              params: cleanedParams,
               json: true,
             };
+            
+            // Only add params if they exist
+            if (cleanedParams !== undefined) {
+              queryOptions.params = cleanedParams;
+            }
             
             if (mergedHints) {
               queryOptions.types = mergedHints;
