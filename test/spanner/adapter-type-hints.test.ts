@@ -126,6 +126,75 @@ class TestableSpannerAdapter {
     return cleaned;
   }
 
+  // Helper function to automatically infer Spanner types from JavaScript values
+  private inferSpannerTypeFromValue(value: any): string {
+    if (value === null || value === undefined) {
+      return "STRING";
+    }
+    
+    if (typeof value === 'string') {
+      return "STRING";
+    }
+    
+    if (typeof value === 'number') {
+      if (Number.isInteger(value)) {
+        return "INT64";
+      }
+      return "FLOAT64";
+    }
+    
+    if (typeof value === 'boolean') {
+      return "BOOL";
+    }
+    
+    if (value instanceof Date) {
+      return "TIMESTAMP";
+    }
+    
+    if (Buffer.isBuffer(value) || value instanceof Uint8Array) {
+      return "BYTES";
+    }
+    
+    if (typeof value === 'object') {
+      return "JSON";
+    }
+    
+    return "STRING";
+  }
+
+  // Helper function to automatically generate type hints from parameters
+  private generateTypeHintsFromParams(params?: Record<string, any>): Record<string, string> | undefined {
+    if (!params) return undefined;
+    
+    const typeHints: Record<string, string> = {};
+    for (const key in params) {
+      if (Object.prototype.hasOwnProperty.call(params, key)) {
+        typeHints[key] = this.inferSpannerTypeFromValue(params[key]);
+      }
+    }
+    return typeHints;
+  }
+
+  // Helper function to merge provided hints with inferred hints
+  private mergeTypeHints(
+    providedHints?: Record<string, string>,
+    params?: Record<string, any>
+  ): Record<string, string> | undefined {
+    if (!params && !providedHints) return undefined;
+    
+    const inferredHints = this.generateTypeHintsFromParams(params);
+    
+    if (!providedHints) {
+      return inferredHints;
+    }
+    
+    if (!inferredHints) {
+      return providedHints;
+    }
+    
+    return { ...inferredHints, ...providedHints };
+  }
+
   async query<T = any>(
     sql: string,
     params?: Record<string, any>,
@@ -133,8 +202,11 @@ class TestableSpannerAdapter {
   ): Promise<T[]> {
     const db = this.ensureConnected();
     
+    // Merge provided hints with inferred hints
+    const mergedHints = this.mergeTypeHints(spannerTypeHints, params);
+    
     // Clean params if they contain JSON
-    const cleanedParams = this.cleanParamsForSpanner(params, spannerTypeHints);
+    const cleanedParams = this.cleanParamsForSpanner(params, mergedHints);
     
     const queryOptions: any = {
       sql,
@@ -142,10 +214,10 @@ class TestableSpannerAdapter {
       json: true,
     };
     
-    // Add types if provided
-    if (spannerTypeHints) {
-      queryOptions.types = spannerTypeHints;
-      queryOptions.paramTypes = spannerTypeHints; // Mock uses this to detect type hints
+    // Add types if provided or inferred
+    if (mergedHints) {
+      queryOptions.types = mergedHints;
+      queryOptions.paramTypes = mergedHints; // Mock uses this to detect type hints
     }
 
     const [rows] = await db.run(queryOptions);
@@ -159,8 +231,11 @@ class TestableSpannerAdapter {
   ): Promise<{ count: number }> {
     const db = this.ensureConnected();
     
+    // Merge provided hints with inferred hints
+    const mergedHints = this.mergeTypeHints(spannerTypeHints, params);
+    
     // Clean params if they contain JSON
-    const cleanedParams = this.cleanParamsForSpanner(params, spannerTypeHints);
+    const cleanedParams = this.cleanParamsForSpanner(params, mergedHints);
 
     const rowCount = await db.runTransactionAsync(
       async (transaction: any) => {
@@ -169,10 +244,10 @@ class TestableSpannerAdapter {
           params: cleanedParams,
         };
         
-        // Add types if provided
-        if (spannerTypeHints) {
-          updateOptions.types = spannerTypeHints;
-          updateOptions.paramTypes = spannerTypeHints;
+        // Add types if provided or inferred
+        if (mergedHints) {
+          updateOptions.types = mergedHints;
+          updateOptions.paramTypes = mergedHints;
         }
 
         const [count] = await transaction.runUpdate(updateOptions);
@@ -190,8 +265,11 @@ class TestableSpannerAdapter {
   ): Promise<T[]> {
     const db = this.ensureConnected();
     
+    // Merge provided hints with inferred hints
+    const mergedHints = this.mergeTypeHints(spannerTypeHints, params);
+    
     // Clean params if they contain JSON
-    const cleanedParams = this.cleanParamsForSpanner(params, spannerTypeHints);
+    const cleanedParams = this.cleanParamsForSpanner(params, mergedHints);
 
     return await db.runTransactionAsync(
       async (transaction: any) => {
@@ -201,10 +279,10 @@ class TestableSpannerAdapter {
           json: true,
         };
         
-        // Add types if provided
-        if (spannerTypeHints) {
-          queryOptions.types = spannerTypeHints;
-          queryOptions.paramTypes = spannerTypeHints;
+        // Add types if provided or inferred
+        if (mergedHints) {
+          queryOptions.types = mergedHints;
+          queryOptions.paramTypes = mergedHints;
         }
 
         const [rows] = await transaction.run(queryOptions);
@@ -226,15 +304,16 @@ class TestableSpannerAdapter {
       ) => {
         if (spannerTx.begin) await spannerTx.begin();
         
-        const cleanedParams = this.cleanParamsForSpanner(paramsCmd, cmdSpannerTypeHints);
+        const mergedHints = this.mergeTypeHints(cmdSpannerTypeHints, paramsCmd);
+        const cleanedParams = this.cleanParamsForSpanner(paramsCmd, mergedHints);
         const updateOptions: any = {
           sql: sqlCmd,
           params: cleanedParams,
         };
         
-        if (cmdSpannerTypeHints) {
-          updateOptions.types = cmdSpannerTypeHints;
-          updateOptions.paramTypes = cmdSpannerTypeHints;
+        if (mergedHints) {
+          updateOptions.types = mergedHints;
+          updateOptions.paramTypes = mergedHints;
         }
 
         const [rowCount] = await spannerTx.runUpdate(updateOptions);
@@ -245,16 +324,17 @@ class TestableSpannerAdapter {
         paramsQuery?: Record<string, any>,
         querySpannerTypeHints?: Record<string, string>
       ): Promise<T[]> => {
-        const cleanedParams = this.cleanParamsForSpanner(paramsQuery, querySpannerTypeHints);
+        const mergedHints = this.mergeTypeHints(querySpannerTypeHints, paramsQuery);
+        const cleanedParams = this.cleanParamsForSpanner(paramsQuery, mergedHints);
         const queryOptions: any = {
           sql: sqlQuery,
           params: cleanedParams,
           json: true,
         };
         
-        if (querySpannerTypeHints) {
-          queryOptions.types = querySpannerTypeHints;
-          queryOptions.paramTypes = querySpannerTypeHints;
+        if (mergedHints) {
+          queryOptions.types = mergedHints;
+          queryOptions.paramTypes = mergedHints;
         }
 
         const [rows] = await spannerTx.run(queryOptions);
@@ -281,15 +361,16 @@ class TestableSpannerAdapter {
             cmdParams?: Record<string, any>,
             cmdSpannerTypeHints?: Record<string, string>
           ) => {
-            const cleanedParams = this.cleanParamsForSpanner(cmdParams, cmdSpannerTypeHints);
+            const mergedHints = this.mergeTypeHints(cmdSpannerTypeHints, cmdParams);
+            const cleanedParams = this.cleanParamsForSpanner(cmdParams, mergedHints);
             const updateOptions: any = {
               sql: cmdSql,
               params: cleanedParams,
             };
             
-            if (cmdSpannerTypeHints) {
-              updateOptions.types = cmdSpannerTypeHints;
-              updateOptions.paramTypes = cmdSpannerTypeHints;
+            if (mergedHints) {
+              updateOptions.types = mergedHints;
+              updateOptions.paramTypes = mergedHints;
             }
 
             const [rowCount] = await gcpTransaction.runUpdate(updateOptions);
@@ -300,16 +381,17 @@ class TestableSpannerAdapter {
             queryParams?: Record<string, any>,
             querySpannerTypeHints?: Record<string, string>
           ) => {
-            const cleanedParams = this.cleanParamsForSpanner(queryParams, querySpannerTypeHints);
+            const mergedHints = this.mergeTypeHints(querySpannerTypeHints, queryParams);
+            const cleanedParams = this.cleanParamsForSpanner(queryParams, mergedHints);
             const queryOptions: any = {
               sql: querySql,
               params: cleanedParams,
               json: true,
             };
             
-            if (querySpannerTypeHints) {
-              queryOptions.types = querySpannerTypeHints;
-              queryOptions.paramTypes = querySpannerTypeHints;
+            if (mergedHints) {
+              queryOptions.types = mergedHints;
+              queryOptions.paramTypes = mergedHints;
             }
 
             const [rows] = await gcpTransaction.run(queryOptions);
@@ -392,11 +474,12 @@ describe("SpannerAdapter Type Hints", () => {
       expect(result).toEqual([{ result: "with_types" }]);
     });
 
-    it("should work without type hints", async () => {
+    it("should automatically infer types when no hints provided", async () => {
       const params = { p1: "test", p2: 123 };
 
       const result = await adapter.query("SELECT * FROM test", params);
-      expect(result).toEqual([{ result: "no_types" }]);
+      // Types are now auto-inferred, so it should return "with_types"
+      expect(result).toEqual([{ result: "with_types" }]);
     });
 
     it("should pass type hints to execute method", async () => {
@@ -407,11 +490,12 @@ describe("SpannerAdapter Type Hints", () => {
       expect(result).toEqual({ count: 1 });
     });
 
-    it("should work without type hints in execute", async () => {
+    it("should automatically infer types in execute when no hints provided", async () => {
       const params = { p1: "test" };
 
       const result = await adapter.execute("UPDATE test SET col = @p1", params);
-      expect(result).toEqual({ count: 0 });
+      // Types are now auto-inferred, so it should return count: 1
+      expect(result).toEqual({ count: 1 });
     });
 
     it("should pass type hints to executeAndReturnRows method", async () => {
@@ -507,7 +591,7 @@ describe("SpannerAdapter Type Hints", () => {
       expect(result).toEqual([{ result: "with_types" }]);
     });
 
-    it("should work without type hints in transaction", async () => {
+    it("should automatically infer types in transaction when no hints provided", async () => {
       const result = await adapter.transaction(async (tx) => {
         const params = { p1: "test" };
         
@@ -515,7 +599,8 @@ describe("SpannerAdapter Type Hints", () => {
         return queryResult;
       });
 
-      expect(result).toEqual([{ result: "no_types" }]);
+      // Types are now auto-inferred, so it should return "with_types"
+      expect(result).toEqual([{ result: "with_types" }]);
     });
   });
 
@@ -583,6 +668,93 @@ describe("SpannerAdapter Type Hints", () => {
 
       // Should clean undefined but keep null
       const result = await adapter.query("SELECT * FROM test", params, typeHints);
+      expect(result).toEqual([{ result: "with_types" }]);
+    });
+  });
+
+  describe("Automatic Type Inference", () => {
+    it("should automatically infer types when no hints provided", async () => {
+      const params = {
+        stringParam: "test",
+        intParam: 42,
+        floatParam: 3.14,
+        boolParam: true,
+        dateParam: new Date(),
+        jsonParam: { key: "value" },
+        arrayParam: [1, 2, 3],
+      };
+
+      // No type hints provided - should auto-infer and still pass types
+      const result = await adapter.query("SELECT * FROM test", params);
+      // Since types are auto-inferred, mock should see types and return "with_types"
+      expect(result).toEqual([{ result: "with_types" }]);
+    });
+
+    it("should use provided hints over inferred types", async () => {
+      const params = {
+        p1: 42, // Would normally infer as INT64
+        p2: "123", // String that could be a number
+      };
+
+      const typeHints = {
+        p1: "STRING", // Override to STRING
+        p2: "INT64", // Override to INT64
+      };
+
+      const result = await adapter.query("SELECT * FROM test", params, typeHints);
+      expect(result).toEqual([{ result: "with_types" }]);
+    });
+
+    it("should handle null values with auto-inference", async () => {
+      const params = {
+        p1: null,
+        p2: "value",
+        p3: 123,
+      };
+
+      // No hints provided - nulls will default to STRING
+      const result = await adapter.query("SELECT * FROM test", params);
+      expect(result).toEqual([{ result: "with_types" }]);
+    });
+
+    it("should auto-infer JSON type for objects", async () => {
+      const params = {
+        data: {
+          nested: {
+            field: "value",
+            number: 123,
+          },
+        },
+      };
+
+      // No hints - should auto-detect as JSON
+      const result = await adapter.query("SELECT * FROM test", params);
+      expect(result).toEqual([{ result: "with_types" }]);
+    });
+
+    it("should work in execute with auto-inference", async () => {
+      const params = {
+        name: "test",
+        age: 30,
+        active: true,
+      };
+
+      // No hints provided
+      const result = await adapter.execute("UPDATE users SET name = @name", params);
+      expect(result).toEqual({ count: 1 });
+    });
+
+    it("should work in transactions with auto-inference", async () => {
+      const result = await adapter.transaction(async (tx) => {
+        const params = {
+          id: 1,
+          data: { key: "value" },
+        };
+        
+        // No type hints - should auto-infer
+        return await tx.query("SELECT * FROM test", params);
+      });
+
       expect(result).toEqual([{ result: "with_types" }]);
     });
   });

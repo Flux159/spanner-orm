@@ -204,6 +204,81 @@ function cleanParamsForSpanner(
   return cleaned;
 }
 
+// Helper function to automatically infer Spanner types from JavaScript values
+function inferSpannerTypeFromValue(value: any): string {
+  if (value === null || value === undefined) {
+    // For null/undefined, we can't infer type, default to STRING
+    return "STRING";
+  }
+  
+  if (typeof value === 'string') {
+    return "STRING";
+  }
+  
+  if (typeof value === 'number') {
+    // Check if it's an integer or float
+    if (Number.isInteger(value)) {
+      return "INT64";
+    }
+    return "FLOAT64";
+  }
+  
+  if (typeof value === 'boolean') {
+    return "BOOL";
+  }
+  
+  if (value instanceof Date) {
+    return "TIMESTAMP";
+  }
+  
+  if (Buffer.isBuffer(value) || value instanceof Uint8Array) {
+    return "BYTES";
+  }
+  
+  if (typeof value === 'object') {
+    // For objects and arrays, use JSON type
+    return "JSON";
+  }
+  
+  // Default fallback
+  return "STRING";
+}
+
+// Helper function to automatically generate type hints from parameters
+function generateTypeHintsFromParams(params?: Record<string, any>): Record<string, string> | undefined {
+  if (!params) return undefined;
+  
+  const typeHints: Record<string, string> = {};
+  for (const key in params) {
+    if (Object.prototype.hasOwnProperty.call(params, key)) {
+      typeHints[key] = inferSpannerTypeFromValue(params[key]);
+    }
+  }
+  return typeHints;
+}
+
+// Helper function to merge provided hints with inferred hints
+function mergeTypeHints(
+  providedHints?: Record<string, string>,
+  params?: Record<string, any>
+): Record<string, string> | undefined {
+  if (!params && !providedHints) return undefined;
+  
+  // Generate automatic hints from params
+  const inferredHints = generateTypeHintsFromParams(params);
+  
+  if (!providedHints) {
+    return inferredHints;
+  }
+  
+  if (!inferredHints) {
+    return providedHints;
+  }
+  
+  // Merge, with provided hints taking precedence
+  return { ...inferredHints, ...providedHints };
+}
+
 // Helper function to provide better error messages
 function enhanceSpannerError(error: any, params?: Record<string, any>): Error {
   const errorMessage = error.message || '';
@@ -395,10 +470,13 @@ export class SpannerAdapter implements DatabaseAdapter {
   ): Promise<number | AffectedRows> {
     const db = this.ensureConnected(); // Relies on connect() having awaited this.ready
     try {
+      // Merge provided hints with inferred hints
+      const mergedHints = mergeTypeHints(spannerTypeHints, params);
+      
       // Clean params if they contain JSON
-      const cleanedParams = cleanParamsForSpanner(params, spannerTypeHints);
-      const paramTypes = transformDdlHintsToParamTypes(spannerTypeHints) as any;
-      const types = transformDdlHintsToTypes(spannerTypeHints);
+      const cleanedParams = cleanParamsForSpanner(params, mergedHints);
+      const paramTypes = transformDdlHintsToParamTypes(mergedHints) as any;
+      const types = transformDdlHintsToTypes(mergedHints);
 
       // Spanner's runUpdate returns an array where the first element is the affected row count.
       // The result of runTransactionAsync is the result of its callback.
@@ -496,10 +574,13 @@ export class SpannerAdapter implements DatabaseAdapter {
   ): Promise<TResult[]> {
     const db = this.ensureConnected(); // Relies on connect() having awaited this.ready
     try {
+      // Merge provided hints with inferred hints
+      const mergedHints = mergeTypeHints(spannerTypeHints, params);
+      
       // Clean params if they contain JSON
-      const cleanedParams = cleanParamsForSpanner(params, spannerTypeHints);
-      const paramTypes = transformDdlHintsToParamTypes(spannerTypeHints) as any;
-      const types = transformDdlHintsToTypes(spannerTypeHints);
+      const cleanedParams = cleanParamsForSpanner(params, mergedHints);
+      const paramTypes = transformDdlHintsToParamTypes(mergedHints) as any;
+      const types = transformDdlHintsToTypes(mergedHints);
 
       const queryOptions: any = {
         sql,
@@ -576,10 +657,13 @@ export class SpannerAdapter implements DatabaseAdapter {
   ): Promise<TResult[]> {
     const db = this.ensureConnected();
     try {
+      // Merge provided hints with inferred hints
+      const mergedHints = mergeTypeHints(spannerTypeHints, params);
+      
       // Clean params if they contain JSON
-      const cleanedParams = cleanParamsForSpanner(params, spannerTypeHints);
-      const paramTypes = transformDdlHintsToParamTypes(spannerTypeHints) as any;
-      const types = transformDdlHintsToTypes(spannerTypeHints);
+      const cleanedParams = cleanParamsForSpanner(params, mergedHints);
+      const paramTypes = transformDdlHintsToParamTypes(mergedHints) as any;
+      const types = transformDdlHintsToTypes(mergedHints);
 
       // Use runTransactionAsync to ensure a read-write transaction
       return await db.runTransactionAsync(
@@ -656,10 +740,13 @@ export class SpannerAdapter implements DatabaseAdapter {
           );
 
         try {
+          // Merge provided hints with inferred hints
+          const mergedHints = mergeTypeHints(cmdSpannerTypeHints, paramsCmd);
+          
           // Clean params if they contain JSON
-          const cleanedParams = cleanParamsForSpanner(paramsCmd, cmdSpannerTypeHints);
-          const paramTypes = transformDdlHintsToParamTypes(cmdSpannerTypeHints) as any;
-          const types = transformDdlHintsToTypes(cmdSpannerTypeHints);
+          const cleanedParams = cleanParamsForSpanner(paramsCmd, mergedHints);
+          const paramTypes = transformDdlHintsToParamTypes(mergedHints) as any;
+          const types = transformDdlHintsToTypes(mergedHints);
 
           const updateOptions: any = {
             sql: sqlCmd,
@@ -689,10 +776,13 @@ export class SpannerAdapter implements DatabaseAdapter {
       ): Promise<TQuery[]> => {
         const txObjectQuery = spannerTx as any;
         try {
+          // Merge provided hints with inferred hints
+          const mergedHints = mergeTypeHints(querySpannerTypeHints, paramsQuery);
+          
           // Clean params if they contain JSON
-          const cleanedParams = cleanParamsForSpanner(paramsQuery, querySpannerTypeHints);
-          const paramTypes = transformDdlHintsToParamTypes(querySpannerTypeHints) as any;
-          const types = transformDdlHintsToTypes(querySpannerTypeHints);
+          const cleanedParams = cleanParamsForSpanner(paramsQuery, mergedHints);
+          const paramTypes = transformDdlHintsToParamTypes(mergedHints) as any;
+          const types = transformDdlHintsToTypes(mergedHints);
 
           const queryOptions: any = {
             sql: sqlQuery,
@@ -749,10 +839,13 @@ export class SpannerAdapter implements DatabaseAdapter {
             cmdSpannerTypeHints?: Record<string, string>
           ) => {
             try {
+              // Merge provided hints with inferred hints
+              const mergedHints = mergeTypeHints(cmdSpannerTypeHints, cmdParams);
+              
               // Clean params if they contain JSON
-              const cleanedParams = cleanParamsForSpanner(cmdParams, cmdSpannerTypeHints);
-              const paramTypes = transformDdlHintsToParamTypes(cmdSpannerTypeHints) as any;
-              const types = transformDdlHintsToTypes(cmdSpannerTypeHints);
+              const cleanedParams = cleanParamsForSpanner(cmdParams, mergedHints);
+              const paramTypes = transformDdlHintsToParamTypes(mergedHints) as any;
+              const types = transformDdlHintsToTypes(mergedHints);
 
               const updateOptions: any = {
                 sql: cmdSql,
@@ -779,10 +872,13 @@ export class SpannerAdapter implements DatabaseAdapter {
             querySpannerTypeHints?: Record<string, string>
           ) => {
             try {
+              // Merge provided hints with inferred hints
+              const mergedHints = mergeTypeHints(querySpannerTypeHints, queryParams);
+              
               // Clean params if they contain JSON
-              const cleanedParams = cleanParamsForSpanner(queryParams, querySpannerTypeHints);
-              const paramTypes = transformDdlHintsToParamTypes(querySpannerTypeHints) as any;
-              const types = transformDdlHintsToTypes(querySpannerTypeHints);
+              const cleanedParams = cleanParamsForSpanner(queryParams, mergedHints);
+              const paramTypes = transformDdlHintsToParamTypes(mergedHints) as any;
+              const types = transformDdlHintsToTypes(mergedHints);
 
               const queryOptions: any = {
                 sql: querySql,
