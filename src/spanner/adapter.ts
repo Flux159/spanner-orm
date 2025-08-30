@@ -38,6 +38,7 @@ import type {
 } from "../types/adapter.js";
 import type { PreparedQuery, TableConfig } from "../types/common.js"; // Corrected path
 import { shapeResults } from "../core/result-shaper.js"; // Corrected path
+import { types } from "util";
 
 // Helper function to map DDL type strings to Spanner TypeCodes
 function mapDdlTypeToSpannerCode(ddlType: string): string {
@@ -497,7 +498,9 @@ export class SpannerAdapter implements DatabaseAdapter {
   async execute(
     sql: string,
     params?: Record<string, any>,
-    spannerTypeHints?: Record<string, string>
+    types?: Record<string, string>,
+    paramTypes?: Record<string, any>,
+    _spannerTypeHints?: Record<string, string>
   ): Promise<number | AffectedRows> {
     const db = this.ensureConnected(); // Relies on connect() having awaited this.ready
     try {
@@ -516,22 +519,10 @@ export class SpannerAdapter implements DatabaseAdapter {
           try {
             const updateOptions: any = {
               sql,
-            };
-            
-            // Only add params if they exist
-            if (cleanedParams !== undefined) {
-              updateOptions.params = cleanedParams;
-            }
-            
-            // Add types if provided
-            if (types) {
-              updateOptions.types = types;
-            }
-            if (paramTypes) {
-              updateOptions.paramTypes = paramTypes;
-            }
-
-            const [count] = await transaction.runUpdate(updateOptions);
+              params,
+              types,
+              paramTypes,
+            });
             await transaction.commit();
             return count;
           } catch (err) {
@@ -605,7 +596,9 @@ export class SpannerAdapter implements DatabaseAdapter {
   async query<TResult extends AdapterQueryResultRow = AdapterQueryResultRow>(
     sql: string,
     params?: Record<string, any>,
-    spannerTypeHints?: Record<string, string>
+    types?: Record<string, string>,
+    paramTypes?: Record<string, any>,
+    _spannerTypeHints?: Record<string, string>
   ): Promise<TResult[]> {
     const db = this.ensureConnected(); // Relies on connect() having awaited this.ready
     try {
@@ -620,22 +613,9 @@ export class SpannerAdapter implements DatabaseAdapter {
       const queryOptions: any = {
         sql,
         json: true,
-      };
-      
-      // Only add params if they exist
-      if (cleanedParams !== undefined) {
-        queryOptions.params = cleanedParams;
-      }
-      
-      // Add types if provided
-      if (types) {
-        queryOptions.types = types;
-      }
-      if (paramTypes) {
-        queryOptions.paramTypes = paramTypes;
-      }
-
-      const [rows] = await db.run(queryOptions);
+        types,
+        paramTypes,
+      });
       return rows as TResult[];
     } catch (error) {
       console.error("Error executing query with Spanner adapter:", error);
@@ -692,7 +672,8 @@ export class SpannerAdapter implements DatabaseAdapter {
   >(
     sql: string,
     params?: Record<string, any>, // Spanner expects Record<string, any>
-    spannerTypeHints?: Record<string, string>
+    types?: Record<string, string>,
+    paramTypes?: Record<string, any>
   ): Promise<TResult[]> {
     const db = this.ensureConnected();
     try {
@@ -711,22 +692,9 @@ export class SpannerAdapter implements DatabaseAdapter {
             const queryOptions: any = {
               sql,
               json: true,
-            };
-            
-            // Only add params if they exist
-            if (cleanedParams !== undefined) {
-              queryOptions.params = cleanedParams;
-            }
-            
-            // Add types if provided
-            if (types) {
-              queryOptions.types = types;
-            }
-            if (paramTypes) {
-              queryOptions.paramTypes = paramTypes;
-            }
-
-            const [rows] = await transaction.run(queryOptions);
+              types,
+              paramTypes,
+            });
             await transaction.commit();
             return rows as TResult[];
           } catch (err) {
@@ -766,7 +734,9 @@ export class SpannerAdapter implements DatabaseAdapter {
       execute: async (
         sqlCmd: string,
         paramsCmd?: Record<string, any>,
-        cmdSpannerTypeHints?: Record<string, string>
+        typesCmd?: Record<string, string>,
+        paramTypesCmd?: Record<string, any>
+        // _cmdSpannerTypeHints?: Record<string, string>
       ): Promise<number | AffectedRows> => {
         // Note: Spanner transactions are usually committed as a whole.
         // Running individual DMLs and then a separate commit is not the typical pattern.
@@ -782,37 +752,14 @@ export class SpannerAdapter implements DatabaseAdapter {
             "Spanner: conceptual begin() called on transaction object"
           );
 
-        try {
-          // Merge provided hints with inferred hints
-          const mergedHints = mergeTypeHints(cmdSpannerTypeHints, paramsCmd);
-          
-          // Clean params if they contain JSON
-          const cleanedParams = cleanParamsForSpanner(paramsCmd, mergedHints);
-          const paramTypes = transformDdlHintsToParamTypes(mergedHints) as any;
-          const types = transformDdlHintsToTypes(mergedHints);
-
-          const updateOptions: any = {
-            sql: sqlCmd,
-          };
-          
-          // Only add params if they exist
-          if (cleanedParams !== undefined) {
-            updateOptions.params = cleanedParams;
-          }
-          
-          // Add types if provided
-          if (types) {
-            updateOptions.types = types;
-          }
-          if (paramTypes) {
-            updateOptions.paramTypes = paramTypes;
-          }
-
-          const [rowCountFromRunUpdate] = await txObject.runUpdate(updateOptions);
-          return { count: rowCountFromRunUpdate };
-        } catch (err) {
-          throw enhanceSpannerError(err, paramsCmd);
-        }
+        // TODO: Update this to use type hints
+        const [rowCountFromRunUpdate] = await txObject.runUpdate({
+          sql: sqlCmd,
+          params: paramsCmd,
+          types: typesCmd,
+          paramTypes: paramTypesCmd,
+        });
+        return { count: rowCountFromRunUpdate };
       },
       query: async <
         TQuery extends AdapterQueryResultRow = AdapterQueryResultRow
@@ -887,77 +834,72 @@ export class SpannerAdapter implements DatabaseAdapter {
           execute: async (
             cmdSql,
             cmdParams,
-            cmdSpannerTypeHints?: Record<string, string>
+            cmdTypes,
+            cmdParamTypes
+            // _cmdSpannerTypeHints?: Record<string, string>
           ) => {
-            try {
-              // Merge provided hints with inferred hints
-              const mergedHints = mergeTypeHints(cmdSpannerTypeHints, cmdParams);
-              
-              // Clean params if they contain JSON
-              const cleanedParams = cleanParamsForSpanner(cmdParams, mergedHints);
-              const paramTypes = transformDdlHintsToParamTypes(mergedHints) as any;
-              const types = transformDdlHintsToTypes(mergedHints);
+            // const paramTypes = transformDdlHintsToParamTypes(
+            //   cmdSpannerTypeHints
+            // ) as any;
+            // const types = transformDdlHintsToTypes(cmdSpannerTypeHints);
+            // console.log("Before running gcp transaction runUpdate...");
+            // console.log(cmdSql);
+            // console.log(cmdParams);
+            // console.log(types);
+            // console.log(paramTypes);
 
-              const updateOptions: any = {
-                sql: cmdSql,
-              };
-              
-              // Only add params if they exist
-              if (cleanedParams !== undefined) {
-                updateOptions.params = cleanedParams;
-              }
-              
-              // Add types if provided
-              if (types) {
-                updateOptions.types = types;
-              }
-              if (paramTypes) {
-                updateOptions.paramTypes = paramTypes;
-              }
+            const [rowCount] = await gcpTransaction.runUpdate({
+              sql: cmdSql,
+              params: cmdParams,
+              types: cmdTypes,
+              paramTypes: cmdParamTypes,
+              // types,
+              // paramTypes,
+            });
 
-              const [rowCount] = await gcpTransaction.runUpdate(updateOptions);
-              return { count: rowCount };
-            } catch (err) {
-              throw enhanceSpannerError(err, cmdParams);
-            }
+            // const [rowCount] = await gcpTransaction.runUpdate({
+            //   sql: cmdSql,
+            //   params: cmdParams as Record<string, any> | undefined,
+            //   paramTypes: transformDdlHintsToParamTypes(
+            //     cmdSpannerTypeHints
+            //   ) as any,
+            // });
+            return { count: rowCount };
           },
           query: async (
             querySql,
             queryParams,
-            querySpannerTypeHints?: Record<string, string>
+            queryTypes,
+            queryParamTypes
+            // _querySpannerTypeHints?: Record<string, string>
           ) => {
-            try {
-              // Merge provided hints with inferred hints
-              const mergedHints = mergeTypeHints(querySpannerTypeHints, queryParams);
-              
-              // Clean params if they contain JSON
-              const cleanedParams = cleanParamsForSpanner(queryParams, mergedHints);
-              const paramTypes = transformDdlHintsToParamTypes(mergedHints) as any;
-              const types = transformDdlHintsToTypes(mergedHints);
+            // const paramTypes = transformDdlHintsToParamTypes(
+            //   querySpannerTypeHints
+            // ) as any;
+            // const types = transformDdlHintsToTypes(querySpannerTypeHints);
+            // console.log("Before running gcp query transaction runUpdate...");
+            // console.log(querySql);
+            // console.log(queryParams);
+            // console.log(types);
+            // console.log(paramTypes);
 
-              const queryOptions: any = {
-                sql: querySql,
-                json: true,
-              };
-              
-              // Only add params if they exist
-              if (cleanedParams !== undefined) {
-                queryOptions.params = cleanedParams;
-              }
-              
-              // Add types if provided
-              if (types) {
-                queryOptions.types = types;
-              }
-              if (paramTypes) {
-                queryOptions.paramTypes = paramTypes;
-              }
+            const [rows] = await gcpTransaction.run({
+              sql: querySql,
+              params: queryParams,
+              json: true,
+              types: queryTypes,
+              paramTypes: queryParamTypes,
+            });
 
-              const [rows] = await gcpTransaction.run(queryOptions);
-              return rows as any[];
-            } catch (err) {
-              throw enhanceSpannerError(err, queryParams);
-            }
+            // const [rows] = await gcpTransaction.run({
+            //   sql: querySql,
+            //   params: queryParams as Record<string, any> | undefined,
+            //   json: true,
+            //   paramTypes: transformDdlHintsToParamTypes(
+            //     querySpannerTypeHints
+            //   ) as any,
+            // });
+            return rows as any[];
           },
           commit: async () => {
             // Commit is handled by runTransactionAsync itself. This is a no-op.
