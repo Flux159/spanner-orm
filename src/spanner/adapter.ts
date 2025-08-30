@@ -18,16 +18,16 @@ type SpannerClientInstanceType = import("@google-cloud/spanner").Spanner;
 
 // Local interface to represent the structure of google.spanner.v1.IType
 // This helps with type checking without needing a direct runtime import of 'google'.
-interface SpannerParamType {
-  code: string | number; // Corresponds to google.spanner.v1.TypeCode
-  arrayElementType?: SpannerParamType | null; // Corresponds to google.spanner.v1.IType
-  structType?: {
-    fields: Array<{
-      name?: string | null;
-      type?: SpannerParamType | null; // Corresponds to google.spanner.v1.IType
-    }>;
-  } | null; // Corresponds to google.spanner.v1.IStructType
-}
+// interface SpannerParamType {
+//   code: string | number; // Corresponds to google.spanner.v1.TypeCode
+//   arrayElementType?: SpannerParamType | null; // Corresponds to google.spanner.v1.IType
+//   structType?: {
+//     fields: Array<{
+//       name?: string | null;
+//       type?: SpannerParamType | null; // Corresponds to google.spanner.v1.IType
+//     }>;
+//   } | null; // Corresponds to google.spanner.v1.IStructType
+// }
 
 import type {
   DatabaseAdapter,
@@ -40,348 +40,121 @@ import type { PreparedQuery, TableConfig } from "../types/common.js"; // Correct
 import { shapeResults } from "../core/result-shaper.js"; // Corrected path
 
 // Helper function to map DDL type strings to Spanner TypeCodes
-function mapDdlTypeToSpannerCode(ddlType: string): string {
-  const upperType = ddlType.toUpperCase();
-  if (
-    upperType.startsWith("STRING") ||
-    upperType === "TEXT" ||
-    upperType === "UUID" ||
-    upperType.startsWith("VARCHAR")
-  ) {
-    return "STRING";
-  }
-  if (
-    upperType.startsWith("INT") ||
-    upperType === "BIGINT" ||
-    upperType === "INTEGER" ||
-    upperType === "SERIAL" ||
-    upperType === "BIGSERIAL" ||
-    upperType === "SMALLINT" ||
-    upperType === "INT64"
-  ) {
-    return "INT64";
-  }
-  if (upperType === "BOOLEAN" || upperType === "BOOL") {
-    return "BOOL";
-  }
-  if (
-    upperType.startsWith("FLOAT") ||
-    upperType === "DOUBLE" ||
-    upperType === "REAL" ||
-    upperType === "DOUBLE PRECISION" ||
-    upperType === "FLOAT64"
-  ) {
-    return "FLOAT64";
-  }
-  if (upperType.startsWith("NUMERIC") || upperType.startsWith("DECIMAL")) {
-    return "NUMERIC";
-  }
-  if (upperType === "DATE") {
-    return "DATE";
-  }
-  if (upperType.startsWith("TIMESTAMP")) {
-    // Covers TIMESTAMP and TIMESTAMPTZ
-    return "TIMESTAMP";
-  }
-  if (upperType.startsWith("JSON")) {
-    // Covers JSON and JSONB
-    return "JSON";
-  }
-  if (upperType === "BYTES" || upperType === "BYTEA") {
-    return "BYTES";
-  }
-  // If the type is already a valid Spanner TypeCode, pass it through.
-  // This handles cases where the hint might already be in the correct format.
-  const validSpannerTypeCodes = [
-    "STRING",
-    "INT64",
-    "BOOL",
-    "FLOAT64",
-    "TIMESTAMP",
-    "DATE",
-    "BYTES",
-    "ARRAY",
-    "STRUCT",
-    "NUMERIC",
-    "JSON",
-  ];
-  if (validSpannerTypeCodes.includes(upperType)) {
-    return upperType;
-  }
+// function mapDdlTypeToSpannerCode(ddlType: string): string {
+//   const upperType = ddlType.toUpperCase();
+//   if (
+//     upperType.startsWith("STRING") ||
+//     upperType === "TEXT" ||
+//     upperType === "UUID" ||
+//     upperType.startsWith("VARCHAR")
+//   ) {
+//     return "STRING";
+//   }
+//   if (
+//     upperType.startsWith("INT") ||
+//     upperType === "BIGINT" ||
+//     upperType === "INTEGER" ||
+//     upperType === "SERIAL" ||
+//     upperType === "BIGSERIAL" ||
+//     upperType === "SMALLINT" ||
+//     upperType === "INT64"
+//   ) {
+//     return "INT64";
+//   }
+//   if (upperType === "BOOLEAN" || upperType === "BOOL") {
+//     return "BOOL";
+//   }
+//   if (
+//     upperType.startsWith("FLOAT") ||
+//     upperType === "DOUBLE" ||
+//     upperType === "REAL" ||
+//     upperType === "DOUBLE PRECISION" ||
+//     upperType === "FLOAT64"
+//   ) {
+//     return "FLOAT64";
+//   }
+//   if (upperType.startsWith("NUMERIC") || upperType.startsWith("DECIMAL")) {
+//     return "NUMERIC";
+//   }
+//   if (upperType === "DATE") {
+//     return "DATE";
+//   }
+//   if (upperType.startsWith("TIMESTAMP")) {
+//     // Covers TIMESTAMP and TIMESTAMPTZ
+//     return "TIMESTAMP";
+//   }
+//   if (upperType.startsWith("JSON")) {
+//     // Covers JSON and JSONB
+//     return "JSON";
+//   }
+//   if (upperType === "BYTES" || upperType === "BYTEA") {
+//     return "BYTES";
+//   }
+//   // If the type is already a valid Spanner TypeCode, pass it through.
+//   // This handles cases where the hint might already be in the correct format.
+//   const validSpannerTypeCodes = [
+//     "STRING",
+//     "INT64",
+//     "BOOL",
+//     "FLOAT64",
+//     "TIMESTAMP",
+//     "DATE",
+//     "BYTES",
+//     "ARRAY",
+//     "STRUCT",
+//     "NUMERIC",
+//     "JSON",
+//   ];
+//   if (validSpannerTypeCodes.includes(upperType)) {
+//     return upperType;
+//   }
 
-  console.warn(
-    `Unknown DDL type for Spanner mapping: ${ddlType}. Defaulting to STRING.`
-  );
-  return "STRING";
-}
-
-// Helper function to map type string to Spanner TypeCode enum number
-function getSpannerTypeCodeEnum(typeString: string): number {
-  const typeCodeMap: Record<string, number> = {
-    'BOOL': 1,
-    'INT64': 2,
-    'FLOAT64': 3,
-    'TIMESTAMP': 4,
-    'DATE': 5,
-    'STRING': 6,
-    'BYTES': 7,
-    'ARRAY': 8,
-    'STRUCT': 9,
-    'NUMERIC': 10,
-    'JSON': 11,
-    'PROTO': 13,
-    'ENUM': 14,
-    'FLOAT32': 15,
-    'INTERVAL': 16,
-    'UUID': 17,
-  };
-  return typeCodeMap[typeString] || 6; // Default to STRING (6) if unknown
-}
+//   console.warn(
+//     `Unknown DDL type for Spanner mapping: ${ddlType}. Defaulting to STRING.`
+//   );
+//   return "STRING";
+// }
 
 // Helper function to transform DDL hints to Spanner paramTypes object
-function transformDdlHintsToParamTypes(
-  ddlHints?: Record<string, string>
-): Record<string, SpannerParamType> | undefined {
-  if (!ddlHints) {
-    return undefined;
-  }
-  const paramTypes: Record<string, SpannerParamType> = {};
-  for (const key in ddlHints) {
-    if (Object.prototype.hasOwnProperty.call(ddlHints, key)) {
-      const typeCodeString = mapDdlTypeToSpannerCode(ddlHints[key]);
-      // Construct an object conforming to our local SpannerParamType interface,
-      // which is structurally compatible with google.spanner.v1.IType.
-      paramTypes[key] = {
-        code: getSpannerTypeCodeEnum(typeCodeString), // Use numeric TypeCode enum value
-        arrayElementType: null, // Assuming scalar types for now
-        structType: null, // Assuming scalar types for now
-      };
-    }
-  }
-  return paramTypes;
-}
+// function transformDdlHintsToParamTypes(
+//   ddlHints?: Record<string, string>
+// ): Record<string, SpannerParamType> | undefined {
+//   if (!ddlHints) {
+//     return undefined;
+//   }
+//   const paramTypes: Record<string, SpannerParamType> = {};
+//   for (const key in ddlHints) {
+//     if (Object.prototype.hasOwnProperty.call(ddlHints, key)) {
+//       const typeCodeString = mapDdlTypeToSpannerCode(ddlHints[key]);
+//       // Construct an object conforming to our local SpannerParamType interface,
+//       // which is structurally compatible with google.spanner.v1.IType.
+//       paramTypes[key] = {
+//         code: typeCodeString, // mapDdlTypeToSpannerCode returns a string like "STRING"
+//         arrayElementType: null, // Assuming scalar types for now
+//         structType: null, // Assuming scalar types for now
+//       };
+//     }
+//   }
+//   return paramTypes;
+// }
 
-function transformDdlHintsToTypes(
-  ddlHints?: Record<string, string>
-): Record<string, string> | undefined {
-  if (!ddlHints) {
-    return undefined;
-  }
-  const types: Record<string, string> = {};
-  for (const key in ddlHints) {
-    if (Object.prototype.hasOwnProperty.call(ddlHints, key)) {
-      const typeCodeString = mapDdlTypeToSpannerCode(ddlHints[key]);
-      // Construct an object conforming to our local SpannerParamType interface,
-      // which is structurally compatible with google.spanner.v1.IType.
-      types[key] = typeCodeString; // mapDdlTypeToSpannerCode returns a string like "STRING"
-    }
-  }
-  return types;
-}
-
-// Helper function to clean JSON data before sending to Spanner
-function cleanJsonForSpanner(value: any): any {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  
-  if (typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
-    const cleaned: any = {};
-    for (const key in value) {
-      if (Object.prototype.hasOwnProperty.call(value, key)) {
-        if (value[key] !== undefined) {
-          cleaned[key] = cleanJsonForSpanner(value[key]);
-        }
-        // Skip undefined values entirely
-      }
-    }
-    return cleaned;
-  }
-  
-  if (Array.isArray(value)) {
-    return value.map(item => cleanJsonForSpanner(item));
-  }
-  
-  return value;
-}
-
-// Helper to clean params that might contain JSON
-function cleanParamsForSpanner(
-  params?: Record<string, any>,
-  typeHints?: Record<string, string>
-): Record<string, any> | undefined {
-  if (!params) return undefined;
-  
-  const cleaned: Record<string, any> = {};
-  let hasKeys = false;
-  
-  for (const key in params) {
-    if (Object.prototype.hasOwnProperty.call(params, key)) {
-      const hint = typeHints?.[key];
-      // Clean JSON fields
-      if (hint && mapDdlTypeToSpannerCode(hint) === 'JSON') {
-        cleaned[key] = cleanJsonForSpanner(params[key]);
-      } else {
-        cleaned[key] = params[key];
-      }
-      hasKeys = true;
-    }
-  }
-  
-  // Return undefined if params is empty to avoid sending empty object to Spanner
-  return hasKeys ? cleaned : undefined;
-}
-
-// Helper function to automatically infer Spanner types from JavaScript values
-function inferSpannerTypeFromValue(value: any): string {
-  if (value === null || value === undefined) {
-    // For null/undefined, we can't infer type, default to STRING
-    return "STRING";
-  }
-  
-  if (typeof value === 'string') {
-    return "STRING";
-  }
-  
-  if (typeof value === 'number') {
-    // Check if it's an integer or float
-    if (Number.isInteger(value)) {
-      return "INT64";
-    }
-    return "FLOAT64";
-  }
-  
-  if (typeof value === 'boolean') {
-    return "BOOL";
-  }
-  
-  if (value instanceof Date) {
-    return "TIMESTAMP";
-  }
-  
-  if (Buffer.isBuffer(value) || value instanceof Uint8Array) {
-    return "BYTES";
-  }
-  
-  if (typeof value === 'object') {
-    // For objects and arrays, use JSON type
-    return "JSON";
-  }
-  
-  // Default fallback
-  return "STRING";
-}
-
-// Helper function to automatically generate type hints from parameters
-function generateTypeHintsFromParams(params?: Record<string, any>): Record<string, string> | undefined {
-  if (!params) return undefined;
-  
-  const typeHints: Record<string, string> = {};
-  let hasKeys = false;
-  for (const key in params) {
-    if (Object.prototype.hasOwnProperty.call(params, key)) {
-      typeHints[key] = inferSpannerTypeFromValue(params[key]);
-      hasKeys = true;
-    }
-  }
-  // Return undefined if params is empty to avoid sending empty types object to Spanner
-  return hasKeys ? typeHints : undefined;
-}
-
-// Helper function to merge provided hints with inferred hints
-function mergeTypeHints(
-  providedHints?: Record<string, string>,
-  params?: Record<string, any>
-): Record<string, string> | undefined {
-  if (!params && !providedHints) return undefined;
-  
-  // Generate automatic hints from params
-  const inferredHints = generateTypeHintsFromParams(params);
-  
-  if (!providedHints) {
-    return inferredHints;
-  }
-  
-  if (!inferredHints) {
-    return providedHints;
-  }
-  
-  // Merge, with provided hints taking precedence
-  return { ...inferredHints, ...providedHints };
-}
-
-// Helper function to provide better error messages
-function enhanceSpannerError(error: any, params?: Record<string, any>): Error {
-  const errorMessage = error.message || '';
-  
-  if (errorMessage.includes('The code field is required for types')) {
-    // Check for undefined values in params
-    const hasUndefinedInJson = checkForUndefinedInJsonParams(params);
-    if (hasUndefinedInJson) {
-      return new Error(
-        'Spanner Error: JSON columns cannot contain undefined values. ' +
-        'Found undefined in JSON parameters. Please use null instead of undefined. ' +
-        `Original error: ${errorMessage}`
-      );
-    }
-    
-    // Check for null values without types
-    const nullParams = findNullParams(params);
-    if (nullParams.length > 0) {
-      return new Error(
-        'Spanner Error: Null values may require type information. ' +
-        `Parameters with null values: ${nullParams.join(', ')}. ` +
-        `Consider providing type hints for these parameters. ` +
-        `Original error: ${errorMessage}`
-      );
-    }
-  }
-  
-  return error;
-}
-
-function checkForUndefinedInJsonParams(params?: Record<string, any>): boolean {
-  if (!params) return false;
-  
-  for (const value of Object.values(params)) {
-    if (hasUndefinedValue(value)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function hasUndefinedValue(value: any): boolean {
-  if (value === undefined) return true;
-  
-  if (typeof value === 'object' && value !== null && !(value instanceof Date)) {
-    if (Array.isArray(value)) {
-      return value.some(item => hasUndefinedValue(item));
-    } else {
-      for (const key in value) {
-        if (Object.prototype.hasOwnProperty.call(value, key)) {
-          if (hasUndefinedValue(value[key])) {
-            return true;
-          }
-        }
-      }
-    }
-  }
-  
-  return false;
-}
-
-function findNullParams(params?: Record<string, any>): string[] {
-  if (!params) return [];
-  
-  const nullParams: string[] = [];
-  for (const [key, value] of Object.entries(params)) {
-    if (value === null) {
-      nullParams.push(key);
-    }
-  }
-  return nullParams;
-}
+// function transformDdlHintsToTypes(
+//   ddlHints?: Record<string, string>
+// ): Record<string, string> | undefined {
+//   if (!ddlHints) {
+//     return undefined;
+//   }
+//   const types: Record<string, string> = {};
+//   for (const key in ddlHints) {
+//     if (Object.prototype.hasOwnProperty.call(ddlHints, key)) {
+//       const typeCodeString = mapDdlTypeToSpannerCode(ddlHints[key]);
+//       // Construct an object conforming to our local SpannerParamType interface,
+//       // which is structurally compatible with google.spanner.v1.IType.
+//       types[key] = typeCodeString; // mapDdlTypeToSpannerCode returns a string like "STRING"
+//     }
+//   }
+//   return types;
+// }
 
 export interface SpannerConnectionOptions extends ConnectionOptions {
   projectId: string;
@@ -497,54 +270,46 @@ export class SpannerAdapter implements DatabaseAdapter {
   async execute(
     sql: string,
     params?: Record<string, any>,
-    spannerTypeHints?: Record<string, string>
+    types?: Record<string, string>,
+    paramTypes?: Record<string, any>,
+    _spannerTypeHints?: Record<string, string>
   ): Promise<number | AffectedRows> {
     const db = this.ensureConnected(); // Relies on connect() having awaited this.ready
     try {
-      // Merge provided hints with inferred hints
-      const mergedHints = mergeTypeHints(spannerTypeHints, params);
-      
-      // Clean params if they contain JSON
-      const cleanedParams = cleanParamsForSpanner(params, mergedHints);
-      const paramTypes = transformDdlHintsToParamTypes(mergedHints) as any;
-      const types = transformDdlHintsToTypes(mergedHints);
-
       // Spanner's runUpdate returns an array where the first element is the affected row count.
       // The result of runTransactionAsync is the result of its callback.
       const rowCount = await db.runTransactionAsync(
         async (transaction: SpannerNativeTransaction) => {
           try {
-            const updateOptions: any = {
-              sql,
-            };
-            
-            // Only add params if they exist
-            if (cleanedParams !== undefined) {
-              updateOptions.params = cleanedParams;
-            }
-            
-            // Add types if provided
-            if (types) {
-              updateOptions.types = types;
-            }
-            if (paramTypes) {
-              updateOptions.paramTypes = paramTypes;
-            }
+            // const paramTypes = transformDdlHintsToParamTypes(
+            //   spannerTypeHints
+            // ) as any;
+            // const types = transformDdlHintsToTypes(spannerTypeHints);
+            // console.log("Before running transaction runUpdate...");
+            // console.log(sql);
+            // console.log(params);
+            // console.log(types);
+            // console.log(paramTypes);
 
-            const [count] = await transaction.runUpdate(updateOptions);
+            const [count] = await transaction.runUpdate({
+              sql,
+              params,
+              types,
+              paramTypes,
+            });
             await transaction.commit();
             return count;
           } catch (err) {
             console.error("Error during transaction:", err);
             await transaction.rollback();
-            throw enhanceSpannerError(err, params);
+            throw err;
           }
         }
       );
       return { count: typeof rowCount === "number" ? rowCount : 0 };
     } catch (error) {
       console.error("Error executing command with Spanner adapter:", error);
-      throw enhanceSpannerError(error, params);
+      throw error;
     }
   }
 
@@ -605,41 +370,31 @@ export class SpannerAdapter implements DatabaseAdapter {
   async query<TResult extends AdapterQueryResultRow = AdapterQueryResultRow>(
     sql: string,
     params?: Record<string, any>,
-    spannerTypeHints?: Record<string, string>
+    types?: Record<string, string>,
+    paramTypes?: Record<string, any>,
+    _spannerTypeHints?: Record<string, string>
   ): Promise<TResult[]> {
     const db = this.ensureConnected(); // Relies on connect() having awaited this.ready
     try {
-      // Merge provided hints with inferred hints
-      const mergedHints = mergeTypeHints(spannerTypeHints, params);
-      
-      // Clean params if they contain JSON
-      const cleanedParams = cleanParamsForSpanner(params, mergedHints);
-      const paramTypes = transformDdlHintsToParamTypes(mergedHints) as any;
-      const types = transformDdlHintsToTypes(mergedHints);
+      // const paramTypes = transformDdlHintsToParamTypes(spannerTypeHints) as any;
+      // const types = transformDdlHintsToTypes(spannerTypeHints);
+      // console.log("Before running transaction runUpdate...");
+      // console.log(sql);
+      // console.log(params);
+      // console.log(types);
+      // console.log(paramTypes);
 
-      const queryOptions: any = {
+      const [rows] = await db.run({
         sql,
+        params,
         json: true,
-      };
-      
-      // Only add params if they exist
-      if (cleanedParams !== undefined) {
-        queryOptions.params = cleanedParams;
-      }
-      
-      // Add types if provided
-      if (types) {
-        queryOptions.types = types;
-      }
-      if (paramTypes) {
-        queryOptions.paramTypes = paramTypes;
-      }
-
-      const [rows] = await db.run(queryOptions);
+        types,
+        paramTypes,
+      });
       return rows as TResult[];
     } catch (error) {
       console.error("Error executing query with Spanner adapter:", error);
-      throw enhanceSpannerError(error, params);
+      throw error;
     }
   }
 
@@ -692,47 +447,39 @@ export class SpannerAdapter implements DatabaseAdapter {
   >(
     sql: string,
     params?: Record<string, any>, // Spanner expects Record<string, any>
-    spannerTypeHints?: Record<string, string>
+    types?: Record<string, string>,
+    paramTypes?: Record<string, any>
   ): Promise<TResult[]> {
     const db = this.ensureConnected();
     try {
-      // Merge provided hints with inferred hints
-      const mergedHints = mergeTypeHints(spannerTypeHints, params);
-      
-      // Clean params if they contain JSON
-      const cleanedParams = cleanParamsForSpanner(params, mergedHints);
-      const paramTypes = transformDdlHintsToParamTypes(mergedHints) as any;
-      const types = transformDdlHintsToTypes(mergedHints);
-
       // Use runTransactionAsync to ensure a read-write transaction
       return await db.runTransactionAsync(
         async (transaction: SpannerNativeTransaction) => {
           try {
-            const queryOptions: any = {
-              sql,
-              json: true,
-            };
-            
-            // Only add params if they exist
-            if (cleanedParams !== undefined) {
-              queryOptions.params = cleanedParams;
-            }
-            
-            // Add types if provided
-            if (types) {
-              queryOptions.types = types;
-            }
-            if (paramTypes) {
-              queryOptions.paramTypes = paramTypes;
-            }
+            // Use transaction.run() for DML with THEN RETURN
+            // const paramTypes = transformDdlHintsToParamTypes(
+            //   spannerTypeHints
+            // ) as any;
+            // const types = transformDdlHintsToTypes(spannerTypeHints);
+            // console.log("Before running execute and return rows...");
+            // console.log(sql);
+            // console.log(params);
+            // console.log(types);
+            // console.log(paramTypes);
 
-            const [rows] = await transaction.run(queryOptions);
+            const [rows] = await transaction.run({
+              sql,
+              params,
+              json: true,
+              types,
+              paramTypes,
+            });
             await transaction.commit();
             return rows as TResult[];
           } catch (err) {
             console.error("Error during transaction:", err);
             await transaction.rollback();
-            throw enhanceSpannerError(err, params);
+            throw err;
           }
         }
       );
@@ -741,7 +488,7 @@ export class SpannerAdapter implements DatabaseAdapter {
         "Error executing DML and returning rows with Spanner adapter:",
         error
       );
-      throw enhanceSpannerError(error, params);
+      throw error;
     }
   }
 
@@ -766,7 +513,9 @@ export class SpannerAdapter implements DatabaseAdapter {
       execute: async (
         sqlCmd: string,
         paramsCmd?: Record<string, any>,
-        cmdSpannerTypeHints?: Record<string, string>
+        typesCmd?: Record<string, string>,
+        paramTypesCmd?: Record<string, any>
+        // _cmdSpannerTypeHints?: Record<string, string>
       ): Promise<number | AffectedRows> => {
         // Note: Spanner transactions are usually committed as a whole.
         // Running individual DMLs and then a separate commit is not the typical pattern.
@@ -782,78 +531,28 @@ export class SpannerAdapter implements DatabaseAdapter {
             "Spanner: conceptual begin() called on transaction object"
           );
 
-        try {
-          // Merge provided hints with inferred hints
-          const mergedHints = mergeTypeHints(cmdSpannerTypeHints, paramsCmd);
-          
-          // Clean params if they contain JSON
-          const cleanedParams = cleanParamsForSpanner(paramsCmd, mergedHints);
-          const paramTypes = transformDdlHintsToParamTypes(mergedHints) as any;
-          const types = transformDdlHintsToTypes(mergedHints);
-
-          const updateOptions: any = {
-            sql: sqlCmd,
-          };
-          
-          // Only add params if they exist
-          if (cleanedParams !== undefined) {
-            updateOptions.params = cleanedParams;
-          }
-          
-          // Add types if provided
-          if (types) {
-            updateOptions.types = types;
-          }
-          if (paramTypes) {
-            updateOptions.paramTypes = paramTypes;
-          }
-
-          const [rowCountFromRunUpdate] = await txObject.runUpdate(updateOptions);
-          return { count: rowCountFromRunUpdate };
-        } catch (err) {
-          throw enhanceSpannerError(err, paramsCmd);
-        }
+        // TODO: Update this to use type hints
+        const [rowCountFromRunUpdate] = await txObject.runUpdate({
+          sql: sqlCmd,
+          params: paramsCmd,
+          types: typesCmd,
+          paramTypes: paramTypesCmd,
+        });
+        return { count: rowCountFromRunUpdate };
       },
       query: async <
         TQuery extends AdapterQueryResultRow = AdapterQueryResultRow
       >(
         sqlQuery: string,
-        paramsQuery?: Record<string, any>,
-        querySpannerTypeHints?: Record<string, string>
+        paramsQuery?: Record<string, any>
       ): Promise<TQuery[]> => {
         const txObjectQuery = spannerTx as any;
-        try {
-          // Merge provided hints with inferred hints
-          const mergedHints = mergeTypeHints(querySpannerTypeHints, paramsQuery);
-          
-          // Clean params if they contain JSON
-          const cleanedParams = cleanParamsForSpanner(paramsQuery, mergedHints);
-          const paramTypes = transformDdlHintsToParamTypes(mergedHints) as any;
-          const types = transformDdlHintsToTypes(mergedHints);
-
-          const queryOptions: any = {
-            sql: sqlQuery,
-            json: true,
-          };
-          
-          // Only add params if they exist
-          if (cleanedParams !== undefined) {
-            queryOptions.params = cleanedParams;
-          }
-          
-          // Add types if provided
-          if (types) {
-            queryOptions.types = types;
-          }
-          if (paramTypes) {
-            queryOptions.paramTypes = paramTypes;
-          }
-
-          const [rows] = await txObjectQuery.run(queryOptions);
-          return rows as TQuery[];
-        } catch (err) {
-          throw enhanceSpannerError(err, paramsQuery);
-        }
+        const [rows] = await txObjectQuery.run({
+          sql: sqlQuery,
+          params: paramsQuery,
+          json: true,
+        });
+        return rows as TQuery[];
       },
       commit: async (): Promise<void> => {
         const txObjectCommit = spannerTx as any;
@@ -887,77 +586,72 @@ export class SpannerAdapter implements DatabaseAdapter {
           execute: async (
             cmdSql,
             cmdParams,
-            cmdSpannerTypeHints?: Record<string, string>
+            cmdTypes,
+            cmdParamTypes
+            // _cmdSpannerTypeHints?: Record<string, string>
           ) => {
-            try {
-              // Merge provided hints with inferred hints
-              const mergedHints = mergeTypeHints(cmdSpannerTypeHints, cmdParams);
-              
-              // Clean params if they contain JSON
-              const cleanedParams = cleanParamsForSpanner(cmdParams, mergedHints);
-              const paramTypes = transformDdlHintsToParamTypes(mergedHints) as any;
-              const types = transformDdlHintsToTypes(mergedHints);
+            // const paramTypes = transformDdlHintsToParamTypes(
+            //   cmdSpannerTypeHints
+            // ) as any;
+            // const types = transformDdlHintsToTypes(cmdSpannerTypeHints);
+            // console.log("Before running gcp transaction runUpdate...");
+            // console.log(cmdSql);
+            // console.log(cmdParams);
+            // console.log(types);
+            // console.log(paramTypes);
 
-              const updateOptions: any = {
-                sql: cmdSql,
-              };
-              
-              // Only add params if they exist
-              if (cleanedParams !== undefined) {
-                updateOptions.params = cleanedParams;
-              }
-              
-              // Add types if provided
-              if (types) {
-                updateOptions.types = types;
-              }
-              if (paramTypes) {
-                updateOptions.paramTypes = paramTypes;
-              }
+            const [rowCount] = await gcpTransaction.runUpdate({
+              sql: cmdSql,
+              params: cmdParams,
+              types: cmdTypes,
+              paramTypes: cmdParamTypes,
+              // types,
+              // paramTypes,
+            });
 
-              const [rowCount] = await gcpTransaction.runUpdate(updateOptions);
-              return { count: rowCount };
-            } catch (err) {
-              throw enhanceSpannerError(err, cmdParams);
-            }
+            // const [rowCount] = await gcpTransaction.runUpdate({
+            //   sql: cmdSql,
+            //   params: cmdParams as Record<string, any> | undefined,
+            //   paramTypes: transformDdlHintsToParamTypes(
+            //     cmdSpannerTypeHints
+            //   ) as any,
+            // });
+            return { count: rowCount };
           },
           query: async (
             querySql,
             queryParams,
-            querySpannerTypeHints?: Record<string, string>
+            queryTypes,
+            queryParamTypes
+            // _querySpannerTypeHints?: Record<string, string>
           ) => {
-            try {
-              // Merge provided hints with inferred hints
-              const mergedHints = mergeTypeHints(querySpannerTypeHints, queryParams);
-              
-              // Clean params if they contain JSON
-              const cleanedParams = cleanParamsForSpanner(queryParams, mergedHints);
-              const paramTypes = transformDdlHintsToParamTypes(mergedHints) as any;
-              const types = transformDdlHintsToTypes(mergedHints);
+            // const paramTypes = transformDdlHintsToParamTypes(
+            //   querySpannerTypeHints
+            // ) as any;
+            // const types = transformDdlHintsToTypes(querySpannerTypeHints);
+            // console.log("Before running gcp query transaction runUpdate...");
+            // console.log(querySql);
+            // console.log(queryParams);
+            // console.log(types);
+            // console.log(paramTypes);
 
-              const queryOptions: any = {
-                sql: querySql,
-                json: true,
-              };
-              
-              // Only add params if they exist
-              if (cleanedParams !== undefined) {
-                queryOptions.params = cleanedParams;
-              }
-              
-              // Add types if provided
-              if (types) {
-                queryOptions.types = types;
-              }
-              if (paramTypes) {
-                queryOptions.paramTypes = paramTypes;
-              }
+            const [rows] = await gcpTransaction.run({
+              sql: querySql,
+              params: queryParams,
+              json: true,
+              types: queryTypes,
+              paramTypes: queryParamTypes,
+            });
 
-              const [rows] = await gcpTransaction.run(queryOptions);
-              return rows as any[];
-            } catch (err) {
-              throw enhanceSpannerError(err, queryParams);
-            }
+            // const [rows] = await gcpTransaction.run({
+            //   sql: querySql,
+            //   params: queryParams as Record<string, any> | undefined,
+            //   json: true,
+            //   paramTypes: transformDdlHintsToParamTypes(
+            //     querySpannerTypeHints
+            //   ) as any,
+            // });
+            return rows as any[];
           },
           commit: async () => {
             // Commit is handled by runTransactionAsync itself. This is a no-op.
