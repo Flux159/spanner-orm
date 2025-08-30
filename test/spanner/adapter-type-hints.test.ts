@@ -167,12 +167,15 @@ class TestableSpannerAdapter {
     if (!params) return undefined;
     
     const typeHints: Record<string, string> = {};
+    let hasKeys = false;
     for (const key in params) {
       if (Object.prototype.hasOwnProperty.call(params, key)) {
         typeHints[key] = this.inferSpannerTypeFromValue(params[key]);
+        hasKeys = true;
       }
     }
-    return typeHints;
+    // Return undefined if params is empty to avoid sending empty types object to Spanner
+    return hasKeys ? typeHints : undefined;
   }
 
   // Helper function to merge provided hints with inferred hints
@@ -673,6 +676,17 @@ describe("SpannerAdapter Type Hints", () => {
   });
 
   describe("Automatic Type Inference", () => {
+    it("should handle queries without parameters correctly", async () => {
+      // No parameters at all
+      const result1 = await adapter.query("SELECT * FROM test");
+      // Mock returns "no_types" when no types are passed
+      expect(result1).toEqual([{ result: "no_types" }]);
+      
+      // Empty parameters object
+      const result2 = await adapter.query("SELECT * FROM test", {});
+      expect(result2).toEqual([{ result: "no_types" }]);
+    });
+
     it("should automatically infer types when no hints provided", async () => {
       const params = {
         stringParam: "test",
