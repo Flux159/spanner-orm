@@ -249,12 +249,15 @@ function generateTypeHintsFromParams(params?: Record<string, any>): Record<strin
   if (!params) return undefined;
   
   const typeHints: Record<string, string> = {};
+  let hasKeys = false;
   for (const key in params) {
     if (Object.prototype.hasOwnProperty.call(params, key)) {
       typeHints[key] = inferSpannerTypeFromValue(params[key]);
+      hasKeys = true;
     }
   }
-  return typeHints;
+  // Return undefined if params is empty to avoid sending empty types object to Spanner
+  return hasKeys ? typeHints : undefined;
 }
 
 // Helper function to merge provided hints with inferred hints
