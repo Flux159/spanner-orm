@@ -291,12 +291,17 @@ export class SpannerAdapter implements DatabaseAdapter {
             // console.log(types);
             // console.log(paramTypes);
 
-            const [count] = await transaction.runUpdate({
+            const updateOptions: any = {
               sql,
               params,
-              types,
-              paramTypes,
-            });
+            };
+            if (types !== undefined) {
+              updateOptions.types = types;
+            }
+            if (paramTypes !== undefined) {
+              updateOptions.paramTypes = paramTypes;
+            }
+            const [count] = await transaction.runUpdate(updateOptions);
             await transaction.commit();
             return count;
           } catch (err) {
@@ -384,13 +389,18 @@ export class SpannerAdapter implements DatabaseAdapter {
       // console.log(types);
       // console.log(paramTypes);
 
-      const [rows] = await db.run({
+      const queryOptions: any = {
         sql,
         params,
         json: true,
-        types,
-        paramTypes,
-      });
+      };
+      if (types !== undefined) {
+        queryOptions.types = types;
+      }
+      if (paramTypes !== undefined) {
+        queryOptions.paramTypes = paramTypes;
+      }
+      const [rows] = await db.run(queryOptions);
       return rows as TResult[];
     } catch (error) {
       console.error("Error executing query with Spanner adapter:", error);
@@ -467,13 +477,18 @@ export class SpannerAdapter implements DatabaseAdapter {
             // console.log(types);
             // console.log(paramTypes);
 
-            const [rows] = await transaction.run({
+            const queryOptions: any = {
               sql,
               params,
               json: true,
-              types,
-              paramTypes,
-            });
+            };
+            if (types !== undefined) {
+              queryOptions.types = types;
+            }
+            if (paramTypes !== undefined) {
+              queryOptions.paramTypes = paramTypes;
+            }
+            const [rows] = await transaction.run(queryOptions);
             await transaction.commit();
             return rows as TResult[];
           } catch (err) {
@@ -531,13 +546,17 @@ export class SpannerAdapter implements DatabaseAdapter {
             "Spanner: conceptual begin() called on transaction object"
           );
 
-        // TODO: Update this to use type hints
-        const [rowCountFromRunUpdate] = await txObject.runUpdate({
+        const updateOptions: any = {
           sql: sqlCmd,
           params: paramsCmd,
-          types: typesCmd,
-          paramTypes: paramTypesCmd,
-        });
+        };
+        if (typesCmd !== undefined) {
+          updateOptions.types = typesCmd;
+        }
+        if (paramTypesCmd !== undefined) {
+          updateOptions.paramTypes = paramTypesCmd;
+        }
+        const [rowCountFromRunUpdate] = await txObject.runUpdate(updateOptions);
         return { count: rowCountFromRunUpdate };
       },
       query: async <
@@ -600,14 +619,17 @@ export class SpannerAdapter implements DatabaseAdapter {
             // console.log(types);
             // console.log(paramTypes);
 
-            const [rowCount] = await gcpTransaction.runUpdate({
+            const updateOptions: any = {
               sql: cmdSql,
               params: cmdParams,
-              types: cmdTypes,
-              paramTypes: cmdParamTypes,
-              // types,
-              // paramTypes,
-            });
+            };
+            if (cmdTypes !== undefined) {
+              updateOptions.types = cmdTypes;
+            }
+            if (cmdParamTypes !== undefined) {
+              updateOptions.paramTypes = cmdParamTypes;
+            }
+            const [rowCount] = await gcpTransaction.runUpdate(updateOptions);
 
             // const [rowCount] = await gcpTransaction.runUpdate({
             //   sql: cmdSql,
@@ -635,13 +657,18 @@ export class SpannerAdapter implements DatabaseAdapter {
             // console.log(types);
             // console.log(paramTypes);
 
-            const [rows] = await gcpTransaction.run({
+            const queryOptions: any = {
               sql: querySql,
               params: queryParams,
               json: true,
-              types: queryTypes,
-              paramTypes: queryParamTypes,
-            });
+            };
+            if (queryTypes !== undefined) {
+              queryOptions.types = queryTypes;
+            }
+            if (queryParamTypes !== undefined) {
+              queryOptions.paramTypes = queryParamTypes;
+            }
+            const [rows] = await gcpTransaction.run(queryOptions);
 
             // const [rows] = await gcpTransaction.run({
             //   sql: querySql,
