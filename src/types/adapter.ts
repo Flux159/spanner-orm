@@ -19,6 +19,8 @@ export interface Transaction {
   execute(
     sql: string,
     params?: unknown[],
+    types?: Record<string, string>,
+    paramTypes?: Record<string, any>, //
     spannerTypeHints?: Record<string, string>
   ): Promise<number | AffectedRows>; // Changed to return affected rows/count
 
@@ -28,6 +30,8 @@ export interface Transaction {
   query<T extends QueryResultRow = QueryResultRow>(
     sql: string,
     params?: unknown[],
+    types?: Record<string, string>,
+    paramTypes?: Record<string, any>,
     spannerTypeHints?: Record<string, string>
   ): Promise<T[]>;
 
