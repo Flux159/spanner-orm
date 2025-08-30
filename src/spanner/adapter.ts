@@ -190,6 +190,8 @@ function cleanParamsForSpanner(
   if (!params) return undefined;
   
   const cleaned: Record<string, any> = {};
+  let hasKeys = false;
+  
   for (const key in params) {
     if (Object.prototype.hasOwnProperty.call(params, key)) {
       const hint = typeHints?.[key];
@@ -199,9 +201,12 @@ function cleanParamsForSpanner(
       } else {
         cleaned[key] = params[key];
       }
+      hasKeys = true;
     }
   }
-  return cleaned;
+  
+  // Return undefined if params is empty to avoid sending empty object to Spanner
+  return hasKeys ? cleaned : undefined;
 }
 
 // Helper function to automatically infer Spanner types from JavaScript values
@@ -488,8 +493,12 @@ export class SpannerAdapter implements DatabaseAdapter {
           try {
             const updateOptions: any = {
               sql,
-              params: cleanedParams,
             };
+            
+            // Only add params if they exist
+            if (cleanedParams !== undefined) {
+              updateOptions.params = cleanedParams;
+            }
             
             // Add types if provided
             if (types) {
@@ -587,9 +596,13 @@ export class SpannerAdapter implements DatabaseAdapter {
 
       const queryOptions: any = {
         sql,
-        params: cleanedParams,
         json: true,
       };
+      
+      // Only add params if they exist
+      if (cleanedParams !== undefined) {
+        queryOptions.params = cleanedParams;
+      }
       
       // Add types if provided
       if (types) {
@@ -674,9 +687,13 @@ export class SpannerAdapter implements DatabaseAdapter {
           try {
             const queryOptions: any = {
               sql,
-              params: cleanedParams,
               json: true,
             };
+            
+            // Only add params if they exist
+            if (cleanedParams !== undefined) {
+              queryOptions.params = cleanedParams;
+            }
             
             // Add types if provided
             if (types) {
@@ -753,8 +770,12 @@ export class SpannerAdapter implements DatabaseAdapter {
 
           const updateOptions: any = {
             sql: sqlCmd,
-            params: cleanedParams,
           };
+          
+          // Only add params if they exist
+          if (cleanedParams !== undefined) {
+            updateOptions.params = cleanedParams;
+          }
           
           // Add types if provided
           if (types) {
@@ -789,9 +810,13 @@ export class SpannerAdapter implements DatabaseAdapter {
 
           const queryOptions: any = {
             sql: sqlQuery,
-            params: cleanedParams,
             json: true,
           };
+          
+          // Only add params if they exist
+          if (cleanedParams !== undefined) {
+            queryOptions.params = cleanedParams;
+          }
           
           // Add types if provided
           if (types) {
@@ -852,8 +877,12 @@ export class SpannerAdapter implements DatabaseAdapter {
 
               const updateOptions: any = {
                 sql: cmdSql,
-                params: cleanedParams,
               };
+              
+              // Only add params if they exist
+              if (cleanedParams !== undefined) {
+                updateOptions.params = cleanedParams;
+              }
               
               // Add types if provided
               if (types) {
@@ -885,9 +914,13 @@ export class SpannerAdapter implements DatabaseAdapter {
 
               const queryOptions: any = {
                 sql: querySql,
-                params: cleanedParams,
                 json: true,
               };
+              
+              // Only add params if they exist
+              if (cleanedParams !== undefined) {
+                queryOptions.params = cleanedParams;
+              }
               
               // Add types if provided
               if (types) {
